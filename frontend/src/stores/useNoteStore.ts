@@ -30,7 +30,7 @@ export const useNoteStore = defineStore('notes', () => {
     isLoading.value = true
     error.value = null
     try {
-      summaries.value = await listNotes()
+      summaries.value = (await listNotes()) ?? []
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {
@@ -59,6 +59,9 @@ export const useNoteStore = defineStore('notes', () => {
         content,
         ...(notebookId ? { notebookId } : {}),
       })
+      if (!summaries.value) {
+        summaries.value = []
+      }
       summaries.value.unshift({
         id: created.id,
         notebookId: created.notebookId,

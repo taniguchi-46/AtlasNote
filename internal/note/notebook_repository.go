@@ -41,7 +41,7 @@ func (r *Repository) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 	}
 	defer rows.Close()
 
-	var notebooks []Notebook
+	notebooks := make([]Notebook, 0)
 	for rows.Next() {
 		var nb Notebook
 		var createdAt string

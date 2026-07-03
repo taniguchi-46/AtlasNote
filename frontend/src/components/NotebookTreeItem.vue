@@ -18,19 +18,36 @@
       />
       <span v-else class="notebook-name">{{ node.name }}</span>
 
-      <!-- Actions -->
+        <!-- Actions -->
       <div class="notebook-actions" @click.stop>
-        <button class="notebook-action-btn" type="button" title="子ノートブックを追加" @click="addSubNotebook">
+        <button class="notebook-action-btn" type="button" title="子ノートブックを追加" @click="startAddSubNotebook">
           <PlusIcon :size="12" />
         </button>
         <button class="notebook-action-btn" type="button" title="名前を変更" @click="startRename">
           <Edit2Icon :size="12" />
         </button>
-        <button class="notebook-action-btn danger" type="button" title="削除" @click="deleteSelf">
+        <button
+          class="notebook-action-btn danger"
+          type="button"
+          :title="isConfirmingDelete ? 'もう一度押すと削除' : '削除'"
+          @click="deleteSelf"
+        >
           <Trash2Icon :size="12" />
         </button>
       </div>
     </div>
+
+    <input
+      v-if="isAddingChild"
+      ref="childInputRef"
+      v-model="childName"
+      class="notebook-rename-input child-create-input"
+      type="text"
+      placeholder="子ノートブック名"
+      @blur="saveSubNotebook"
+      @keydown.enter="saveSubNotebook"
+      @keydown.escape="cancelAddSubNotebook"
+    />
 
     <!-- Children -->
     <div v-if="node.children && node.children.length > 0" class="notebook-children">
@@ -59,17 +76,37 @@ const appStore = useAppStore()
 const isEditing = ref(false)
 const editName = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+const isAddingChild = ref(false)
+const childName = ref('')
+const childInputRef = ref<HTMLInputElement | null>(null)
+const isConfirmingDelete = ref(false)
 
 function selectNotebook() {
   notebookStore.activeNotebookId = props.node.id
   appStore.setSidebarSection('notes')
 }
 
-function addSubNotebook() {
-  const name = prompt('子ノートブックの名前を入力してください:')
-  if (name && name.trim()) {
-    notebookStore.newNotebook(name.trim(), props.node.id)
+function startAddSubNotebook() {
+  isAddingChild.value = true
+  childName.value = ''
+  nextTick(() => {
+    childInputRef.value?.focus()
+  })
+}
+
+function saveSubNotebook() {
+  if (!isAddingChild.value) return
+  const trimmed = childName.value.trim()
+  isAddingChild.value = false
+  childName.value = ''
+  if (trimmed) {
+    notebookStore.newNotebook(trimmed, props.node.id)
   }
+}
+
+function cancelAddSubNotebook() {
+  isAddingChild.value = false
+  childName.value = ''
 }
 
 function startRename() {
@@ -90,8 +127,14 @@ function saveRename() {
 }
 
 function deleteSelf() {
-  if (confirm(`ノートブック「${props.node.name}」を削除してもよろしいですか？（中に含まれるサブノートブックも削除されます）`)) {
+  if (isConfirmingDelete.value) {
     notebookStore.removeNotebook(props.node.id)
+    isConfirmingDelete.value = false
+    return
   }
+  isConfirmingDelete.value = true
+  window.setTimeout(() => {
+    isConfirmingDelete.value = false
+  }, 3000)
 }
 </script>

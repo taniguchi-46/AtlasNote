@@ -41,10 +41,21 @@
     <div class="sidebar-notebooks-section">
       <div class="notebooks-header">
         <span>ノートブック</span>
-        <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="addRootNotebook">
+        <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="startAddRootNotebook">
           <PlusIcon :size="14" />
         </button>
       </div>
+      <input
+        v-if="isAddingRootNotebook"
+        ref="rootNotebookInputRef"
+        v-model="rootNotebookName"
+        class="notebook-rename-input"
+        type="text"
+        placeholder="ノートブック名"
+        @blur="saveRootNotebook"
+        @keydown.enter="saveRootNotebook"
+        @keydown.escape="cancelAddRootNotebook"
+      />
       <div class="notebooks-tree">
         <NotebookTreeItem
           v-for="node in notebookStore.notebookTree"
@@ -72,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { PlusIcon, FileTextIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
@@ -83,6 +94,9 @@ import type { SidebarSection } from '../stores/useAppStore'
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
+const isAddingRootNotebook = ref(false)
+const rootNotebookName = ref('')
+const rootNotebookInputRef = ref<HTMLInputElement | null>(null)
 
 onMounted(async () => {
   try {
@@ -132,10 +146,26 @@ function createNewNote() {
   noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
 }
 
-function addRootNotebook() {
-  const name = prompt('ノートブックの名前を入力してください:')
-  if (name && name.trim()) {
-    notebookStore.newNotebook(name.trim())
+function startAddRootNotebook() {
+  isAddingRootNotebook.value = true
+  rootNotebookName.value = ''
+  nextTick(() => {
+    rootNotebookInputRef.value?.focus()
+  })
+}
+
+function saveRootNotebook() {
+  if (!isAddingRootNotebook.value) return
+  const name = rootNotebookName.value.trim()
+  isAddingRootNotebook.value = false
+  rootNotebookName.value = ''
+  if (name) {
+    notebookStore.newNotebook(name)
   }
+}
+
+function cancelAddRootNotebook() {
+  isAddingRootNotebook.value = false
+  rootNotebookName.value = ''
 }
 </script>

@@ -53,7 +53,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 	}
 	defer rows.Close()
 
-	var notes []Summary
+	notes := make([]Summary, 0)
 	for rows.Next() {
 		var note Summary
 		var createdAt string

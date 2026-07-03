@@ -956,12 +956,18 @@ ul {
 
 .notebook-rename-input {
   flex: 1;
+  width: 100%;
   font-size: 13px;
   padding: 2px 4px;
   background: var(--bg-input);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   color: var(--text-primary);
+}
+
+.child-create-input {
+  width: calc(100% - 14px);
+  margin: 2px 0 2px 14px;
 }
 
 .notebook-actions {

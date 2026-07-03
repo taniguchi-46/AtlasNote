@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
-CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
 `,
 }
@@ -86,7 +85,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	if userVersion >= len(migrations) {
-		return nil // Up to date
+		return ensureCompatibleSchema(ctx, db)
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -110,5 +109,77 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("commit migration tx: %w", err)
 	}
 
+	return ensureCompatibleSchema(ctx, db)
+}
+
+func ensureCompatibleSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS notebooks (
+	id TEXT PRIMARY KEY,
+	parent_id TEXT,
+	name TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+`); err != nil {
+		return fmt.Errorf("ensure notebooks table: %w", err)
+	}
+
+	columns, err := tableColumns(ctx, db, "notes")
+	if err != nil {
+		return err
+	}
+
+	requiredColumns := map[string]string{
+		"notebook_id": "TEXT",
+		"is_favorite": "BOOLEAN NOT NULL DEFAULT 0",
+		"is_pinned":   "BOOLEAN NOT NULL DEFAULT 0",
+		"is_trashed":  "BOOLEAN NOT NULL DEFAULT 0",
+	}
+	for name, definition := range requiredColumns {
+		if columns[name] {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE notes ADD COLUMN %s %s", name, definition)); err != nil {
+			return fmt.Errorf("add notes.%s column: %w", name, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `
+CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
+CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
+`); err != nil {
+		return fmt.Errorf("ensure indexes: %w", err)
+	}
+
 	return nil
+}
+
+func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, fmt.Errorf("read %s columns: %w", table, err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, fmt.Errorf("scan %s column: %w", table, err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s columns: %w", table, err)
+	}
+
+	return columns, nil
 }

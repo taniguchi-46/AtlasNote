@@ -43,7 +43,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		isLoading.value = true
 		error.value = null
 		try {
-			notebooks.value = await listNotebooks()
+			notebooks.value = (await listNotebooks()) ?? []
 		} catch (e) {
 			error.value = e instanceof Error ? e.message : 'ノートブックの読み込みに失敗しました'
 		} finally {
@@ -58,6 +58,9 @@ export const useNotebookStore = defineStore('notebooks', () => {
 				name,
 				...(parentId ? { parentId } : {}),
 			})
+			if (!notebooks.value) {
+				notebooks.value = []
+			}
 			notebooks.value.push(nb)
 			return nb
 		} catch (e) {
