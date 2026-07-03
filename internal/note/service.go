@@ -53,6 +53,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	now := time.Now().UTC()
 	record := Record{
 		ID:          id,
+		NotebookID:  input.NotebookID,
 		Title:       title,
 		ContentPath: contentPath,
 		CreatedAt:   now,
@@ -73,11 +74,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	}
 
 	return Note{
-		ID:        record.ID,
-		Title:     record.Title,
-		Content:   content,
-		CreatedAt: record.CreatedAt,
-		UpdatedAt: record.UpdatedAt,
+		ID:         record.ID,
+		NotebookID: record.NotebookID,
+		Title:      record.Title,
+		Content:    content,
+		IsFavorite: record.IsFavorite,
+		IsPinned:   record.IsPinned,
+		IsTrashed:  record.IsTrashed,
+		CreatedAt:  record.CreatedAt,
+		UpdatedAt:  record.UpdatedAt,
 	}, nil
 }
 
@@ -97,47 +102,84 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 	}
 
 	return Note{
-		ID:        record.ID,
-		Title:     record.Title,
-		Content:   content,
-		CreatedAt: record.CreatedAt,
-		UpdatedAt: record.UpdatedAt,
+		ID:         record.ID,
+		NotebookID: record.NotebookID,
+		Title:      record.Title,
+		Content:    content,
+		IsFavorite: record.IsFavorite,
+		IsPinned:   record.IsPinned,
+		IsTrashed:  record.IsTrashed,
+		CreatedAt:  record.CreatedAt,
+		UpdatedAt:  record.UpdatedAt,
 	}, nil
 }
 
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Note, error) {
-	title, content, err := validateInput(input.Title, input.Content)
-	if err != nil {
-		return Note{}, err
-	}
-
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return Note{}, err
 	}
 
-	record.Title = title
-	record.UpdatedAt = time.Now().UTC()
-
-	if err := s.store.WriteTemp(ctx, record.ID, content); err != nil {
+	content, err := s.store.Read(ctx, record.ID)
+	if err != nil {
 		return Note{}, err
 	}
 
+	if input.Title != nil {
+		record.Title = *input.Title
+	}
+	if input.Content != nil {
+		content = *input.Content
+	}
+	if input.NotebookID != nil {
+		record.NotebookID = input.NotebookID
+	}
+	if input.IsFavorite != nil {
+		record.IsFavorite = *input.IsFavorite
+	}
+	if input.IsPinned != nil {
+		record.IsPinned = *input.IsPinned
+	}
+	if input.IsTrashed != nil {
+		record.IsTrashed = *input.IsTrashed
+	}
+
+	title, content, err := validateInput(record.Title, content)
+	if err != nil {
+		return Note{}, err
+	}
+	record.Title = title
+	record.UpdatedAt = time.Now().UTC()
+
+	if input.Content != nil {
+		if err := s.store.WriteTemp(ctx, record.ID, content); err != nil {
+			return Note{}, err
+		}
+	}
+
 	if err := s.repository.Update(ctx, record); err != nil {
-		_ = s.store.RollbackTemp(context.Background(), record.ID)
+		if input.Content != nil {
+			_ = s.store.RollbackTemp(context.Background(), record.ID)
+		}
 		return Note{}, fmt.Errorf("update note record: %w", err)
 	}
 
-	if err := s.store.CommitTemp(ctx, record.ID); err != nil {
-		return Note{}, fmt.Errorf("commit markdown update: %w", err)
+	if input.Content != nil {
+		if err := s.store.CommitTemp(ctx, record.ID); err != nil {
+			return Note{}, fmt.Errorf("commit markdown update: %w", err)
+		}
 	}
 
 	return Note{
-		ID:        record.ID,
-		Title:     record.Title,
-		Content:   content,
-		CreatedAt: record.CreatedAt,
-		UpdatedAt: record.UpdatedAt,
+		ID:         record.ID,
+		NotebookID: record.NotebookID,
+		Title:      record.Title,
+		Content:    content,
+		IsFavorite: record.IsFavorite,
+		IsPinned:   record.IsPinned,
+		IsTrashed:  record.IsTrashed,
+		CreatedAt:  record.CreatedAt,
+		UpdatedAt:  record.UpdatedAt,
 	}, nil
 }
 

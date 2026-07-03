@@ -24,8 +24,8 @@ func NewRepository(db *sql.DB) *Repository {
 
 func (r *Repository) Create(ctx context.Context, record Record) error {
 	query, args, err := psql.Insert(notesTable).
-		Columns("id", "title", "content_path", "created_at", "updated_at").
-		Values(record.ID, record.Title, record.ContentPath, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
+		Columns("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
+		Values(record.ID, record.NotebookID, record.Title, record.ContentPath, record.IsFavorite, record.IsPinned, record.IsTrashed, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build note insert: %w", err)
@@ -39,7 +39,7 @@ func (r *Repository) Create(ctx context.Context, record Record) error {
 }
 
 func (r *Repository) List(ctx context.Context) ([]Summary, error) {
-	query, args, err := psql.Select("id", "title", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
 		From(notesTable).
 		OrderBy("updated_at DESC").
 		ToSql()
@@ -58,7 +58,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 		var note Summary
 		var createdAt string
 		var updatedAt string
-		if err := rows.Scan(&note.ID, &note.Title, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&note.ID, &note.NotebookID, &note.Title, &note.IsFavorite, &note.IsPinned, &note.IsTrashed, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan note summary: %w", err)
 		}
 
@@ -82,7 +82,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 }
 
 func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
-	query, args, err := psql.Select("id", "title", "content_path", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
 		From(notesTable).
 		Where(sq.Eq{"id": id}).
 		Limit(1).
@@ -96,8 +96,12 @@ func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
 	var updatedAt string
 	err = r.db.QueryRowContext(ctx, query, args...).Scan(
 		&record.ID,
+		&record.NotebookID,
 		&record.Title,
 		&record.ContentPath,
+		&record.IsFavorite,
+		&record.IsPinned,
+		&record.IsTrashed,
 		&createdAt,
 		&updatedAt,
 	)
@@ -122,7 +126,11 @@ func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
 
 func (r *Repository) Update(ctx context.Context, record Record) error {
 	query, args, err := psql.Update(notesTable).
+		Set("notebook_id", record.NotebookID).
 		Set("title", record.Title).
+		Set("is_favorite", record.IsFavorite).
+		Set("is_pinned", record.IsPinned).
+		Set("is_trashed", record.IsTrashed).
 		Set("updated_at", formatTime(record.UpdatedAt)).
 		Where(sq.Eq{"id": record.ID}).
 		ToSql()

@@ -51,15 +51,31 @@ func configure(ctx context.Context, db *sql.DB) error {
 
 var migrations = []string{
 	`
+CREATE TABLE IF NOT EXISTS notebooks (
+	id TEXT PRIMARY KEY,
+	parent_id TEXT,
+	name TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS notes (
 	id TEXT PRIMARY KEY,
+	notebook_id TEXT,
 	title TEXT NOT NULL,
 	content_path TEXT NOT NULL UNIQUE,
+	is_favorite BOOLEAN NOT NULL DEFAULT 0,
+	is_pinned BOOLEAN NOT NULL DEFAULT 0,
+	is_trashed BOOLEAN NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(notebook_id) REFERENCES notebooks(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
+CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
 `,
 }
 

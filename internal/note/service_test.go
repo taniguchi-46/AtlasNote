@@ -10,6 +10,10 @@ import (
 	"atlasnote/internal/storage"
 )
 
+func ptr[T any](v T) *T {
+	return &v
+}
+
 func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	t.Parallel()
 
@@ -62,8 +66,8 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	}
 
 	updated, err := service.Update(ctx, created.ID, note.UpdateInput{
-		Title:   "Updated note",
-		Content: "Updated content",
+		Title:   ptr("Updated note"),
+		Content: ptr("Updated content"),
 	})
 	if err != nil {
 		t.Fatalf("update note: %v", err)
