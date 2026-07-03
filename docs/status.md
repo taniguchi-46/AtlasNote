@@ -63,5 +63,87 @@ go test ./...
 | `docs/glossary.md` | 用語集 |
 | `docs/BRANCHING.md` | ブランチ、コミット、PR の運用ルール |
 | `docs/development/tech-stack.md` | 採用予定技術と未確定の開発環境情報 |
+| `docs/development/setup.md` | 開発環境セットアップと起動方法 |
 | `.agents/skills/skill.md` | 汎用開発 skill |
 | `.codex/AGENTS.md` | Codex 固有の作業指針 |
+
+## 2026-07-03 追記: Wails プロジェクト本体の初期作成
+
+- Wails v2 想定の最小バックエンドを追加。
+  - `main.go`
+  - `app.go`
+  - `go.mod`
+  - `wails.json`
+- Vue 3 + TypeScript + Vite の最小フロントエンドを追加。
+  - `frontend/package.json`
+  - `frontend/package-lock.json`
+  - `frontend/index.html`
+  - `frontend/vite.config.ts`
+  - `frontend/tsconfig.json`
+  - `frontend/src/`
+- ルートの npm 補助スクリプトを `package.json` に追加。
+- `.gitignore` を追加し、`node_modules/`、`frontend/dist/`、`.env` などを除外。
+
+確認済み:
+
+```bash
+npm run build
+npm audit --audit-level=moderate
+```
+
+確認済み:
+
+- `wails dev` 起動成功。開発用 URL は `http://localhost:34115`。
+- `wails build` 成功。`build/bin/AtlasNote.exe` を生成。
+
+## 2026-07-03 追記: Go の導入
+
+- Chocolatey での `golang` インストールは、管理者権限不足と Chocolatey の lockfile 権限問題により失敗。
+- 代替として公式 `go1.26.4.windows-amd64.zip` を `.tools/go` に展開。
+- SHA256 を公式値 `3ca8fb4630b07c419cbdd51f754e31363cfcfb83b3a5354d9e895c90be2cc345` と照合済み。
+- ユーザー PATH に `.tools/go/bin` を追加。
+- `go mod tidy` で `go.sum` を作成。
+
+確認済み:
+
+```bash
+go version
+go test ./...
+```
+
+結果:
+
+- `go version go1.26.4 windows/amd64`
+- `go test ./...` 成功
+
+## 2026-07-03 追記: Wails CLI の導入
+
+- Wails CLI `v2.10.1` を `.tools/go-bin` にインストール。
+- Go モジュール側の Wails 依存 `github.com/wailsapp/wails/v2 v2.10.1` と CLI バージョンを合わせた。
+- ユーザー PATH に `.tools/go-bin` を追加。
+
+確認済み:
+
+```bash
+wails version
+wails doctor
+```
+
+結果:
+
+- `wails version`: `v2.10.1`
+- `wails doctor`: `Your system is ready for Wails development!`
+
+## 2026-07-03 追記: Wails dev / build の確認
+
+確認済み:
+
+```bash
+wails dev
+wails build
+```
+
+結果:
+
+- `wails dev`: 起動成功。開発用 URL は `http://localhost:34115`。
+- `wails build`: 成功。`build/bin/AtlasNote.exe` を生成。

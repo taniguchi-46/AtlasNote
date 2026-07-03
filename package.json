@@ -1,0 +1,14 @@
+{
+  "name": "atlas-note-root",
+  "private": true,
+  "scripts": {
+    "dev": "wails dev",
+    "build": "wails build",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:typecheck": "npm --prefix frontend run typecheck",
+    "frontend:lint": "npm --prefix frontend run lint"
+  },
+  "packageManager": "npm@10.8.2"
+}
+
