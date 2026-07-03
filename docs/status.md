@@ -64,6 +64,7 @@ go test ./...
 | `docs/BRANCHING.md` | ブランチ、コミット、PR の運用ルール |
 | `docs/development/tech-stack.md` | 採用予定技術と未確定の開発環境情報 |
 | `docs/development/setup.md` | 開発環境セットアップと起動方法 |
+| `.env.example` | ローカル環境変数のサンプル。実値は含めない |
 | `.agents/skills/skill.md` | 汎用開発 skill |
 | `.codex/AGENTS.md` | Codex 固有の作業指針 |
 

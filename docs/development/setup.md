@@ -46,6 +46,16 @@ npm --prefix frontend install
 go mod tidy
 ```
 
+## 環境変数
+
+ローカル設定が必要な場合は `.env.example` を `.env` にコピーし、実値は `.env` にだけ記載する。
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` には API キー、パスワード、トークンなどの秘密情報を入れる可能性があるため、Git 管理しない。
+
 ## 開発サーバーの起動
 
 ```powershell

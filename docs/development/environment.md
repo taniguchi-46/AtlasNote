@@ -166,9 +166,11 @@ Wasm は初期段階では採用しない。
 ```bash
 AI_PROVIDER=
 AI_API_KEY=
+AI_MODEL=
 WEBDAV_ENDPOINT=
 WEBDAV_USERNAME=
 WEBDAV_PASSWORD=
+ATLAS_NOTE_DATA_DIR=
 ```
 
 実値はローカル環境または OS の安全な保存先で管理する。AI API Key の保存方法は、将来的に OS Keychain の利用可否を確認して決める。
@@ -178,6 +180,5 @@ WEBDAV_PASSWORD=
 - npm / pnpm / yarn の選定
 - Lint / Format / Typecheck / Test の正式コマンド
 - SQLite ファイルと Markdown 保存先
-- `.env.example` の項目
 - Dockerfile を作るタイミング
 - Wasm を再検討する条件の詳細
