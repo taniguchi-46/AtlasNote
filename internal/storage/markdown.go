@@ -50,7 +50,7 @@ func (s *MarkdownStore) Read(ctx context.Context, id string) (string, error) {
 	return string(content), nil
 }
 
-func (s *MarkdownStore) Write(ctx context.Context, id string, content string) error {
+func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, content string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -60,8 +60,58 @@ func (s *MarkdownStore) Write(ctx context.Context, id string, content string) er
 		return err
 	}
 
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		return fmt.Errorf("write markdown content: %w", err)
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("write markdown temp content: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) CommitTemp(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return err
+	}
+
+	tempPath := path + ".tmp"
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("commit markdown temp content: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) RollbackTemp(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return err
+	}
+
+	tempPath := path + ".tmp"
+	if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("rollback markdown temp content: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) Write(ctx context.Context, id string, content string) error {
+	if err := s.WriteTemp(ctx, id, content); err != nil {
+		return err
+	}
+	
+	if err := s.CommitTemp(ctx, id); err != nil {
+		_ = s.RollbackTemp(context.Background(), id)
+		return err
 	}
 
 	return nil

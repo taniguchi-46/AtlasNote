@@ -49,8 +49,8 @@ func configure(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func Migrate(ctx context.Context, db *sql.DB) error {
-	const schema = `
+var migrations = []string{
+	`
 CREATE TABLE IF NOT EXISTS notes (
 	id TEXT PRIMARY KEY,
 	title TEXT NOT NULL,
@@ -60,10 +60,38 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
-`
+`,
+}
 
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("migrate sqlite schema: %w", err)
+func Migrate(ctx context.Context, db *sql.DB) error {
+	var userVersion int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+
+	if userVersion >= len(migrations) {
+		return nil // Up to date
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin migration tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	for i := userVersion; i < len(migrations); i++ {
+		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
+			return fmt.Errorf("migrate version %d: %w", i+1, err)
+		}
+	}
+
+	newVersion := len(migrations)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", newVersion)); err != nil {
+		return fmt.Errorf("update user_version: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration tx: %w", err)
 	}
 
 	return nil

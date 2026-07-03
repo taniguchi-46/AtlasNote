@@ -59,13 +59,17 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		UpdatedAt:   now,
 	}
 
-	if err := s.store.Write(ctx, id, content); err != nil {
+	if err := s.store.WriteTemp(ctx, id, content); err != nil {
 		return Note{}, err
 	}
 
 	if err := s.repository.Create(ctx, record); err != nil {
-		_ = s.store.Delete(context.Background(), id)
-		return Note{}, err
+		_ = s.store.RollbackTemp(context.Background(), id)
+		return Note{}, fmt.Errorf("create note record: %w", err)
+	}
+
+	if err := s.store.CommitTemp(ctx, id); err != nil {
+		return Note{}, fmt.Errorf("commit markdown: %w", err)
 	}
 
 	return Note{
@@ -115,12 +119,17 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	record.Title = title
 	record.UpdatedAt = time.Now().UTC()
 
-	if err := s.store.Write(ctx, record.ID, content); err != nil {
+	if err := s.store.WriteTemp(ctx, record.ID, content); err != nil {
 		return Note{}, err
 	}
 
 	if err := s.repository.Update(ctx, record); err != nil {
-		return Note{}, err
+		_ = s.store.RollbackTemp(context.Background(), record.ID)
+		return Note{}, fmt.Errorf("update note record: %w", err)
+	}
+
+	if err := s.store.CommitTemp(ctx, record.ID); err != nil {
+		return Note{}, fmt.Errorf("commit markdown update: %w", err)
 	}
 
 	return Note{
