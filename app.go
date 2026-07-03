@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"atlasnote/internal/config"
 	"atlasnote/internal/database"
@@ -40,8 +41,39 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 }
 
-func (a *App) Greet(name string) string {
-	return "Hello " + name + "!"
+func (a *App) CreateNote(input note.CreateInput) (note.Note, error) {
+	if a.notes == nil {
+		return note.Note{}, errors.New("note service is not initialized")
+	}
+	return a.notes.Create(a.ctx, input)
+}
+
+func (a *App) ListNotes() ([]note.Summary, error) {
+	if a.notes == nil {
+		return nil, errors.New("note service is not initialized")
+	}
+	return a.notes.List(a.ctx)
+}
+
+func (a *App) GetNote(id string) (note.Note, error) {
+	if a.notes == nil {
+		return note.Note{}, errors.New("note service is not initialized")
+	}
+	return a.notes.Get(a.ctx, id)
+}
+
+func (a *App) UpdateNote(id string, input note.UpdateInput) (note.Note, error) {
+	if a.notes == nil {
+		return note.Note{}, errors.New("note service is not initialized")
+	}
+	return a.notes.Update(a.ctx, id, input)
+}
+
+func (a *App) DeleteNote(id string) error {
+	if a.notes == nil {
+		return errors.New("note service is not initialized")
+	}
+	return a.notes.Delete(a.ctx, id)
 }
 
 func (a *App) GetStartupStatus() StartupStatus {
