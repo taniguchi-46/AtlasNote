@@ -10,7 +10,6 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 - UpNote の使いやすさ
 - Joplin の自由度
-- Obsidian の知識管理
 - AI による知識整理・ライティング支援
 - 開発者向け機能
 - WebDAV を中心とした同期
@@ -18,7 +17,19 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 ---
 
-# 技術スタック
+## AI Documents
+
+このプロジェクトでは、AI Agent 向けの共通ドキュメントと設定を以下に整理しています。
+
+- `docs/`: Agent 共通で参照するプロジェクト知識、作業状況、設計、規約。
+- `.agents/skills/`: 今後の開発で使うスキル。
+- `.codex/`: Codex 固有の行動指針とテンプレート。
+
+作業前に `docs/status.md` と `docs/ai.md` を確認してください。
+
+---
+
+## 技術スタック
 
 | カテゴリ | 採用 |
 |----------|------|
@@ -28,7 +39,7 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 | Build | Vite |
 | Styling | UnoCSS |
 | UI | Reka UI |
-| State | Composable + Pinia |
+| State | Composables + Pinia |
 | Database | SQLite |
 | Editor | Tiptap + CodeMirror |
 | Storage | Markdown |
@@ -36,7 +47,7 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 ---
 
-# アーキテクチャ
+## アーキテクチャ
 
 ```text
 ┌──────────────────────────────┐
