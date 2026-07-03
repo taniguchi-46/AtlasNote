@@ -34,10 +34,32 @@ go test ./...
 - AI Agent 向けの共通ドキュメントを `docs/` に配置。
 - Codex 固有の作業指針を `AGENTS.md` と `.codex/AGENTS.md` に配置。
 - 汎用開発 skill を `.agents/skills/skill.md` に配置。
+- Wails プロジェクト本体を作成し、Go / TypeScript / Vue 3 / Vite の実ファイル構成を確定する。
 
 ## 次にやること
 
-- Wails プロジェクト本体を作成し、Go / TypeScript / Vue 3 / Vite の実ファイル構成を確定する。
+### 実装計画
+
+1. 開発前の懸念解消
+   - 画面文言と一部ドキュメントで文字化けして見える箇所を確認し、実際に壊れているファイルは現在の機能に合わせて正常な日本語へ戻す。
+   - Go / Wails / Node.js の実行 PATH を再確認し、`.tools/` 配下のローカル Go / Wails CLI を使う前提を開発手順に反映する。
+2. ローカルデータ基盤の実装
+   - SQLite、Markdown Storage、Repository の責務境界を先にコードへ落とし込む。
+   - ノート本文は Markdown、メタデータは SQLite に保存する最小構成を作る。
+   - DB スキーマ、保存先ディレクトリ、初期化処理、入力検証、エラー処理を最小範囲で実装する。
+3. Wails API とフロントエンドの最小接続
+   - Go 側にノート作成・取得・更新・削除のアプリケーションサービスを用意する。
+   - Vue 側は Wails API を直接散らさず、composable または API クライアント層から呼び出す。
+   - まずは一覧、選択、編集、保存の最小 UI に限定する。
+4. 編集体験の拡張
+   - 基本 CRUD が安定してから Tiptap / CodeMirror の導入範囲を決める。
+   - 依存追加が必要な場合は目的、影響範囲、代替案を確認してから行う。
+5. 後続機能の仕様具体化
+   - WebDAV 同期、AI API Key 管理、AI 連携は、ローカル保存基盤が固まってから個別に設計する。
+   - API Key は平文ログや例外表示に出さない方針を維持し、保存方式は OS Keychain 可否を確認してから決める。
+
+詳細: `docs/development/implementation-plan.md`
+
 - SQLite、Markdown Storage、Repository + Squirrel の責務境界をコードに落とし込む。
 - Tiptap / CodeMirror を使う編集体験の最小構成を設計する。
 - WebDAV 同期と AI API Key 管理の仕様を具体化する。
