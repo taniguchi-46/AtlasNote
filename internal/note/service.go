@@ -131,7 +131,9 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	if input.Content != nil {
 		content = *input.Content
 	}
-	if input.NotebookID != nil {
+	if input.ClearNotebook != nil && *input.ClearNotebook {
+		record.NotebookID = nil
+	} else if input.NotebookID != nil {
 		record.NotebookID = input.NotebookID
 	}
 	if input.IsFavorite != nil {

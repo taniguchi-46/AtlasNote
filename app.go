@@ -76,6 +76,34 @@ func (a *App) DeleteNote(id string) error {
 	return a.notes.Delete(a.ctx, id)
 }
 
+func (a *App) CreateNotebook(input note.NotebookCreateInput) (note.Notebook, error) {
+	if a.notes == nil {
+		return note.Notebook{}, errors.New("note service is not initialized")
+	}
+	return a.notes.CreateNotebook(a.ctx, input)
+}
+
+func (a *App) ListNotebooks() ([]note.Notebook, error) {
+	if a.notes == nil {
+		return nil, errors.New("note service is not initialized")
+	}
+	return a.notes.ListNotebooks(a.ctx)
+}
+
+func (a *App) UpdateNotebook(id string, input note.NotebookUpdateInput) (note.Notebook, error) {
+	if a.notes == nil {
+		return note.Notebook{}, errors.New("note service is not initialized")
+	}
+	return a.notes.UpdateNotebook(a.ctx, id, input)
+}
+
+func (a *App) DeleteNotebook(id string) error {
+	if a.notes == nil {
+		return errors.New("note service is not initialized")
+	}
+	return a.notes.DeleteNotebook(a.ctx, id)
+}
+
 func (a *App) GetStartupStatus() StartupStatus {
 	if a.startupErr != nil {
 		return StartupStatus{

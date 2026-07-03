@@ -14,7 +14,7 @@
       class="new-note-btn"
       type="button"
       :disabled="noteStore.isSaving"
-      @click="noteStore.newNote()"
+      @click="createNewNote"
     >
       <PlusIcon :size="16" />
       <span>新規ノート</span>
@@ -27,15 +27,32 @@
         :key="item.section"
         :id="`nav-${item.section}`"
         class="nav-item"
-        :class="{ 'is-active': appStore.sidebarSection === item.section }"
+        :class="{ 'is-active': appStore.sidebarSection === item.section && !notebookStore.activeNotebookId }"
         type="button"
-        @click="appStore.setSidebarSection(item.section)"
+        @click="handleNavClick(item.section)"
       >
         <component :is="item.icon" :size="16" class="nav-icon" />
         <span>{{ item.label }}</span>
         <span v-if="item.count > 0" class="nav-badge">{{ item.count }}</span>
       </button>
     </nav>
+
+    <!-- Notebooks Section -->
+    <div class="sidebar-notebooks-section">
+      <div class="notebooks-header">
+        <span>ノートブック</span>
+        <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="addRootNotebook">
+          <PlusIcon :size="14" />
+        </button>
+      </div>
+      <div class="notebooks-tree">
+        <NotebookTreeItem
+          v-for="node in notebookStore.notebookTree"
+          :key="node.id"
+          :node="node"
+        />
+      </div>
+    </div>
 
     <!-- Spacer -->
     <div class="sidebar-spacer" />
@@ -55,14 +72,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { PlusIcon, FileTextIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
+import { useNotebookStore } from '../stores/useNotebookStore'
+import NotebookTreeItem from './NotebookTreeItem.vue'
 import type { SidebarSection } from '../stores/useAppStore'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
+const notebookStore = useNotebookStore()
+
+onMounted(async () => {
+  try {
+    await notebookStore.fetchNotebooks()
+  } catch (_) {}
+})
 
 const navItems = computed<Array<{
   section: SidebarSection
@@ -95,4 +121,21 @@ const navItems = computed<Array<{
     count: noteStore.trashedNotes.length,
   },
 ])
+
+function handleNavClick(section: SidebarSection) {
+  appStore.setSidebarSection(section)
+  notebookStore.activeNotebookId = null
+}
+
+function createNewNote() {
+  // If a notebook is selected, associate the new note with it
+  noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
+}
+
+function addRootNotebook() {
+  const name = prompt('ノートブックの名前を入力してください:')
+  if (name && name.trim()) {
+    notebookStore.newNotebook(name.trim())
+  }
+}
 </script>

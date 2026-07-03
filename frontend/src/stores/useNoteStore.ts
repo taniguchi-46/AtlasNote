@@ -50,11 +50,15 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
-  async function newNote(title = '新しいノート', content = '') {
+  async function newNote(title = '新しいノート', content = '', notebookId: string | null = null) {
     isSaving.value = true
     error.value = null
     try {
-      const created = await createNote({ title, content })
+      const created = await createNote({
+        title,
+        content,
+        ...(notebookId ? { notebookId } : {}),
+      })
       summaries.value.unshift({
         id: created.id,
         notebookId: created.notebookId,
@@ -78,7 +82,9 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     try {
       const updated = await updateNote(id, input)
-      activeNote.value = updated
+      if (activeNote.value?.id === id) {
+        activeNote.value = updated
+      }
       const idx = summaries.value.findIndex((n: note.Summary) => n.id === id)
       if (idx !== -1) {
         summaries.value[idx] = {

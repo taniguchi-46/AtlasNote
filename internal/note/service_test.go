@@ -87,3 +87,52 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 }
+
+func TestServiceUpdateCanClearNotebook(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+
+	service := note.NewService(note.NewRepository(db), store)
+
+	notebook, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Project"})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+
+	created, err := service.Create(ctx, note.CreateInput{
+		NotebookID: ptr(notebook.ID),
+		Title:      "Notebook note",
+		Content:    "Content",
+	})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if created.NotebookID == nil || *created.NotebookID != notebook.ID {
+		t.Fatalf("created notebook id = %v", created.NotebookID)
+	}
+
+	updated, err := service.Update(ctx, created.ID, note.UpdateInput{
+		ClearNotebook: ptr(true),
+	})
+	if err != nil {
+		t.Fatalf("clear notebook: %v", err)
+	}
+	if updated.NotebookID != nil {
+		t.Fatalf("expected notebook id to be cleared, got %v", *updated.NotebookID)
+	}
+}

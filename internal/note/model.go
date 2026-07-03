@@ -32,12 +32,13 @@ type CreateInput struct {
 }
 
 type UpdateInput struct {
-	NotebookID *string `json:"notebookId"`
-	Title      *string `json:"title"`
-	Content    *string `json:"content"`
-	IsFavorite *bool   `json:"isFavorite"`
-	IsPinned   *bool   `json:"isPinned"`
-	IsTrashed  *bool   `json:"isTrashed"`
+	NotebookID    *string `json:"notebookId"`
+	ClearNotebook *bool   `json:"clearNotebook"`
+	Title         *string `json:"title"`
+	Content       *string `json:"content"`
+	IsFavorite    *bool   `json:"isFavorite"`
+	IsPinned      *bool   `json:"isPinned"`
+	IsTrashed     *bool   `json:"isTrashed"`
 }
 
 type Record struct {
@@ -50,4 +51,23 @@ type Record struct {
 	IsTrashed   bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type Notebook struct {
+	ID        string    `json:"id"`
+	ParentID  *string   `json:"parentId"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type NotebookCreateInput struct {
+	ParentID *string `json:"parentId"`
+	Name     string  `json:"name"`
+}
+
+type NotebookUpdateInput struct {
+	ParentID    *string `json:"parentId"`
+	ClearParent *bool   `json:"clearParent"`
+	Name        *string `json:"name"`
 }

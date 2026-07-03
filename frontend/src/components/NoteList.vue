@@ -99,11 +99,17 @@ import { computed } from 'vue'
 import { FileTextIcon, StarIcon, PinIcon, Trash2Icon, RotateCcwIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
+import { useNotebookStore } from '../stores/useNotebookStore'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
+const notebookStore = useNotebookStore()
 
 const sectionTitle = computed(() => {
+  if (notebookStore.activeNotebookId) {
+    const nb = notebookStore.notebooks.find(n => n.id === notebookStore.activeNotebookId)
+    return nb ? nb.name : 'すべてのノート'
+  }
   switch (appStore.sidebarSection) {
     case 'favorites': return 'お気に入り'
     case 'pinned': return 'ピン留め'
@@ -113,12 +119,17 @@ const sectionTitle = computed(() => {
 })
 
 const displayedNotes = computed(() => {
+  let list = []
   switch (appStore.sidebarSection) {
-    case 'favorites': return noteStore.favoriteNotes
-    case 'pinned': return noteStore.pinnedNotes
-    case 'trash': return noteStore.trashedNotes
-    default: return noteStore.activeNotes
+    case 'favorites': list = noteStore.favoriteNotes; break
+    case 'pinned': list = noteStore.pinnedNotes; break
+    case 'trash': list = noteStore.trashedNotes; break
+    default: list = noteStore.activeNotes; break
   }
+  if (notebookStore.activeNotebookId) {
+    list = list.filter(n => n.notebookId === notebookStore.activeNotebookId)
+  }
+  return list
 })
 
 function formatDate(iso: string): string {

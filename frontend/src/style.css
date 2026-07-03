@@ -772,6 +772,14 @@ ul {
   border-radius: 4px;
 }
 
+.ProseMirror img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em 0;
+  border-radius: 6px;
+}
+
 .ProseMirror pre code {
   background: none;
   padding: 0;
@@ -859,4 +867,169 @@ ul {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ─────────────────────────────────────────
+   9. Notebooks Section
+───────────────────────────────────────── */
+.sidebar-notebooks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 0 4px;
+}
+
+.notebooks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.add-notebook-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: background 0.1s, color 0.1s;
+}
+
+.add-notebook-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.notebooks-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notebook-tree-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.notebook-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background 0.1s, color 0.1s;
+  position: relative;
+}
+
+.notebook-row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.notebook-row.is-active {
+  background: var(--bg-active);
+  color: var(--text-active);
+}
+
+.notebook-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.notebook-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notebook-rename-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 2px 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+
+.notebook-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  position: absolute;
+  right: 6px;
+  background: inherit;
+  padding-left: 8px;
+}
+
+.notebook-row:hover .notebook-actions {
+  opacity: 1;
+}
+
+.notebook-action-btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: background 0.1s, color 0.1s;
+}
+
+.notebook-action-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+[data-theme='light'] .notebook-action-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.notebook-action-btn.danger:hover {
+  color: var(--color-danger);
+}
+
+.notebook-children {
+  display: flex;
+  flex-direction: column;
+  padding-left: 12px;
+  border-left: 1px dashed var(--border);
+  margin-left: 14px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  gap: 2px;
+}
+
+/* Notebook dropdown in NoteEditor */
+.notebook-select {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  outline: none;
+  cursor: pointer;
+  max-width: 180px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notebook-select:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }

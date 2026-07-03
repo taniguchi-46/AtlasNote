@@ -30,6 +30,21 @@
           @blur="handleTitleSave"
           @keydown.enter="handleTitleSave"
         />
+        <select
+          id="note-notebook-select"
+          v-model="activeNoteNotebookId"
+          class="notebook-select"
+          @change="handleNotebookChange"
+        >
+          <option :value="null">ノートブックなし</option>
+          <option
+            v-for="nb in notebookOptions"
+            :key="nb.id"
+            :value="nb.id"
+          >
+            {{ '— '.repeat(nb.depth) }}{{ nb.name }}
+          </option>
+        </select>
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中…</span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
@@ -213,6 +228,7 @@ import {
   QuoteIcon, TerminalIcon, TableIcon
 } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
@@ -230,10 +246,40 @@ import { common, createLowlight } from 'lowlight'
 
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
+const notebookStore = useNotebookStore()
 
 const localTitle = ref('')
+const activeNoteNotebookId = ref<string | null>(null)
 const savedMessage = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+interface NotebookOption {
+  id: string
+  name: string
+  depth: number
+}
+
+const notebookOptions = computed(() => {
+  const options: NotebookOption[] = []
+  function traverse(nodes: NotebookNode[], depth = 0) {
+    nodes.forEach(node => {
+      options.push({ id: node.id, name: node.name, depth })
+      if (node.children) {
+        traverse(node.children, depth + 1)
+      }
+    })
+  }
+  traverse(notebookStore.notebookTree)
+  return options
+})
+
+function handleNotebookChange() {
+  if (!noteStore.activeNote) return
+  const input = activeNoteNotebookId.value
+    ? { notebookId: activeNoteNotebookId.value }
+    : { clearNotebook: true }
+  noteStore.saveNote(noteStore.activeNote.id, input).then(() => showSaved())
+}
 
 // Tiptap Editor instance
 const editor = new Editor({
@@ -266,6 +312,18 @@ const editor = new Editor({
       lowlight,
     }),
   ],
+  editorProps: {
+    handlePaste(_view, event) {
+      return insertImageFiles(event.clipboardData?.files)
+    },
+    handleDrop(_view, event) {
+      const handled = insertImageFiles(event.dataTransfer?.files)
+      if (handled) {
+        event.preventDefault()
+      }
+      return handled
+    },
+  },
   onUpdate({ editor }) {
     const markdown = (editor.storage as any).markdown.getMarkdown()
     scheduleAutoSave(markdown)
@@ -276,6 +334,7 @@ const editor = new Editor({
 watch(() => noteStore.activeNote, (note) => {
   if (note) {
     localTitle.value = note.title
+    activeNoteNotebookId.value = note.notebookId ?? null
     if (editor && !editor.isFocused) {
       const currentMarkdown = (editor.storage as any).markdown.getMarkdown()
       if (currentMarkdown !== note.content) {
@@ -321,6 +380,25 @@ function showSaved() {
 
 function insertTable() {
   editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+}
+
+function insertImageFiles(files?: FileList | null): boolean {
+  if (!files || files.length === 0) return false
+
+  const images = Array.from(files).filter(file => file.type.startsWith('image/'))
+  if (images.length === 0) return false
+
+  images.forEach(file => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const src = typeof reader.result === 'string' ? reader.result : ''
+      if (!src) return
+      editor.chain().focus().setImage({ src, alt: file.name }).run()
+    }
+    reader.readAsDataURL(file)
+  })
+
+  return true
 }
 
 function formatDate(iso: string): string {
