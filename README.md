@@ -21,11 +21,12 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 このプロジェクトでは、AI Agent 向けの共通ドキュメントと設定を以下に整理しています。
 
-- `docs/`: Agent 共通で参照するプロジェクト知識、作業状況、設計、規約。
-- `.agents/skills/`: 今後の開発で使うスキル。
-- `.codex/`: Codex 固有の行動指針とテンプレート。
+- `docs/rules/`: Agent 共通で参照するプロジェクト知識、設計、規約。
+- `docs/status.md`: 現在の作業状況。
+- `.agents/`: Agent 固有の行動指針とスキル (`.agents/AGENTS.md` など)。
+- `.codex/`: テンプレート類。
 
-作業前に `docs/status.md` と `docs/ai.md` を確認してください。
+作業前に `docs/status.md` と `docs/rules/ai.md` を確認してください。
 
 ---
 

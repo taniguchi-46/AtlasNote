@@ -32,7 +32,7 @@ go test ./...
 
 - `README.md` にプロジェクトコンセプト、AI Documents、技術スタック、概略アーキテクチャを記載。
 - AI Agent 向けの共通ドキュメントを `docs/` に配置。
-- Codex 固有の作業指針を `AGENTS.md` と `.codex/AGENTS.md` に配置。
+- Codex 固有の作業指針を `.agents/AGENTS.md` に配置。
 - 汎用開発 skill を `.agents/skills/skill.md` に配置。
 - Wails プロジェクト本体を作成し、Go / TypeScript / Vue 3 / Vite の実ファイル構成を確定する。
 
@@ -63,7 +63,7 @@ go test ./...
 - SQLite、Markdown Storage、Repository + Squirrel の責務境界をコードに落とし込む。
 - Tiptap / CodeMirror を使う編集体験の最小構成を設計する。
 - WebDAV 同期と AI API Key 管理の仕様を具体化する。
-- 実際の確認コマンドを `docs/conventions.md` とこのファイルに反映する。
+- 実際の確認コマンドを `docs/rules/conventions.md` とこのファイルに反映する。
 
 ## 保留事項
 
@@ -78,17 +78,17 @@ go test ./...
 | ファイル | 役割 |
 | --- | --- |
 | `README.md` | プロジェクト概要、技術スタック、概略アーキテクチャ |
-| `docs/ai.md` | AI Agent 共通ルール |
-| `docs/architecture.md` | 設計情報 |
-| `docs/conventions.md` | 実装規約 |
-| `docs/loop.md` | AI 作業フロー |
-| `docs/glossary.md` | 用語集 |
-| `docs/BRANCHING.md` | ブランチ、コミット、PR の運用ルール |
+| `docs/rules/ai.md` | AI Agent 共通ルール |
+| `docs/rules/architecture.md` | 設計情報 |
+| `docs/rules/conventions.md` | 実装規約 |
+| `docs/rules/loop.md` | AI 作業フロー |
+| `docs/rules/glossary.md` | 用語集 |
+| `docs/rules/BRANCHING.md` | ブランチ、コミット、PR の運用ルール |
 | `docs/development/tech-stack.md` | 採用予定技術と未確定の開発環境情報 |
 | `docs/development/setup.md` | 開発環境セットアップと起動方法 |
 | `.env.example` | ローカル環境変数のサンプル。実値は含めない |
 | `.agents/skills/skill.md` | 汎用開発 skill |
-| `.codex/AGENTS.md` | Codex 固有の作業指針 |
+| `.agents/AGENTS.md` | Codex 固有の作業指針 |
 
 ## 2026-07-03 追記: Wails プロジェクト本体の初期作成
 

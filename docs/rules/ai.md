@@ -6,9 +6,9 @@
 
 1. `README.md` でプロジェクト概要、思想、技術スタックを確認する。
 2. `docs/status.md` で現在の状態、完了済みタスク、残タスク、保留事項を確認する。
-3. `docs/architecture.md` で設計、責務境界、データ構造を確認する。
-4. `docs/conventions.md` で命名、実装、確認方法を確認する。
-5. 必要に応じて `docs/loop.md` と `docs/glossary.md` を参照する。
+3. `docs/rules/architecture.md` で設計、責務境界、データ構造を確認する。
+4. `docs/rules/conventions.md` で命名、実装、確認方法を確認する。
+5. 必要に応じて `docs/rules/loop.md` と `docs/rules/glossary.md` を参照する。
 
 ## 基本方針
 
@@ -45,10 +45,10 @@
 
 | 種類 | 配置 | 内容 |
 | --- | --- | --- |
-| AI 共通ルール | `docs/ai.md` | Agent 共通の作業方針 |
+| AI 共通ルール | `docs/rules/ai.md` | Agent 共通の作業方針 |
 | 現在状況 | `docs/status.md` | 作業状況、完了事項、次タスク、保留事項 |
-| 作業フロー | `docs/loop.md` | 調査から完了報告までの流れ |
-| 設計情報 | `docs/architecture.md` | 構成、データ、外部連携 |
-| 実装規約 | `docs/conventions.md` | 命名、実装、確認方法 |
-| 用語集 | `docs/glossary.md` | プロジェクト内の用語 |
+| 作業フロー | `docs/rules/loop.md` | 調査から完了報告までの流れ |
+| 設計情報 | `docs/rules/architecture.md` | 構成、データ、外部連携 |
+| 実装規約 | `docs/rules/conventions.md` | 命名、実装、確認方法 |
+| 用語集 | `docs/rules/glossary.md` | プロジェクト内の用語 |
 | Agent skill | `.agents/skills/skill.md` | 作業時に参照する汎用手順 |
