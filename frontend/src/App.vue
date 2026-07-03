@@ -22,6 +22,38 @@
         <button class="primary-action" type="button">New note</button>
       </header>
 
+      <section
+        v-if="startupStatus && !startupStatus.ready"
+        class="startup-alert"
+        role="alert"
+        aria-labelledby="startup-alert-title"
+      >
+        <p id="startup-alert-title" class="startup-alert-title">起動時の初期化に失敗しました</p>
+        <p class="startup-alert-copy">
+          DB、保存先ディレクトリ、Markdown Store のいずれかを準備できませんでした。保存機能は利用できません。
+        </p>
+        <dl class="startup-alert-details">
+          <div v-if="startupStatus.dataDir">
+            <dt>保存先</dt>
+            <dd>{{ startupStatus.dataDir }}</dd>
+          </div>
+          <div v-if="startupStatus.message">
+            <dt>エラー</dt>
+            <dd>{{ startupStatus.message }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section
+        v-else-if="startupStatusError"
+        class="startup-alert"
+        role="alert"
+        aria-labelledby="startup-status-error-title"
+      >
+        <p id="startup-status-error-title" class="startup-alert-title">起動状態を確認できません</p>
+        <p class="startup-alert-copy">{{ startupStatusError }}</p>
+      </section>
+
       <section class="editor-surface" aria-label="エディタ">
         <p class="empty-title">開発環境の土台を作成しました</p>
         <p class="empty-copy">
@@ -32,3 +64,19 @@
   </main>
 </template>
 
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { getStartupStatus, type StartupStatus } from './api/startup'
+
+const startupStatus = ref<StartupStatus | null>(null)
+const startupStatusError = ref('')
+
+onMounted(async () => {
+  try {
+    startupStatus.value = await getStartupStatus()
+  } catch (error) {
+    startupStatusError.value =
+      error instanceof Error ? error.message : 'Wails API の呼び出しに失敗しました。'
+  }
+})
+</script>

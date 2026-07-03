@@ -82,26 +82,51 @@ wails build
 build/bin/AtlasNote.exe
 ```
 
+## Codex sandbox での確認
+
+Codex の通常 sandbox 実行では、Node.js と Go がユーザープロファイル配下へアクセスするため、ローカル PowerShell で成功するコマンドでも権限エラーになる場合がある。
+
+確認済みの挙動:
+
+| 実行方法 | コマンド | 結果 |
+| --- | --- | --- |
+| Codex sandbox 通常実行 | `npm run frontend:build` | `C:\Users\mt252` の `lstat` で `EPERM` |
+| Codex 権限付き実行 | `npm run frontend:build` | 成功 |
+| Codex sandbox 通常実行 | `.\.tools\go-bin\wails.exe build` | Go build cache `C:\Users\mt252\AppData\Local\go-build` へのアクセスで失敗 |
+| Codex 権限付き実行 | `.\.tools\go-bin\wails.exe build` | 成功 |
+
+Codex でビルド確認を行う場合は、通常 sandbox ではなく権限付き実行で確認する。`wails` が PATH で見つからない場合は、次のようにリポジトリ内の Wails CLI を直接指定する。
+
+```powershell
+.\.tools\go-bin\wails.exe build
+```
+
+このエラーはアプリ本体のビルドエラーではなく、Codex sandbox の権限境界によるものとして扱う。
+
 ## 確認コマンド
 
 ```powershell
 wails doctor
 go test ./...
-npm run frontend:build
+wails build
 npm --prefix frontend audit --audit-level=moderate
 ```
+
+`npm run frontend:build` はフロントエンド単体の確認に使える。ただし `frontend/wailsjs/` は Git 管理対象外で、Wails API の TypeScript bindings が未生成のクリーン環境では失敗する。クリーン checkout 直後は先に `wails build` を実行して bindings を生成してから使う。
 
 確認済み:
 
 - `wails doctor`: 成功
 - `go test ./...`: 成功
-- `npm run frontend:build`: 成功
+- `wails build`: 通常 PowerShell / Codex 権限付き実行で成功。Codex sandbox 通常実行では Go build cache へのアクセスで失敗。
+- `npm run frontend:build`: Wails bindings 生成後の通常 PowerShell / Codex 権限付き実行で成功。Codex sandbox 通常実行では `EPERM`。
 - `npm --prefix frontend audit --audit-level=moderate`: 脆弱性 0 件
 - `wails dev`: 成功
-- `wails build`: 成功
 
 ## 注意点
 
 - `.tools/`、`build/`、`frontend/dist/`、`frontend/node_modules/` は Git 管理対象外。
+- `frontend/wailsjs/` は Git 管理対象外。クリーン環境でフロントエンド単体ビルドを行う前に、`wails build` で Wails API bindings を生成する。
 - 既に開いている PowerShell には、ユーザー PATH の変更が自動反映されない場合がある。
 - `go --version` ではなく `go version` を使う。
+- Codex sandbox 通常実行での `EPERM` は、権限付き実行で再確認する。

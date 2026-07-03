@@ -18,6 +18,12 @@ type App struct {
 	startupErr error
 }
 
+type StartupStatus struct {
+	Ready   bool   `json:"ready"`
+	Message string `json:"message,omitempty"`
+	DataDir string `json:"dataDir,omitempty"`
+}
+
 func NewApp() *App {
 	app := &App{}
 	app.initialize(context.Background())
@@ -38,12 +44,28 @@ func (a *App) Greet(name string) string {
 	return "Hello " + name + "!"
 }
 
+func (a *App) GetStartupStatus() StartupStatus {
+	if a.startupErr != nil {
+		return StartupStatus{
+			Ready:   false,
+			Message: a.startupErr.Error(),
+			DataDir: a.dataDir,
+		}
+	}
+
+	return StartupStatus{
+		Ready:   true,
+		DataDir: a.dataDir,
+	}
+}
+
 func (a *App) initialize(ctx context.Context) {
 	paths, err := config.LoadPaths()
 	if err != nil {
 		a.startupErr = err
 		return
 	}
+	a.dataDir = paths.DataDir
 
 	db, err := database.Open(ctx, paths.DatabasePath)
 	if err != nil {
@@ -60,5 +82,4 @@ func (a *App) initialize(ctx context.Context) {
 
 	a.db = db
 	a.notes = note.NewService(note.NewRepository(db), store)
-	a.dataDir = paths.DataDir
 }
