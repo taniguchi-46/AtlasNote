@@ -2,26 +2,18 @@
 
 最終更新: 2026-07-03
 
-## 前提
+### 1. sandbox 環境で Node build が `EPERM` になる件（完了）
 
-以下の改善を先に行う。
+- Codex の sandbox 実行時に `npm run frontend:build` が `C:\Users\mt252` の `lstat` で失敗する原因を整理済み。
+- 通常 sandbox 実行、権限付き実行、Wails build 内部実行の違いを確認済み。
+- 開発手順に、Codex で確認する場合の実行方法を明記済み。
+- 詳細は `docs/development/setup.md` の「Codex sandbox での確認」を参照。
 
-- Codex 側で UTF-8 の Markdown / Vue ファイルを正しく読めるようにする。
-- Codex 側の実行環境で `go` / `wails` の PATH を正しく扱えるようにする。
+### 2. `startupErr` がまだ UI / API に出ていない件（完了）
 
-## 1, 2 の改善後に行うこと
-
-### 1. sandbox 環境で Node build が `EPERM` になる件
-
-- Codex の sandbox 実行時に `npm run frontend:build` が `C:\Users\mt252` の `lstat` で失敗する原因を整理する。
-- 通常実行、権限付き実行、Wails build 内部実行の違いを確認する。
-- 開発手順に、Codex で確認する場合の実行方法を明記する。
-
-### 2. `startupErr` がまだ UI / API に出ていない件
-
-- 起動時の DB 初期化、保存先作成、Markdown Store 初期化に失敗した場合の扱いを決める。
-- Wails API から初期化エラーを返せるようにする。
-- フロントエンド側で初期化失敗時の表示方針を決める。
+- 起動時の DB 初期化、保存先作成、Markdown Store 初期化に失敗した場合は、アプリを起動したまま保存機能を利用不可として UI に表示する方針に決定。
+- Wails API の `GetStartupStatus` から初期化状態、エラーメッセージ、保存先を返すように実装済み。
+- フロントエンド側で起動状態を確認し、初期化失敗時に警告を表示するように実装済み。
 
 ### 3. DB マイグレーションが最小構成の件
 
