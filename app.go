@@ -9,6 +9,8 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
@@ -142,4 +144,10 @@ func (a *App) initialize(ctx context.Context) {
 
 	a.db = db
 	a.notes = note.NewService(note.NewRepository(db), store)
+}
+
+func (a *App) ToggleAlwaysOnTop(b bool) {
+	if a.ctx != nil {
+		runtime.WindowSetAlwaysOnTop(a.ctx, b)
+	}
 }

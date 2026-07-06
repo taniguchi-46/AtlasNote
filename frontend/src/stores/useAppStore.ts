@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export type Theme = 'light' | 'dark'
 export type SidebarSection = 'notes' | 'favorites' | 'pinned' | 'trash'
@@ -10,10 +10,13 @@ export const useAppStore = defineStore('app', () => {
   )
   const sidebarSection = ref<SidebarSection>('notes')
 
+  watch(theme, (newTheme) => {
+    localStorage.setItem('atlas-theme', newTheme)
+    document.documentElement.setAttribute('data-theme', newTheme)
+  }, { immediate: true })
+
   function setTheme(t: Theme) {
     theme.value = t
-    localStorage.setItem('atlas-theme', t)
-    document.documentElement.setAttribute('data-theme', t)
   }
 
   function toggleTheme() {
@@ -23,9 +26,6 @@ export const useAppStore = defineStore('app', () => {
   function setSidebarSection(s: SidebarSection) {
     sidebarSection.value = s
   }
-
-  // Apply initial theme
-  document.documentElement.setAttribute('data-theme', theme.value)
 
   return { theme, sidebarSection, setTheme, toggleTheme, setSidebarSection }
 })

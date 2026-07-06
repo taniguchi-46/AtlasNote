@@ -34,6 +34,19 @@
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中…</span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
+          
+          <!-- Mode Toggle Button -->
+          <button
+            class="mode-toggle-btn"
+            type="button"
+            :title="editMode === 'wysiwyg' ? 'Markdownモードに切り替え' : 'リッチテキストモードに切り替え'"
+            @click="toggleEditMode"
+          >
+            <CodeIcon v-if="editMode === 'wysiwyg'" :size="16" />
+            <FileTextIcon v-else :size="16" />
+            <span>{{ editMode === 'wysiwyg' ? 'Markdown' : 'リッチテキスト' }}</span>
+          </button>
+
           <button
             class="icon-btn"
             type="button"
@@ -61,8 +74,8 @@
         </div>
       </div>
 
-      <!-- Format Bar -->
-      <div class="editor-format-bar">
+      <!-- Format Bar (Only shown in WYSIWYG mode) -->
+      <div v-if="editMode === 'wysiwyg'" class="editor-format-bar">
         <button
           class="format-btn"
           :class="{ 'is-active': editor?.isActive('bold') }"
@@ -106,7 +119,7 @@
           class="format-btn"
           :class="{ 'is-active': editor?.isActive('heading', { level: 1 }) }"
           type="button"
-          title="見出し 1"
+          title="見出し1"
           @click="editor?.chain().focus().toggleHeading({ level: 1 }).run()"
         >
           <Heading1Icon :size="15" />
@@ -115,7 +128,7 @@
           class="format-btn"
           :class="{ 'is-active': editor?.isActive('heading', { level: 2 }) }"
           type="button"
-          title="見出し 2"
+          title="見出し2"
           @click="editor?.chain().focus().toggleHeading({ level: 2 }).run()"
         >
           <Heading2Icon :size="15" />
@@ -124,7 +137,7 @@
           class="format-btn"
           :class="{ 'is-active': editor?.isActive('heading', { level: 3 }) }"
           type="button"
-          title="見出し 3"
+          title="見出し3"
           @click="editor?.chain().focus().toggleHeading({ level: 3 }).run()"
         >
           <Heading3Icon :size="15" />
@@ -195,7 +208,7 @@
         <BubbleMenu 
           :editor="editor" 
           :tippy-options="{ duration: 100 }"
-          v-if="editor"
+          v-if="editor && editMode === 'wysiwyg'"
           class="table-bubble-menu"
           :should-show="(props: any) => props.editor.isActive('table')"
         >
@@ -220,7 +233,14 @@
           <button class="menu-btn danger" title="表を削除" @click="editor.chain().focus().deleteTable().run()">表を削除</button>
         </BubbleMenu>
 
-        <EditorContent :editor="editor" class="prose-editor" />
+        <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
+        <textarea
+          v-else
+          v-model="localMarkdown"
+          class="markdown-textarea"
+          placeholder="ここにMarkdownで内容を入力してください..."
+          @input="handleMarkdownInput"
+        />
       </div>
 
       <!-- Status bar -->
@@ -240,11 +260,11 @@ import {
   Heading1Icon, Heading2Icon, Heading3Icon,
   ListIcon, ListOrderedIcon, CheckSquareIcon,
   QuoteIcon, TerminalIcon, TableIcon,
-  MoreVerticalIcon, AlignLeftIcon, AlignCenterIcon, AlignRightIcon,
-  CopyIcon, ColumnsIcon, RowsIcon, TrashIcon
+  AlignLeftIcon, AlignCenterIcon, AlignRightIcon,
+  ColumnsIcon, RowsIcon, TrashIcon
 } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
-import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
+import { useNotebookStore } from '../stores/useNotebookStore'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
@@ -276,6 +296,8 @@ const maxEmbeddedImageBytes = 512 * 1024
 
 const localTitle = ref('')
 const savedMessage = ref(false)
+const editMode = ref<'wysiwyg' | 'markdown'>('wysiwyg')
+const localMarkdown = ref('')
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 // Tiptap Editor instance
@@ -290,7 +312,7 @@ const editor = new Editor({
       linkify: true,
     }),
     Placeholder.configure({
-      placeholder: 'ここにMarkdownで内容を入力してください...',
+      placeholder: 'ここに内容を入力してください...',
     }),
     Link.configure({
       openOnClick: false,
@@ -334,14 +356,18 @@ const editor = new Editor({
   },
   onUpdate({ editor }) {
     const markdown = (editor.storage as any).markdown.getMarkdown()
+    localMarkdown.value = markdown
     scheduleAutoSave(markdown)
   }
 })
 
-// Sync note changes to editor
+// Sync note changes to editor and localMarkdown
 watch(() => noteStore.activeNote, (note) => {
   if (note) {
     localTitle.value = note.title
+    if (localMarkdown.value !== note.content) {
+      localMarkdown.value = note.content
+    }
     if (editor && !editor.isFocused) {
       const currentMarkdown = (editor.storage as any).markdown.getMarkdown()
       if (currentMarkdown !== note.content) {
@@ -358,6 +384,9 @@ onBeforeUnmount(() => {
 })
 
 const charCount = computed(() => {
+  if (editMode.value === 'markdown') {
+    return localMarkdown.value.length
+  }
   if (!editor) return 0
   return editor.getText().length
 })
@@ -367,6 +396,22 @@ function handleTitleSave() {
   if (localTitle.value === noteStore.activeNote.title) return
   noteStore.saveNote(noteStore.activeNote.id, { title: localTitle.value })
     .then(() => showSaved())
+}
+
+function toggleEditMode() {
+  if (editMode.value === 'wysiwyg') {
+    localMarkdown.value = (editor.storage as any).markdown.getMarkdown()
+    editMode.value = 'markdown'
+  } else {
+    (editor.commands as any).setContent(localMarkdown.value, false, {
+      preserveWhitespace: 'full'
+    })
+    editMode.value = 'wysiwyg'
+  }
+}
+
+function handleMarkdownInput() {
+  scheduleAutoSave(localMarkdown.value)
 }
 
 function scheduleAutoSave(content: string) {
@@ -424,3 +469,40 @@ function formatDate(iso: string): string {
   })
 }
 </script>
+
+<style scoped>
+.mode-toggle-btn {
+  padding: 4px 10px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.2s, border-color 0.2s;
+  margin-right: 8px;
+}
+
+.mode-toggle-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.markdown-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  border: none;
+  resize: none;
+  background-color: transparent;
+  color: var(--text-primary);
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 24px;
+  outline: none;
+}
+</style>

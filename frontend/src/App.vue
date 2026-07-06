@@ -1,6 +1,7 @@
 <template>
   <div class="app-root" :data-theme="appStore.theme">
     <AppTopBar 
+      :is-always-on-top="isAlwaysOnTop"
       @sync="handleSync"
       @search="handleSearch"
       @new-note="noteStore.newNote()"
@@ -38,6 +39,7 @@ import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import { getStartupStatus, type StartupStatus } from './api/startup'
+import { ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
 import { useSettingsStore } from './stores/useSettingsStore'
@@ -46,6 +48,7 @@ const noteStore = useNoteStore()
 const appStore = useAppStore()
 const settingsStore = useSettingsStore()
 const startupStatus = ref<StartupStatus | null>(null)
+const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true')
 
 // Apply font family globally
 watchEffect(() => {
@@ -61,8 +64,14 @@ function handleSearch(query: string) {
   console.log('Search query:', query)
 }
 
-function handleToggleAlwaysOnTop() {
-  console.log('Toggle always on top clicked')
+async function handleToggleAlwaysOnTop() {
+  isAlwaysOnTop.value = !isAlwaysOnTop.value
+  localStorage.setItem('atlas-always-on-top', String(isAlwaysOnTop.value))
+  try {
+    await ToggleAlwaysOnTop(isAlwaysOnTop.value)
+  } catch (e) {
+    console.error('Wails ToggleAlwaysOnTop failed:', e)
+  }
 }
 
 function handleOpenSettings() {
@@ -78,6 +87,13 @@ onMounted(async () => {
   } catch (_) {
     // Network or Wails not available (dev browser mode)
     await noteStore.fetchNotes().catch(() => {})
+  }
+
+  // Apply initial always-on-top status
+  try {
+    await ToggleAlwaysOnTop(isAlwaysOnTop.value)
+  } catch (e) {
+    console.error('Wails ToggleAlwaysOnTop failed:', e)
   }
 })
 </script>

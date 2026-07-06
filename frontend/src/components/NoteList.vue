@@ -25,6 +25,7 @@
         class="note-item"
         :class="{ 'is-active': noteStore.activeNote?.id === note.id }"
         role="listitem"
+        @contextmenu.prevent="showContextMenu($event, note)"
       >
         <button
           :id="`note-item-${note.id}`"
@@ -40,62 +41,46 @@
           </div>
           <p class="note-item-title">{{ note.title || '(無題)' }}</p>
         </button>
-
-        <!-- Context actions -->
-        <div class="note-item-actions">
-          <button
-            v-if="!note.isTrashed"
-            class="action-btn"
-            type="button"
-            :title="note.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加'"
-            @click.stop="noteStore.toggleFavorite(note.id)"
-          >
-            <StarIcon :size="14" :class="{ filled: note.isFavorite }" />
-          </button>
-          <button
-            v-if="!note.isTrashed"
-            class="action-btn"
-            type="button"
-            :title="note.isPinned ? 'ピン留めを外す' : 'ピン留め'"
-            @click.stop="noteStore.togglePinned(note.id)"
-          >
-            <PinIcon :size="14" :class="{ filled: note.isPinned }" />
-          </button>
-          <button
-            v-if="!note.isTrashed"
-            class="action-btn danger"
-            type="button"
-            title="ゴミ箱へ移動"
-            @click.stop="noteStore.trashNote(note.id)"
-          >
-            <Trash2Icon :size="14" />
-          </button>
-          <template v-else>
-            <button
-              class="action-btn"
-              type="button"
-              title="復元"
-              @click.stop="noteStore.restoreNote(note.id)"
-            >
-              <RotateCcwIcon :size="14" />
-            </button>
-            <button
-              class="action-btn danger"
-              type="button"
-              title="完全に削除"
-              @click.stop="noteStore.permanentlyDeleteNote(note.id)"
-            >
-              <Trash2Icon :size="14" />
-            </button>
-          </template>
-        </div>
       </li>
     </ul>
+
+    <!-- Context Menu -->
+    <div 
+      v-if="contextMenu.visible" 
+      class="context-menu" 
+      :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
+    >
+      <template v-if="!contextMenu.isTrashed">
+        <button class="context-menu-item" @click="handleContextAction('favorite')">
+          <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
+          {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
+        </button>
+        <button class="context-menu-item" @click="handleContextAction('pin')">
+          <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
+          {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
+        </button>
+        <div class="context-menu-divider"></div>
+        <button class="context-menu-item danger" @click="handleContextAction('trash')">
+          <Trash2Icon :size="14" class="mr-2" />
+          ゴミ箱へ移動
+        </button>
+      </template>
+      <template v-else>
+        <button class="context-menu-item" @click="handleContextAction('restore')">
+          <RotateCcwIcon :size="14" class="mr-2" />
+          元に戻す
+        </button>
+        <button class="context-menu-item danger" @click="handleContextAction('delete')">
+          <Trash2Icon :size="14" class="mr-2" />
+          完全に削除
+        </button>
+      </template>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { FileTextIcon, StarIcon, PinIcon, Trash2Icon, RotateCcwIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
@@ -104,6 +89,60 @@ import { useNotebookStore } from '../stores/useNotebookStore'
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
+
+const contextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  noteId: '',
+  isTrashed: false,
+  isFavorite: false,
+  isPinned: false,
+})
+
+function showContextMenu(event: MouseEvent, note: any) {
+  contextMenu.value = {
+    visible: true,
+    x: event.clientX,
+    y: event.clientY,
+    noteId: note.id,
+    isTrashed: note.isTrashed,
+    isFavorite: note.isFavorite,
+    isPinned: note.isPinned,
+  }
+  
+  // Close menu when clicking elsewhere
+  document.addEventListener('click', closeContextMenu)
+}
+
+function closeContextMenu() {
+  contextMenu.value.visible = false
+  document.removeEventListener('click', closeContextMenu)
+}
+
+function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'restore' | 'delete') {
+  const id = contextMenu.value.noteId
+  if (!id) return
+  
+  switch (action) {
+    case 'favorite':
+      noteStore.toggleFavorite(id)
+      break
+    case 'pin':
+      noteStore.togglePinned(id)
+      break
+    case 'trash':
+      noteStore.trashNote(id)
+      break
+    case 'restore':
+      noteStore.restoreNote(id)
+      break
+    case 'delete':
+      noteStore.permanentlyDeleteNote(id)
+      break
+  }
+  closeContextMenu()
+}
 
 const sectionTitle = computed(() => {
   if (notebookStore.activeNotebookId) {
@@ -142,3 +181,55 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })
 }
 </script>
+
+<style scoped>
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 160px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background-color: var(--bg-hover);
+}
+
+.context-menu-item.danger {
+  color: var(--color-danger);
+}
+
+.context-menu-item.danger:hover {
+  background-color: rgba(248, 81, 73, 0.1);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 4px 0;
+}
+
+.mr-2 {
+  margin-right: 8px;
+}
+
+.filled {
+  fill: currentColor;
+}
+</style>

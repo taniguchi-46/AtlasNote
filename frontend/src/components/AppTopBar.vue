@@ -25,8 +25,14 @@
       </button>
       
       <!-- 常に最前面 -->
-      <button class="icon-btn" title="常に最前面" type="button" @click="$emit('toggle-always-on-top')">
-        <PinIcon :size="18" />
+      <button 
+        class="icon-btn" 
+        :class="{ active: isAlwaysOnTop }" 
+        title="常に最前面" 
+        type="button" 
+        @click="$emit('toggle-always-on-top')"
+      >
+        <AppWindowIcon :size="18" />
       </button>
 
       <!-- 設定 -->
@@ -42,9 +48,13 @@ import {
   RefreshCwIcon, 
   SearchIcon, 
   FilePlusIcon, 
-  PinIcon, 
+  AppWindowIcon, 
   SettingsIcon 
 } from '@lucide/vue'
+
+defineProps<{
+  isAlwaysOnTop: boolean
+}>()
 
 defineEmits<{
   (e: 'sync'): void
@@ -62,8 +72,8 @@ defineEmits<{
   justify-content: space-between;
   height: 48px;
   padding: 0 16px;
-  background-color: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-app);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   -webkit-app-region: drag; /* For window dragging if Wails frameless is used */
 }
@@ -91,9 +101,9 @@ defineEmits<{
   width: 200px;
   height: 28px;
   padding: 0 8px 0 32px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-input);
   color: var(--text-primary);
   font-size: 13px;
   transition: width 0.2s, border-color 0.2s;
@@ -101,11 +111,34 @@ defineEmits<{
 
 .search-input:focus {
   outline: none;
-  border-color: var(--primary-color);
+  border-color: var(--brand-primary);
   width: 250px;
 }
 
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .icon-btn.primary {
-  color: var(--primary-color);
+  color: var(--brand-primary);
+}
+
+.icon-btn.active {
+  color: var(--brand-primary);
+  background-color: var(--bg-active);
 }
 </style>
