@@ -247,6 +247,7 @@ import { common, createLowlight } from 'lowlight'
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
 const notebookStore = useNotebookStore()
+const maxEmbeddedImageBytes = 512 * 1024
 
 const localTitle = ref('')
 const activeNoteNotebookId = ref<string | null>(null)
@@ -286,6 +287,7 @@ const editor = new Editor({
   extensions: [
     StarterKit.configure({
       codeBlock: false,
+      link: false,
     }),
     Markdown.configure({
       html: true,
@@ -388,7 +390,13 @@ function insertImageFiles(files?: FileList | null): boolean {
   const images = Array.from(files).filter(file => file.type.startsWith('image/'))
   if (images.length === 0) return false
 
-  images.forEach(file => {
+  const embeddableImages = images.filter(file => file.size <= maxEmbeddedImageBytes)
+  if (embeddableImages.length !== images.length) {
+    noteStore.error = '512KBを超える画像はMVPでは貼り付けできません'
+  }
+  if (embeddableImages.length === 0) return true
+
+  embeddableImages.forEach(file => {
     const reader = new FileReader()
     reader.onload = () => {
       const src = typeof reader.result === 'string' ? reader.result : ''
