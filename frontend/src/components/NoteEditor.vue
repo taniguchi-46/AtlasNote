@@ -192,6 +192,34 @@
 
       <!-- Editor Canvas -->
       <div class="editor-body">
+        <BubbleMenu 
+          :editor="editor" 
+          :tippy-options="{ duration: 100 }"
+          v-if="editor"
+          class="table-bubble-menu"
+          :should-show="(props: any) => props.editor.isActive('table')"
+        >
+          <button class="menu-btn" title="列を左に挿入" @click="editor.chain().focus().addColumnBefore().run()"><ColumnsIcon :size="14" class="flip-horizontal" /></button>
+          <button class="menu-btn" title="列を右に挿入" @click="editor.chain().focus().addColumnAfter().run()"><ColumnsIcon :size="14" /></button>
+          <button class="menu-btn" title="列を削除" @click="editor.chain().focus().deleteColumn().run()"><TrashIcon :size="14" class="text-danger" /></button>
+          
+          <span class="menu-divider" />
+          
+          <button class="menu-btn" title="行を上に挿入" @click="editor.chain().focus().addRowBefore().run()"><RowsIcon :size="14" class="flip-vertical" /></button>
+          <button class="menu-btn" title="行を下に挿入" @click="editor.chain().focus().addRowAfter().run()"><RowsIcon :size="14" /></button>
+          <button class="menu-btn" title="行を削除" @click="editor.chain().focus().deleteRow().run()"><TrashIcon :size="14" class="text-danger" /></button>
+          
+          <span class="menu-divider" />
+          
+          <button class="menu-btn" title="左揃え" @click="editor.chain().focus().setCellAttribute('align', 'left').run()"><AlignLeftIcon :size="14" /></button>
+          <button class="menu-btn" title="中央揃え" @click="editor.chain().focus().setCellAttribute('align', 'center').run()"><AlignCenterIcon :size="14" /></button>
+          <button class="menu-btn" title="右揃え" @click="editor.chain().focus().setCellAttribute('align', 'right').run()"><AlignRightIcon :size="14" /></button>
+
+          <span class="menu-divider" />
+
+          <button class="menu-btn danger" title="表を削除" @click="editor.chain().focus().deleteTable().run()">表を削除</button>
+        </BubbleMenu>
+
         <EditorContent :editor="editor" class="prose-editor" />
       </div>
 
@@ -211,11 +239,14 @@ import {
   BoldIcon, ItalicIcon, StrikethroughIcon, CodeIcon,
   Heading1Icon, Heading2Icon, Heading3Icon,
   ListIcon, ListOrderedIcon, CheckSquareIcon,
-  QuoteIcon, TerminalIcon, TableIcon
+  QuoteIcon, TerminalIcon, TableIcon,
+  MoreVerticalIcon, AlignLeftIcon, AlignCenterIcon, AlignRightIcon,
+  CopyIcon, ColumnsIcon, RowsIcon, TrashIcon
 } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { Editor, EditorContent } from '@tiptap/vue-3'
+import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
@@ -229,6 +260,14 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
+
+const CustomTableCell = TableCell.extend({
+  content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
+})
+
+const CustomTableHeader = TableHeader.extend({
+  content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
+})
 
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
@@ -261,8 +300,8 @@ const editor = new Editor({
       resizable: true,
     }),
     TableRow,
-    TableHeader,
-    TableCell,
+    CustomTableHeader,
+    CustomTableCell,
     TaskList,
     TaskItem.configure({
       nested: true,
@@ -282,6 +321,16 @@ const editor = new Editor({
       }
       return handled
     },
+    handleKeyDown(view, event) {
+      if (event.ctrlKey && event.key === 'Enter') {
+        const editorInstance = editor
+        if (editorInstance.isActive('table')) {
+          editorInstance.commands.addRowAfter()
+          return true
+        }
+      }
+      return false
+    }
   },
   onUpdate({ editor }) {
     const markdown = (editor.storage as any).markdown.getMarkdown()
@@ -337,6 +386,9 @@ function showSaved() {
 }
 
 function insertTable() {
+  if (editor.isActive('table')) {
+    return
+  }
   editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
 }
 
