@@ -30,21 +30,7 @@
           @blur="handleTitleSave"
           @keydown.enter="handleTitleSave"
         />
-        <select
-          id="note-notebook-select"
-          v-model="activeNoteNotebookId"
-          class="notebook-select"
-          @change="handleNotebookChange"
-        >
-          <option :value="null">ノートブックなし</option>
-          <option
-            v-for="nb in notebookOptions"
-            :key="nb.id"
-            :value="nb.id"
-          >
-            {{ '— '.repeat(nb.depth) }}{{ nb.name }}
-          </option>
-        </select>
+
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中…</span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
@@ -250,37 +236,8 @@ const notebookStore = useNotebookStore()
 const maxEmbeddedImageBytes = 512 * 1024
 
 const localTitle = ref('')
-const activeNoteNotebookId = ref<string | null>(null)
 const savedMessage = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-
-interface NotebookOption {
-  id: string
-  name: string
-  depth: number
-}
-
-const notebookOptions = computed(() => {
-  const options: NotebookOption[] = []
-  function traverse(nodes: NotebookNode[], depth = 0) {
-    nodes.forEach(node => {
-      options.push({ id: node.id, name: node.name, depth })
-      if (node.children) {
-        traverse(node.children, depth + 1)
-      }
-    })
-  }
-  traverse(notebookStore.notebookTree)
-  return options
-})
-
-function handleNotebookChange() {
-  if (!noteStore.activeNote) return
-  const input = activeNoteNotebookId.value
-    ? { notebookId: activeNoteNotebookId.value }
-    : { clearNotebook: true }
-  noteStore.saveNote(noteStore.activeNote.id, input).then(() => showSaved())
-}
 
 // Tiptap Editor instance
 const editor = new Editor({
@@ -336,7 +293,6 @@ const editor = new Editor({
 watch(() => noteStore.activeNote, (note) => {
   if (note) {
     localTitle.value = note.title
-    activeNoteNotebookId.value = note.notebookId ?? null
     if (editor && !editor.isFocused) {
       const currentMarkdown = (editor.storage as any).markdown.getMarkdown()
       if (currentMarkdown !== note.content) {

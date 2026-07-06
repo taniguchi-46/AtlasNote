@@ -1,5 +1,13 @@
 <template>
   <div class="app-root" :data-theme="appStore.theme">
+    <AppTopBar 
+      @sync="handleSync"
+      @search="handleSearch"
+      @new-note="noteStore.newNote()"
+      @toggle-always-on-top="handleToggleAlwaysOnTop"
+      @open-settings="handleOpenSettings"
+    />
+
     <!-- Startup error banner -->
     <div
       v-if="startupStatus && !startupStatus.ready"
@@ -21,6 +29,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import AppTopBar from './components/AppTopBar.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
@@ -31,6 +40,23 @@ import { useAppStore } from './stores/useAppStore'
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const startupStatus = ref<StartupStatus | null>(null)
+
+// Placeholder handlers for TopBar actions
+function handleSync() {
+  console.log('Sync clicked')
+}
+
+function handleSearch(query: string) {
+  console.log('Search query:', query)
+}
+
+function handleToggleAlwaysOnTop() {
+  console.log('Toggle always on top clicked')
+}
+
+function handleOpenSettings() {
+  console.log('Open settings clicked')
+}
 
 onMounted(async () => {
   try {
