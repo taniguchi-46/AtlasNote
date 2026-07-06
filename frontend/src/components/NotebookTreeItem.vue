@@ -5,7 +5,22 @@
       :class="{ 'is-active': notebookStore.activeNotebookId === node.id }"
       @click="selectNotebook"
     >
-      <FolderIcon :size="14" class="notebook-icon" />
+      <div class="icon-wrapper" @click.stop="toggleIconPicker">
+        <component :is="currentIconComponent" :size="14" class="notebook-icon" />
+        
+        <!-- Icon Picker Popover -->
+        <div v-if="isIconPickerOpen" class="icon-picker" @click.stop>
+          <button 
+            v-for="(comp, name) in availableIcons" 
+            :key="name" 
+            class="icon-picker-btn"
+            :class="{ active: node.icon === name }"
+            @click="selectIcon(name as string)"
+          >
+            <component :is="comp" :size="14" />
+          </button>
+        </div>
+      </div>
       
       <input
         v-if="isEditing"
@@ -61,8 +76,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
-import { FolderIcon, PlusIcon, Edit2Icon, Trash2Icon } from '@lucide/vue'
+import { ref, nextTick, computed } from 'vue'
+import { 
+  FolderIcon, PlusIcon, Edit2Icon, Trash2Icon,
+  BookIcon, BookmarkIcon, BriefcaseIcon, CoffeeIcon, GlobeIcon, HeartIcon, LayoutIcon
+} from '@lucide/vue'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
 
@@ -80,6 +98,33 @@ const isAddingChild = ref(false)
 const childName = ref('')
 const childInputRef = ref<HTMLInputElement | null>(null)
 const isConfirmingDelete = ref(false)
+const isIconPickerOpen = ref(false)
+
+const availableIcons: Record<string, any> = {
+  folder: FolderIcon,
+  book: BookIcon,
+  bookmark: BookmarkIcon,
+  briefcase: BriefcaseIcon,
+  coffee: CoffeeIcon,
+  globe: GlobeIcon,
+  heart: HeartIcon,
+  layout: LayoutIcon
+}
+
+const currentIconComponent = computed(() => {
+  return props.node.icon && availableIcons[props.node.icon] 
+    ? availableIcons[props.node.icon] 
+    : FolderIcon
+})
+
+function toggleIconPicker() {
+  isIconPickerOpen.value = !isIconPickerOpen.value
+}
+
+function selectIcon(iconName: string) {
+  notebookStore.updateNotebookIcon(props.node.id, iconName)
+  isIconPickerOpen.value = false
+}
 
 function selectNotebook() {
   notebookStore.activeNotebookId = props.node.id

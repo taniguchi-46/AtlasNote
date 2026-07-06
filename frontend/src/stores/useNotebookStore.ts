@@ -5,6 +5,7 @@ import { listNotebooks, createNotebook, updateNotebook, deleteNotebook } from '.
 
 export interface NotebookNode extends note.Notebook {
 	children: NotebookNode[]
+	icon?: string
 }
 
 export const useNotebookStore = defineStore('notebooks', () => {
@@ -129,6 +130,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		return ids
 	}
 
+	async function updateNotebookIcon(id: string, icon: string) {
+		// MVP Mock: Update local state only
+		const index = notebooks.value.findIndex(n => n.id === id)
+		if (index !== -1) {
+			const node = notebooks.value[index] as NotebookNode
+			node.icon = icon
+		}
+	}
+
 	return {
 		notebooks,
 		activeNotebookId,
@@ -140,5 +150,6 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		renameNotebook,
 		moveNotebook,
 		removeNotebook,
+		updateNotebookIcon,
 	}
 })
