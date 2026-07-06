@@ -24,22 +24,33 @@
       <NoteList />
       <NoteEditor />
     </div>
+
+    <!-- Modals -->
+    <SettingsModal />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watchEffect } from 'vue'
 import AppTopBar from './components/AppTopBar.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
+import SettingsModal from './components/SettingsModal.vue'
 import { getStartupStatus, type StartupStatus } from './api/startup'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
+import { useSettingsStore } from './stores/useSettingsStore'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
+const settingsStore = useSettingsStore()
 const startupStatus = ref<StartupStatus | null>(null)
+
+// Apply font family globally
+watchEffect(() => {
+  document.documentElement.style.setProperty('--font-family-base', settingsStore.fontFamily)
+})
 
 // Placeholder handlers for TopBar actions
 function handleSync() {
@@ -55,7 +66,7 @@ function handleToggleAlwaysOnTop() {
 }
 
 function handleOpenSettings() {
-  console.log('Open settings clicked')
+  settingsStore.openSettings()
 }
 
 onMounted(async () => {
