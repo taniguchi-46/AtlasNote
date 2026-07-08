@@ -1,179 +1,212 @@
 # 実装計画
 
-最終更新: 2026-07-03
+最終更新: 2026-07-08
 
 ## 目的
 
-Atlas Note をドキュメント整備と Wails 最小構成の段階から、実際にノートを保存・表示・編集できる開発段階へ移行する。
+Atlas Note を、ローカルでノートを保存・表示・編集できる MVP から、Markdown を正とした安定した編集体験へ段階的に育てる。
 
-当面はローカルファーストの基盤を優先し、AI 連携、WebDAV 同期、高機能エディタは土台が安定してから段階的に追加する。
+現在は初期の「保存基盤を作る」段階を越えているため、この計画は完了済みフェーズと今後の継続フェーズを分けて管理する。
 
 ## 現状
 
-- Wails v2、Go、Vue 3、TypeScript、Vite の最小プロジェクトは配置済み。
+- Wails v2、Go、Vue 3、TypeScript、Vite のプロジェクトは配置済み。
 - ルート `package.json` には Wails / frontend 用の基本スクリプトがある。
-- `go.mod` は Wails 依存のみの最小構成。
-- frontend は現時点で Vue 以外のアプリ用依存をまだ追加していない。
+- Go 側には SQLite / Markdown Storage / Repository / Service / Wails API の基本構成がある。
+- フロントエンドには Vue 3、Pinia、UnoCSS、Reka UI、Tiptap、tiptap-markdown が導入済み。
+- ノート本文は Markdown、メタデータは SQLite に保存する。
+- エディタは Markdown モードを保存責務の中心とし、Rich / Preview モードを Markdown へ戻せる範囲の編集ビューとして扱う。
 - `.env.example` には AI、WebDAV、ローカル保存先の環境変数サンプルがある。
-- 実装済みの Go API は `Greet` のみで、ノート保存・DB・Markdown Storage は未実装。
-- 画面文言と一部ドキュメントで文字化けして見える箇所があるため、実装前または初期実装時に確認が必要。
 
-## 開発に移れるか
+## 開発方針
 
-結論として、開発には移れる。
-
-ただし、最初に着手する範囲は「ノート保存基盤の最小実装」に絞る。SQLite、Markdown Storage、Repository、Wails API の境界を先に作り、Tiptap、CodeMirror、WebDAV、AI 連携は後続フェーズに分ける。
+- Markdown を保存データの正とする。
+- Rich 側で独自表現を増やす場合は、Markdown へ戻せることを先に確認する。
+- DB / API / ファイル構成変更は、必要性・影響範囲・ロールバック方法を確認してから行う。
+- UI は既存の3ペイン構成と UpNote 風 Rich 編集の方向性を尊重する。
+- 画像貼り付け・添付ファイル設計は現在のエディタ整理スコープから外す。
 
 ## 確認済み
 
-```powershell
-.\.tools\go\bin\go.exe test ./...
-npm run frontend:build
+```bash
+go test ./...
+npm --prefix frontend run test:serializer
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
 ```
 
-結果:
+補足:
 
-- Go テストは成功。現時点ではテストファイルなし。
-- frontend build は成功。
-- 通常 PATH では `go` が見つからなかったため、`.tools/go/bin/go.exe` を直接使って確認した。
-- sandbox 環境では Node.js が `C:\Users\mt252` を参照できず `EPERM` になったため、frontend build は権限付きで再確認した。
+- sandbox 環境では Node.js が `C:\Users\mt252` を参照できず `EPERM` になる場合があるため、必要に応じて権限付きで再確認する。
+- `frontend/wailsjs/` が未生成のクリーン環境では、先に `wails build` で Wails bindings を生成する。
 
-## 懸念事項
+## 完了済みフェーズ
 
-### 文字化け
-
-`README.md`、`docs/*.md`、`frontend/src/App.vue` の表示文言に文字化けして見える箇所がある。
-
-対応方針:
-
-- 実際にファイル内容が壊れているか、表示環境のエンコード問題かを確認する。
-- UI に出る文言は、現在の機能に合わせて正常な日本語へ修正する。
-- ドキュメントの全面修正は範囲が大きいため、開発に必要な箇所から最小限で直す。
-
-### PATH
-
-Go と Wails CLI は `.tools/` 配下に配置されているが、現在の PowerShell セッションでは `go` が見つからなかった。
-
-対応方針:
-
-- 開発時の確認コマンドは、必要に応じて `.tools/go/bin/go.exe` と `.tools/go-bin/wails.exe` を直接指定する。
-- 手順書には PATH 反映が新しい PowerShell で有効になる可能性があることを明記する。
-
-### 依存追加
-
-設計上は UnoCSS、Reka UI、Pinia、Squirrel、SQLite、Tiptap、CodeMirror が予定されているが、現時点では多くが未導入。
-
-対応方針:
-
-- 最初の実装で必要な依存だけ追加する。
-- エディタ系や UI 系の依存は、最小 CRUD が動いてから導入する。
-- 依存追加前に目的、影響範囲、代替案を確認する。
-
-## フェーズ 1: ローカルデータ基盤
+### フェーズ 1: ローカルデータ基盤
 
 目的:
 
 - ノートをローカルに保存できる最低限の土台を作る。
 
-実装候補:
+完了内容:
 
-- Go 側に `internal/note`、`internal/storage`、`internal/repository` などの責務別パッケージを追加する。
-- SQLite 初期化処理を追加する。
-- Markdown 本文の保存先ディレクトリを決める。
-- ノートのメタデータを SQLite に保存する。
-- ノート本文を Markdown ファイルとして保存する。
+- SQLite 初期化処理を追加。
+- Markdown 本文の読み書きを担当する `MarkdownStore` を追加。
+- ノートのメタデータを SQLite に保存。
+- ノート本文を Markdown ファイルとして保存。
+- ユーザー入力をファイルパスへ直接使わない ID ベースの保存にした。
 
-最小データ項目:
-
-- `id`
-- `title`
-- `content_path`
-- `created_at`
-- `updated_at`
-
-注意点:
-
-- DB スキーマ変更は小さく始める。
-- Markdown ファイル名は安全な ID ベースにする。
-- ユーザー入力をファイルパスへ直接使わない。
-- 保存先ディレクトリは `.env` またはアプリ既定値から決める。
-
-## フェーズ 2: Repository と Service
+### フェーズ 2: Repository と Service
 
 目的:
 
 - SQLite と Markdown Storage の詳細を UI / Wails API から隠す。
 
-実装候補:
+完了内容:
 
-- `NoteRepository` で SQLite の読み書きを担当する。
-- `MarkdownStore` で本文ファイルの読み書きを担当する。
-- `NoteService` で作成、取得、更新、削除のユースケースをまとめる。
+- `NoteRepository` で SQLite の読み書きを担当。
+- `MarkdownStore` で本文ファイルの読み書きを担当。
+- `NoteService` で作成、取得、更新、削除のユースケースを集約。
+- Notebook Repository / Service を追加。
+- ノートブック紐付けの解除を含む更新テストを追加。
 
-確認すること:
-
-- エラー時に秘密情報やローカル絶対パスを出しすぎない。
-- 入力値の空文字、長すぎるタイトル、不正 ID を検証する。
-- DB と Markdown の片方だけ成功した場合の扱いを決める。
-
-## フェーズ 3: Wails API
+### フェーズ 3: Wails API
 
 目的:
 
 - フロントエンドからノート操作を呼べるようにする。
 
-実装候補:
+完了内容:
 
-- `App` にノート操作メソッドを追加する。
-- Wails の型生成結果を frontend から使う。
-- 直接 SQL やファイルパスを返さず、画面用 DTO を返す。
+- `App` にノート操作メソッドを追加。
+- `App` にノートブック操作メソッドを追加。
+- Wails の型生成結果を frontend から利用。
+- 画面用 DTO を返し、SQL や内部ファイルパスを UI に漏らさない構成にした。
 
-API 候補:
+主な API:
 
 - `ListNotes()`
 - `GetNote(id string)`
-- `CreateNote(input CreateNoteInput)`
-- `UpdateNote(id string, input UpdateNoteInput)`
+- `CreateNote(input CreateInput)`
+- `UpdateNote(id string, input UpdateInput)`
 - `DeleteNote(id string)`
+- `ListNotebooks()`
+- `CreateNotebook(input NotebookCreateInput)`
+- `UpdateNotebook(id string, input NotebookUpdateInput)`
+- `DeleteNotebook(id string)`
+- `ToggleAlwaysOnTop(b bool)`
 
-## フェーズ 4: フロントエンド最小 UI
+### フェーズ 4: フロントエンド最小 UI
 
 目的:
 
 - ノート一覧、選択、編集、保存の基本操作を画面で確認できる状態にする。
 
-実装候補:
+完了内容:
 
-- `frontend/src/components/` に一覧、編集領域、空状態を分ける。
-- `frontend/src/composables/` に Wails API 呼び出しをまとめる。
-- 最初はプレーンな textarea で編集し、Tiptap / CodeMirror は後続にする。
+- 3ペインレイアウトを追加。
+- 上部バー、サイドバー、ノート一覧、エディタ、設定モーダルを追加。
+- Pinia store 経由で Wails API を呼び出す構成にした。
+- お気に入り、ピン留め、ゴミ箱の表示・操作を追加。
+- ノート一覧の右クリックコンテキストメニューを追加。
+- ノートブックツリーとノートブック選択を追加。
 
-確認すること:
-
-- ローディング状態
-- 空データ時の表示
-- 保存失敗時の表示
-- 画面文言の文字化け
-- XSS につながる危険な HTML 挿入がないこと
-
-## フェーズ 5: エディタ拡張
+### フェーズ 5: エディタ拡張
 
 目的:
 
-- 最小 CRUD の安定後に、編集体験を改善する。
+- Markdown を中心に、Rich / Preview と往復できる編集体験を作る。
+
+完了内容:
+
+- Markdown モードを追加。
+- Rich / Preview モードを追加。
+- Markdown -> Rich -> Markdown の往復を実装。
+- Rich 側の見出し・太字・リスト編集を実装。
+- `editor.storage.markdown.getMarkdown()` 依存を避け、Tiptap JSON から Markdown へ戻す serializer を追加。
+- raw HTML は Rich 側で実行しないように、Rich 読み込み前にタグ文字列をエスケープ。
+- serializer の基本テストを追加。
+
+実機確認済み:
+
+- Markdown モードで `## chatgpt できる` が表示される。
+- Preview 切り替え後に Markdown へ戻っても `##` が保持される。
+- Rich 側で見出し2・太字・リストを作成し、Markdown に正しく保存される。
+- `## aa -> Rich -> Markdown` が `## aa` に戻る。
+- `<div onclick="alert(1)">test</div>` が Rich 側で実行されない。
+
+## 継続フェーズ
+
+### フェーズ 6: Markdown / Rich 仕様の明文化
+
+目的:
+
+- 今後の後戻りを減らすため、エディタの保存責務と対応範囲を明文化する。
 
 実装候補:
 
-- Markdown 編集を CodeMirror で扱う。
-- プレビューまたはリッチ編集が必要な場合に Tiptap の導入範囲を決める。
-- キーボード操作と保存状態表示を追加する。
+- Markdown を保存責務の中心にする方針を `docs/rules/architecture.md` へ反映する。
+- Rich は Markdown への変換可能範囲に限定する方針を明文化する。
+- raw HTML の扱いを仕様として明文化する。
+- serializer の対応範囲と未対応範囲を記録する。
+
+確認すること:
+
+- Rich 側で HTML が実行されないこと。
+- Markdown 原文を壊さないこと。
+- Rich 編集後に Markdown として保存されること。
+
+### フェーズ 7: table 編集 UI の再設計
+
+目的:
+
+- table を Markdown 中心設計と矛盾しない範囲で扱えるようにする。
+
+検討候補:
+
+- Markdown table と Rich table の対応範囲を決める。
+- Rich 側で table 挿入・行列操作をどこまで提供するか決める。
+- 旧 table 操作 UI / CSS の残存箇所を確認する。
+- table の中に table を作れない制約を維持する。
 
 注意点:
 
-- Tiptap / CodeMirror の両方を同時に入れると責務が曖昧になりやすいため、先に用途を分ける。
-- 依存追加前に、最小構成で解決できるかを確認する。
+- 先に Markdown table へ落とせる範囲を決める。
+- Tiptap Table の標準コマンドを優先し、不要なライブラリは追加しない。
+- Rich 側だけで表現できる機能を増やしすぎない。
 
-## フェーズ 6: WebDAV / AI 連携の設計
+### フェーズ 8: serializer の拡張とテスト
+
+目的:
+
+- Rich 編集で扱える Markdown 変換範囲を安全に広げる。
+
+現対応:
+
+- heading
+- bold / italic / strike / inline code / link
+- bullet list / ordered list / task list
+- blockquote
+- code block
+- horizontal rule
+- table
+- image
+
+未対応:
+
+- footnote
+- frontmatter
+- reference link
+- Markdown コメント
+- HTML block の高度な保持
+
+方針:
+
+- 変換範囲を増やす場合は、先に `frontend/scripts/test-serializer.mjs` へテストを追加する。
+- 実装は `frontend/src/utils/tiptapMarkdownSerializer.ts` に閉じる。
+- `NoteEditor.vue` 側へ個別変換ロジックを増やしすぎない。
+
+### フェーズ 9: WebDAV / AI 連携の設計
 
 目的:
 
@@ -191,24 +224,34 @@ AI:
 - ログに API Key、会話内容、個人情報を出しすぎない。
 - レート制限、タイムアウト、コスト表示の扱いを決める。
 
+## 保留事項
+
+- 設定モーダルの実機表示確認。
+- 常に最前面ボタンの実機動作確認。
+- 添付ファイル保存設計。
+- デスクトップアプリの対応 OS と配布方式。
+- 高度な全文検索の方式。
+
 ## 確認コマンド
 
 開発中の基本確認:
 
-```powershell
-.\.tools\go\bin\go.exe test ./...
-npm run frontend:build
+```bash
+go test ./...
+npm --prefix frontend run test:serializer
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
 ```
 
 必要に応じて:
 
-```powershell
-.\.tools\go-bin\wails.exe doctor
-.\.tools\go-bin\wails.exe build
+```bash
+wails doctor
+wails build
 ```
 
-## 最初の実装タスク候補
+## 次の実装タスク候補
 
-1. UI とドキュメントの文字化け箇所を確認し、開発に直接影響する箇所だけ直す。
-2. SQLite / Markdown Storage / Repository の最小パッケージ構成を作る。
-3. ノート CRUD を Wails API と Vue の最小 UI に接続する。
+1. Markdown / Rich エディタ仕様を `docs/rules/architecture.md` に反映する。
+2. table 編集 UI の仕様を決める。
+3. 設定モーダルと常に最前面機能を実機で再確認する。
