@@ -93,14 +93,10 @@ wails build
    - Markdown を保存責務の中心にする方針を設計ドキュメントへ反映する。
    - Rich は Markdown への変換可能範囲に限定する方針を明文化する。
    - raw HTML の扱いを仕様として明文化する。
-2. table 編集 UI の再設計
-   - Markdown table と Rich table の対応範囲を決める。
-   - Rich 側で table 挿入・行列操作をどこまで提供するか決める。
-   - 旧 table 操作 UI / CSS の残存箇所を確認し、必要なタイミングで整理する。
-3. 実機確認が必要な UI の確認
+2. 実機確認が必要な UI の確認
    - 設定モーダルの背景・余白・スクロール。
    - 常に最前面ボタンの見た目と Wails 側の動作。
-4. serializer の継続確認
+3. serializer の継続確認
    - 対応範囲を増やす場合は、先に `frontend/scripts/test-serializer.mjs` へテストを追加する。
 
 詳細: `docs/todo/todo-mvp.md`
@@ -190,3 +186,16 @@ wails doctor
   - Rich 側で見出し2・太字・リストを作成し、Markdown に正しく保存される。
   - `## aa -> Rich -> Markdown` が `## aa` に戻る。
   - `<div onclick="alert(1)">test</div>` が Rich 側で実行されない。
+
+### 2026-07-08: table 編集 UI 仕様の確定
+
+- Markdown を保存データの正とし、Rich table は Markdown table へ戻せる範囲の編集 UI として扱う方針にした。
+- MVP では GitHub Flavored Markdown 互換の基本 table を対象にする。
+- Rich 側では table 挿入、行追加、列追加、行削除、列削除、表削除までを提供する方針にした。
+- セル結合、セル分割、複数ヘッダー行、セル単位の装飾、列幅の Markdown 永続化、table 内 table は MVP では扱わない。
+- Rich 側の table 挿入は実機表示確認済み。
+- table 選択中の行追加、列追加、行削除、列削除、表削除 UI を format bar に追加。
+- 旧 table 操作用 CSS は `frontend/src/style.css` から整理済み。
+- table 選択中の行追加、列追加、行削除、列削除、表削除は実機動作確認済み。
+- table 作成済みノートで Markdown / Preview 往復しても内容が保持されることを実機確認済み。
+- 別ノートから table 作成済みノートを開いても内容が消えないことを実機確認済み。

@@ -190,6 +190,61 @@
         >
           <TerminalIcon :size="15" />
         </button>
+
+        <span class="format-divider" />
+
+        <button
+          class="format-btn"
+          :class="{ 'is-active': editor?.isActive('table') }"
+          type="button"
+          title="表を挿入"
+          @click="insertTable"
+        >
+          <Table2Icon :size="15" />
+        </button>
+
+        <template v-if="isTableActive">
+          <button
+            class="format-btn"
+            type="button"
+            title="下に行を追加"
+            @click="addTableRow"
+          >
+            <TableRowsSplitIcon :size="15" />
+          </button>
+          <button
+            class="format-btn"
+            type="button"
+            title="右に列を追加"
+            @click="addTableColumn"
+          >
+            <TableColumnsSplitIcon :size="15" />
+          </button>
+          <button
+            class="format-btn danger"
+            type="button"
+            title="現在の行を削除"
+            @click="deleteTableRow"
+          >
+            <Rows3Icon :size="15" />
+          </button>
+          <button
+            class="format-btn danger"
+            type="button"
+            title="現在の列を削除"
+            @click="deleteTableColumn"
+          >
+            <Columns3Icon :size="15" />
+          </button>
+          <button
+            class="format-btn danger"
+            type="button"
+            title="表を削除"
+            @click="deleteTable"
+          >
+            <Trash2Icon :size="15" />
+          </button>
+        </template>
       </div>
 
       <div class="editor-body">
@@ -217,6 +272,7 @@ import {
   BoldIcon,
   CheckSquareIcon,
   CodeIcon,
+  Columns3Icon,
   FileTextIcon,
   Heading1Icon,
   Heading2Icon,
@@ -226,12 +282,17 @@ import {
   ListOrderedIcon,
   PinIcon,
   QuoteIcon,
+  Rows3Icon,
   StarIcon,
   StrikethroughIcon,
+  Table2Icon,
+  TableColumnsSplitIcon,
+  TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
 } from '@lucide/vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
+import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
@@ -265,6 +326,7 @@ const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
+const editorStateVersion = ref(0)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
 
@@ -301,7 +363,12 @@ const editor = new Editor({
       lowlight,
     }),
   ],
+  onSelectionUpdate() {
+    editorStateVersion.value += 1
+  },
   onUpdate({ editor }) {
+    editorStateVersion.value += 1
+
     if (editMode.value !== 'wysiwyg') return
     if (isApplyingContent.value) return
 
@@ -331,7 +398,9 @@ watch(
       localMarkdown.value = note.content
       isRichDirty.value = false
       if (editMode.value === 'wysiwyg') {
-        setEditorFromMarkdown(note.content)
+        if (!setEditorFromMarkdown(note.content)) {
+          editMode.value = 'markdown'
+        }
       }
       return
     }
@@ -342,7 +411,9 @@ watch(
 
     if (!isRichDirty.value && localMarkdown.value !== note.content) {
       localMarkdown.value = note.content
-      setEditorFromMarkdown(note.content)
+      if (!setEditorFromMarkdown(note.content)) {
+        editMode.value = 'markdown'
+      }
     }
   },
   { immediate: true },
@@ -354,6 +425,11 @@ onBeforeUnmount(() => {
 
 const charCount = computed(() => {
   return localMarkdown.value.length
+})
+
+const isTableActive = computed(() => {
+  editorStateVersion.value
+  return editMode.value === 'wysiwyg' && editor.isActive('table')
 })
 
 function handleTitleSave() {
@@ -372,20 +448,27 @@ function toggleEditMode() {
     return
   }
 
-  setEditorFromMarkdown(localMarkdown.value)
-  editMode.value = 'wysiwyg'
+  if (setEditorFromMarkdown(localMarkdown.value)) {
+    editMode.value = 'wysiwyg'
+  }
 }
 
-function setEditorFromMarkdown(markdown: string) {
+function setEditorFromMarkdown(markdown: string): boolean {
   isApplyingContent.value = true
-  ;(editor.commands as any).setContent(escapeRawHtmlForRichEditor(markdown), {
-    emitUpdate: false,
-    parseOptions: {
-      preserveWhitespace: 'full',
-    },
-  })
-  isApplyingContent.value = false
-  isRichDirty.value = false
+  try {
+    const html = parseMarkdownToRichHtml(escapeRawHtmlForRichEditor(markdown))
+    const content = parseRichHtmlToJson(html)
+    ;(editor.commands as any).setContent(content, {
+      emitUpdate: false,
+    })
+    isRichDirty.value = false
+    return true
+  } catch (error) {
+    console.error('Failed to load Markdown into rich editor', error)
+    return false
+  } finally {
+    isApplyingContent.value = false
+  }
 }
 
 function escapeRawHtmlForRichEditor(markdown: string) {
@@ -417,6 +500,65 @@ function applyRichEditorToMarkdown() {
     scheduleAutoSave(markdown)
   }
   isRichDirty.value = false
+}
+
+function parseMarkdownToRichHtml(markdown: string): string {
+  return (editor.storage as any).markdown.parser.parse(markdown)
+}
+
+function parseRichHtmlToJson(html: string) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  normalizeTableCells(container)
+  return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container).toJSON()
+}
+
+function normalizeTableCells(container: HTMLElement) {
+  container.querySelectorAll('td, th').forEach((cell) => {
+    if (hasBlockChild(cell)) return
+
+    const paragraph = document.createElement('p')
+    while (cell.firstChild) {
+      paragraph.appendChild(cell.firstChild)
+    }
+    cell.appendChild(paragraph)
+  })
+}
+
+function hasBlockChild(cell: Element) {
+  return Array.from(cell.children).some((child) =>
+    ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'blockquote', 'pre', 'hr'].includes(
+      child.tagName.toLowerCase(),
+    ),
+  )
+}
+
+function insertTable() {
+  editor
+    .chain()
+    .focus()
+    .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+    .run()
+}
+
+function addTableRow() {
+  editor.chain().focus().addRowAfter().run()
+}
+
+function addTableColumn() {
+  editor.chain().focus().addColumnAfter().run()
+}
+
+function deleteTableRow() {
+  editor.chain().focus().deleteRow().run()
+}
+
+function deleteTableColumn() {
+  editor.chain().focus().deleteColumn().run()
+}
+
+function deleteTable() {
+  editor.chain().focus().deleteTable().run()
 }
 
 function handleMarkdownInput() {

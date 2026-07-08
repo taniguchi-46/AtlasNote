@@ -162,18 +162,21 @@ npm --prefix frontend run build
 
 - table を Markdown 中心設計と矛盾しない範囲で扱えるようにする。
 
-検討候補:
+確定仕様:
 
-- Markdown table と Rich table の対応範囲を決める。
-- Rich 側で table 挿入・行列操作をどこまで提供するか決める。
-- 旧 table 操作 UI / CSS の残存箇所を確認する。
-- table の中に table を作れない制約を維持する。
+- Markdown を保存データの正とし、Rich table は Markdown table へ戻せる範囲の編集 UI として扱う。
+- MVP では GitHub Flavored Markdown 互換の基本 table を対象にする。
+- 対応する操作は table 挿入、行追加、列追加、行削除、列削除、表削除までにする。
+- セル内の複数段落やリストは Markdown 保存時に `<br>` を含む単一セル表現へ正規化される。
+- セル結合、セル分割、複数ヘッダー行、セル単位の背景色、文字寄せ、列幅の Markdown 永続化、table 内 table は MVP では扱わない。
+- 旧 table 操作用 CSS は整理済み。新しい table 操作 UI は Rich モードの format bar に集約する。
 
 注意点:
 
 - 先に Markdown table へ落とせる範囲を決める。
 - Tiptap Table の標準コマンドを優先し、不要なライブラリは追加しない。
 - Rich 側だけで表現できる機能を増やしすぎない。
+- `TableCell` / `TableHeader` のカスタムスキーマで table 内 table を作れない制約を維持する。
 
 ### フェーズ 8: serializer の拡張とテスト
 
