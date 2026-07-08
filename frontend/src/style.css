@@ -639,7 +639,6 @@ ul {
   margin: 0 6px;
 }
 
-/* ProseMirror Element Styles */
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
@@ -813,7 +812,7 @@ ul {
 .ProseMirror th {
   font-weight: 600;
   text-align: left;
-  background: var(--bg-list);
+  background: transparent;
 }
 
 .ProseMirror .selectedCell:after {
@@ -841,6 +840,87 @@ ul {
 .resize-cursor {
   cursor: ew-resize;
   cursor: col-resize;
+}
+
+.table-bubble-menu {
+  z-index: 50;
+}
+
+.table-action-root {
+  position: relative;
+}
+
+.table-action-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.table-action-trigger:hover,
+.table-action-trigger[aria-expanded='true'] {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.table-action-menu {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 6px);
+  min-width: 176px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+.table-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.table-action-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.table-action-item.danger:hover {
+  color: var(--color-danger);
+}
+
+.table-action-divider {
+  display: block;
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border);
+}
+
+.flip-horizontal {
+  transform: scaleX(-1);
+}
+
+.flip-vertical {
+  transform: scaleY(-1);
 }
 
 .editor-statusbar {

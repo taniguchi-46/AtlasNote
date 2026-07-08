@@ -1,25 +1,24 @@
 <template>
   <section class="editor-pane" aria-label="エディタ">
-    <!-- Empty state -->
     <div v-if="!noteStore.activeNote" class="editor-empty">
       <div class="editor-empty-icon">
         <FileTextIcon :size="48" />
       </div>
       <p class="editor-empty-title">ノートを選択してください</p>
-      <p class="editor-empty-sub">左のリストからノートを選ぶか、新規ノートを作成してください</p>
+      <p class="editor-empty-sub">
+        左のリストからノートを選ぶか、新しいノートを作成してください
+      </p>
       <button
         id="btn-new-note-editor"
         class="primary-btn"
         type="button"
         @click="noteStore.newNote()"
       >
-        新規ノート
+        新しいノート
       </button>
     </div>
 
-    <!-- Editor -->
     <template v-else>
-      <!-- Toolbar -->
       <div class="editor-toolbar">
         <input
           id="note-title-input"
@@ -32,19 +31,18 @@
         />
 
         <div class="toolbar-actions">
-          <span v-if="noteStore.isSaving" class="saving-indicator">保存中…</span>
+          <span v-if="noteStore.isSaving" class="saving-indicator">保存中...</span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
-          
-          <!-- Mode Toggle Button -->
+
           <button
             class="mode-toggle-btn"
             type="button"
-            :title="editMode === 'wysiwyg' ? 'Markdownモードに切り替え' : 'リッチテキストモードに切り替え'"
+            :title="editMode === 'wysiwyg' ? 'Markdownモードに切り替え' : 'プレビューモードに切り替え'"
             @click="toggleEditMode"
           >
             <CodeIcon v-if="editMode === 'wysiwyg'" :size="16" />
             <FileTextIcon v-else :size="16" />
-            <span>{{ editMode === 'wysiwyg' ? 'Markdown' : 'リッチテキスト' }}</span>
+            <span>{{ editMode === 'wysiwyg' ? 'Markdownへ' : 'Previewへ' }}</span>
           </button>
 
           <button
@@ -74,7 +72,6 @@
         </div>
       </div>
 
-      <!-- Format Bar (Only shown in WYSIWYG mode) -->
       <div v-if="editMode === 'wysiwyg'" class="editor-format-bar">
         <button
           class="format-btn"
@@ -98,7 +95,7 @@
           class="format-btn"
           :class="{ 'is-active': editor?.isActive('strike') }"
           type="button"
-          title="打ち消し線"
+          title="取り消し線"
           @click="editor?.chain().focus().toggleStrike().run()"
         >
           <StrikethroughIcon :size="15" />
@@ -193,46 +190,9 @@
         >
           <TerminalIcon :size="15" />
         </button>
-        <button
-          class="format-btn"
-          type="button"
-          title="テーブル挿入"
-          @click="insertTable"
-        >
-          <TableIcon :size="15" />
-        </button>
       </div>
 
-      <!-- Editor Canvas -->
       <div class="editor-body">
-        <BubbleMenu 
-          :editor="editor" 
-          :tippy-options="{ duration: 100 }"
-          v-if="editor && editMode === 'wysiwyg'"
-          class="table-bubble-menu"
-          :should-show="(props: any) => props.editor.isActive('table')"
-        >
-          <button class="menu-btn" title="列を左に挿入" @click="editor.chain().focus().addColumnBefore().run()"><ColumnsIcon :size="14" class="flip-horizontal" /></button>
-          <button class="menu-btn" title="列を右に挿入" @click="editor.chain().focus().addColumnAfter().run()"><ColumnsIcon :size="14" /></button>
-          <button class="menu-btn" title="列を削除" @click="editor.chain().focus().deleteColumn().run()"><TrashIcon :size="14" class="text-danger" /></button>
-          
-          <span class="menu-divider" />
-          
-          <button class="menu-btn" title="行を上に挿入" @click="editor.chain().focus().addRowBefore().run()"><RowsIcon :size="14" class="flip-vertical" /></button>
-          <button class="menu-btn" title="行を下に挿入" @click="editor.chain().focus().addRowAfter().run()"><RowsIcon :size="14" /></button>
-          <button class="menu-btn" title="行を削除" @click="editor.chain().focus().deleteRow().run()"><TrashIcon :size="14" class="text-danger" /></button>
-          
-          <span class="menu-divider" />
-          
-          <button class="menu-btn" title="左揃え" @click="editor.chain().focus().setCellAttribute('align', 'left').run()"><AlignLeftIcon :size="14" /></button>
-          <button class="menu-btn" title="中央揃え" @click="editor.chain().focus().setCellAttribute('align', 'center').run()"><AlignCenterIcon :size="14" /></button>
-          <button class="menu-btn" title="右揃え" @click="editor.chain().focus().setCellAttribute('align', 'right').run()"><AlignRightIcon :size="14" /></button>
-
-          <span class="menu-divider" />
-
-          <button class="menu-btn danger" title="表を削除" @click="editor.chain().focus().deleteTable().run()">表を削除</button>
-        </BubbleMenu>
-
         <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
         <textarea
           v-else
@@ -243,7 +203,6 @@
         />
       </div>
 
-      <!-- Status bar -->
       <div class="editor-statusbar">
         <span>{{ charCount }} 文字</span>
         <span>更新: {{ formatDate(noteStore.activeNote.updatedAt) }}</span>
@@ -253,20 +212,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
-  FileTextIcon, StarIcon, PinIcon, Trash2Icon,
-  BoldIcon, ItalicIcon, StrikethroughIcon, CodeIcon,
-  Heading1Icon, Heading2Icon, Heading3Icon,
-  ListIcon, ListOrderedIcon, CheckSquareIcon,
-  QuoteIcon, TerminalIcon, TableIcon,
-  AlignLeftIcon, AlignCenterIcon, AlignRightIcon,
-  ColumnsIcon, RowsIcon, TrashIcon
+  BoldIcon,
+  CheckSquareIcon,
+  CodeIcon,
+  FileTextIcon,
+  Heading1Icon,
+  Heading2Icon,
+  Heading3Icon,
+  ItalicIcon,
+  ListIcon,
+  ListOrderedIcon,
+  PinIcon,
+  QuoteIcon,
+  StarIcon,
+  StrikethroughIcon,
+  TerminalIcon,
+  Trash2Icon,
 } from '@lucide/vue'
-import { useNoteStore } from '../stores/useNoteStore'
-import { useNotebookStore } from '../stores/useNotebookStore'
 import { Editor, EditorContent } from '@tiptap/vue-3'
-import { BubbleMenu } from '@tiptap/vue-3/menus'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
@@ -280,6 +245,8 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
+import { useNoteStore } from '../stores/useNoteStore'
+import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -291,16 +258,16 @@ const CustomTableHeader = TableHeader.extend({
 
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
-const notebookStore = useNotebookStore()
-const maxEmbeddedImageBytes = 512 * 1024
 
 const localTitle = ref('')
 const savedMessage = ref(false)
-const editMode = ref<'wysiwyg' | 'markdown'>('wysiwyg')
+const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
+const isApplyingContent = ref(false)
+const isRichDirty = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let activeNoteId: string | null = null
 
-// Tiptap Editor instance
 const editor = new Editor({
   extensions: [
     StarterKit.configure({
@@ -312,6 +279,8 @@ const editor = new Editor({
       linkify: true,
     }),
     Placeholder.configure({
+      emptyNodeClass: 'is-empty',
+      showOnlyCurrent: true,
       placeholder: 'ここに内容を入力してください...',
     }),
     Link.configure({
@@ -332,82 +301,122 @@ const editor = new Editor({
       lowlight,
     }),
   ],
-  editorProps: {
-    handlePaste(_view, event) {
-      return insertImageFiles(event.clipboardData?.files)
-    },
-    handleDrop(_view, event) {
-      const handled = insertImageFiles(event.dataTransfer?.files)
-      if (handled) {
-        event.preventDefault()
-      }
-      return handled
-    },
-    handleKeyDown(view, event) {
-      if (event.ctrlKey && event.key === 'Enter') {
-        const editorInstance = editor
-        if (editorInstance.isActive('table')) {
-          editorInstance.commands.addRowAfter()
-          return true
-        }
-      }
-      return false
+  onUpdate({ editor }) {
+    if (editMode.value !== 'wysiwyg') return
+    if (isApplyingContent.value) return
+
+    const markdown = serializeTiptapJsonToMarkdown(editor.getJSON())
+    isRichDirty.value = true
+
+    if (localMarkdown.value !== markdown) {
+      localMarkdown.value = markdown
+      scheduleAutoSave(markdown)
     }
   },
-  onUpdate({ editor }) {
-    const markdown = (editor.storage as any).markdown.getMarkdown()
-    localMarkdown.value = markdown
-    scheduleAutoSave(markdown)
-  }
 })
 
-// Sync note changes to editor and localMarkdown
-watch(() => noteStore.activeNote, (note) => {
-  if (note) {
+watch(
+  () => noteStore.activeNote,
+  (note) => {
+    if (!note) {
+      activeNoteId = null
+      return
+    }
+
+    const noteChanged = activeNoteId !== note.id
+    activeNoteId = note.id
     localTitle.value = note.title
-    if (localMarkdown.value !== note.content) {
+
+    if (noteChanged) {
       localMarkdown.value = note.content
-    }
-    if (editor && !editor.isFocused) {
-      const currentMarkdown = (editor.storage as any).markdown.getMarkdown()
-      if (currentMarkdown !== note.content) {
-        (editor.commands as any).setContent(note.content, false, {
-          preserveWhitespace: 'full'
-        })
+      isRichDirty.value = false
+      if (editMode.value === 'wysiwyg') {
+        setEditorFromMarkdown(note.content)
       }
+      return
     }
-  }
-}, { immediate: true })
+
+    if (editMode.value === 'markdown') {
+      return
+    }
+
+    if (!isRichDirty.value && localMarkdown.value !== note.content) {
+      localMarkdown.value = note.content
+      setEditorFromMarkdown(note.content)
+    }
+  },
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   editor.destroy()
 })
 
 const charCount = computed(() => {
-  if (editMode.value === 'markdown') {
-    return localMarkdown.value.length
-  }
-  if (!editor) return 0
-  return editor.getText().length
+  return localMarkdown.value.length
 })
 
 function handleTitleSave() {
   if (!noteStore.activeNote) return
   if (localTitle.value === noteStore.activeNote.title) return
-  noteStore.saveNote(noteStore.activeNote.id, { title: localTitle.value })
+
+  noteStore
+    .saveNote(noteStore.activeNote.id, { title: localTitle.value })
     .then(() => showSaved())
 }
 
 function toggleEditMode() {
   if (editMode.value === 'wysiwyg') {
-    localMarkdown.value = (editor.storage as any).markdown.getMarkdown()
+    applyRichEditorToMarkdown()
     editMode.value = 'markdown'
-  } else {
-    (editor.commands as any).setContent(localMarkdown.value, false, {
-      preserveWhitespace: 'full'
-    })
-    editMode.value = 'wysiwyg'
+    return
   }
+
+  setEditorFromMarkdown(localMarkdown.value)
+  editMode.value = 'wysiwyg'
+}
+
+function setEditorFromMarkdown(markdown: string) {
+  isApplyingContent.value = true
+  ;(editor.commands as any).setContent(escapeRawHtmlForRichEditor(markdown), {
+    emitUpdate: false,
+    parseOptions: {
+      preserveWhitespace: 'full',
+    },
+  })
+  isApplyingContent.value = false
+  isRichDirty.value = false
+}
+
+function escapeRawHtmlForRichEditor(markdown: string) {
+  let inFence = false
+
+  return markdown
+    .split('\n')
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence
+        return line
+      }
+      if (inFence) return line
+
+      return line.replace(/<\/?[A-Za-z][^>\n]*>/g, (tag) =>
+        tag
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;'),
+      )
+    })
+    .join('\n')
+}
+
+function applyRichEditorToMarkdown() {
+  const markdown = serializeTiptapJsonToMarkdown(editor.getJSON())
+  if (localMarkdown.value !== markdown) {
+    localMarkdown.value = markdown
+    scheduleAutoSave(markdown)
+  }
+  isRichDirty.value = false
 }
 
 function handleMarkdownInput() {
@@ -415,57 +424,35 @@ function handleMarkdownInput() {
 }
 
 function scheduleAutoSave(content: string) {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer)
+  }
+
   autoSaveTimer = setTimeout(() => {
     if (!noteStore.activeNote) return
-    noteStore.saveNote(noteStore.activeNote.id, {
-      title: localTitle.value,
-      content,
-    }).then(() => showSaved())
+
+    noteStore
+      .saveNote(noteStore.activeNote.id, {
+        title: localTitle.value,
+        content,
+      })
+      .then(() => showSaved())
   }, 1000)
 }
 
 function showSaved() {
   savedMessage.value = true
-  setTimeout(() => { savedMessage.value = false }, 2000)
-}
-
-function insertTable() {
-  if (editor.isActive('table')) {
-    return
-  }
-  editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-}
-
-function insertImageFiles(files?: FileList | null): boolean {
-  if (!files || files.length === 0) return false
-
-  const images = Array.from(files).filter(file => file.type.startsWith('image/'))
-  if (images.length === 0) return false
-
-  const embeddableImages = images.filter(file => file.size <= maxEmbeddedImageBytes)
-  if (embeddableImages.length !== images.length) {
-    noteStore.error = '512KBを超える画像はMVPでは貼り付けできません'
-  }
-  if (embeddableImages.length === 0) return true
-
-  embeddableImages.forEach(file => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const src = typeof reader.result === 'string' ? reader.result : ''
-      if (!src) return
-      editor.chain().focus().setImage({ src, alt: file.name }).run()
-    }
-    reader.readAsDataURL(file)
-  })
-
-  return true
+  setTimeout(() => {
+    savedMessage.value = false
+  }, 2000)
 }
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('ja-JP', {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 </script>
