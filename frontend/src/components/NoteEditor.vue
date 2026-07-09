@@ -72,40 +72,40 @@
         </div>
       </div>
 
-      <div v-if="editMode === 'wysiwyg'" class="editor-format-bar">
+      <div class="editor-format-bar" @mousedown.prevent>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('bold') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('bold') }"
           type="button"
           title="太字"
-          @click="editor?.chain().focus().toggleBold().run()"
+          @click="toggleBold"
         >
           <BoldIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('italic') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('italic') }"
           type="button"
           title="斜体"
-          @click="editor?.chain().focus().toggleItalic().run()"
+          @click="toggleItalic"
         >
           <ItalicIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('strike') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('strike') }"
           type="button"
           title="取り消し線"
-          @click="editor?.chain().focus().toggleStrike().run()"
+          @click="toggleStrike"
         >
           <StrikethroughIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('code') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('code') }"
           type="button"
           title="インラインコード"
-          @click="editor?.chain().focus().toggleCode().run()"
+          @click="toggleInlineCode"
         >
           <CodeIcon :size="15" />
         </button>
@@ -114,28 +114,28 @@
 
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('heading', { level: 1 }) }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('heading', { level: 1 }) }"
           type="button"
           title="見出し1"
-          @click="editor?.chain().focus().toggleHeading({ level: 1 }).run()"
+          @click="toggleHeading(1)"
         >
           <Heading1Icon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('heading', { level: 2 }) }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('heading', { level: 2 }) }"
           type="button"
           title="見出し2"
-          @click="editor?.chain().focus().toggleHeading({ level: 2 }).run()"
+          @click="toggleHeading(2)"
         >
           <Heading2Icon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('heading', { level: 3 }) }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('heading', { level: 3 }) }"
           type="button"
           title="見出し3"
-          @click="editor?.chain().focus().toggleHeading({ level: 3 }).run()"
+          @click="toggleHeading(3)"
         >
           <Heading3Icon :size="15" />
         </button>
@@ -144,28 +144,28 @@
 
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('bulletList') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('bulletList') }"
           type="button"
           title="箇条書きリスト"
-          @click="editor?.chain().focus().toggleBulletList().run()"
+          @click="toggleBulletList"
         >
           <ListIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('orderedList') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('orderedList') }"
           type="button"
           title="番号付きリスト"
-          @click="editor?.chain().focus().toggleOrderedList().run()"
+          @click="toggleOrderedList"
         >
           <ListOrderedIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('taskList') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('taskList') }"
           type="button"
           title="タスクリスト"
-          @click="editor?.chain().focus().toggleTaskList().run()"
+          @click="toggleTaskList"
         >
           <CheckSquareIcon :size="15" />
         </button>
@@ -174,19 +174,19 @@
 
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('blockquote') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('blockquote') }"
           type="button"
           title="引用"
-          @click="editor?.chain().focus().toggleBlockquote().run()"
+          @click="toggleBlockquote"
         >
           <QuoteIcon :size="15" />
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('codeBlock') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('codeBlock') }"
           type="button"
           title="コードブロック"
-          @click="editor?.chain().focus().toggleCodeBlock().run()"
+          @click="toggleCodeBlock"
         >
           <TerminalIcon :size="15" />
         </button>
@@ -195,7 +195,7 @@
 
         <button
           class="format-btn"
-          :class="{ 'is-active': editor?.isActive('table') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('table') }"
           type="button"
           title="表を挿入"
           @click="insertTable"
@@ -203,7 +203,7 @@
           <Table2Icon :size="15" />
         </button>
 
-        <template v-if="isTableActive">
+        <template v-if="isTableActionVisible">
           <button
             class="format-btn"
             type="button"
@@ -251,10 +251,14 @@
         <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
         <textarea
           v-else
+          ref="markdownTextarea"
           v-model="localMarkdown"
           class="markdown-textarea"
           placeholder="ここにMarkdownで内容を入力してください..."
           @input="handleMarkdownInput"
+          @click="updateMarkdownSelection"
+          @keyup="updateMarkdownSelection"
+          @select="updateMarkdownSelection"
         />
       </div>
 
@@ -267,7 +271,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   BoldIcon,
   CheckSquareIcon,
@@ -324,9 +328,12 @@ const localTitle = ref('')
 const savedMessage = ref(false)
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
+const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
 const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
+const markdownSelectionVersion = ref(0)
+let lastMarkdownSelection = { start: 0, end: 0 }
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
 
@@ -432,6 +439,13 @@ const isTableActive = computed(() => {
   return editMode.value === 'wysiwyg' && editor.isActive('table')
 })
 
+const isTableActionVisible = computed(() => {
+  if (editMode.value === 'wysiwyg') return isTableActive.value
+
+  markdownSelectionVersion.value
+  return findMarkdownTableRange() !== null
+})
+
 function handleTitleSave() {
   if (!noteStore.activeNote) return
   if (localTitle.value === noteStore.activeNote.title) return
@@ -448,6 +462,7 @@ function toggleEditMode() {
     return
   }
 
+  scheduleAutoSave(localMarkdown.value)
   if (setEditorFromMarkdown(localMarkdown.value)) {
     editMode.value = 'wysiwyg'
   }
@@ -494,6 +509,8 @@ function escapeRawHtmlForRichEditor(markdown: string) {
 }
 
 function applyRichEditorToMarkdown() {
+  if (!isRichDirty.value) return
+
   const markdown = serializeTiptapJsonToMarkdown(editor.getJSON())
   if (localMarkdown.value !== markdown) {
     localMarkdown.value = markdown
@@ -509,8 +526,46 @@ function parseMarkdownToRichHtml(markdown: string): string {
 function parseRichHtmlToJson(html: string) {
   const container = document.createElement('div')
   container.innerHTML = html
+  preserveSoftBreaks(container)
   normalizeTableCells(container)
   return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container).toJSON()
+}
+
+function preserveSoftBreaks(container: HTMLElement) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    if (!node.textContent?.includes('\n')) continue
+    if (node.textContent.trim().length === 0) continue
+    if (hasAncestor(node, ['pre', 'code'])) continue
+
+    textNodes.push(node)
+  }
+
+  textNodes.forEach((node) => {
+    const parts = node.textContent?.split('\n') ?? []
+    const fragment = document.createDocumentFragment()
+
+    parts.forEach((part, index) => {
+      if (index > 0) fragment.appendChild(document.createElement('br'))
+      if (part.length > 0) fragment.appendChild(document.createTextNode(part))
+    })
+
+    node.replaceWith(fragment)
+  })
+}
+
+function hasAncestor(node: Node, tagNames: string[]) {
+  let current = node.parentElement
+
+  while (current) {
+    if (tagNames.includes(current.tagName.toLowerCase())) return true
+    current = current.parentElement
+  }
+
+  return false
 }
 
 function normalizeTableCells(container: HTMLElement) {
@@ -533,7 +588,102 @@ function hasBlockChild(cell: Element) {
   )
 }
 
+function toggleBold() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleBold().run()
+    return
+  }
+
+  toggleMarkdownInlineWrap('**')
+}
+
+function toggleItalic() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleItalic().run()
+    return
+  }
+
+  toggleMarkdownInlineWrap('*')
+}
+
+function toggleStrike() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleStrike().run()
+    return
+  }
+
+  toggleMarkdownInlineWrap('~~')
+}
+
+function toggleInlineCode() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleCode().run()
+    return
+  }
+
+  toggleMarkdownInlineWrap('`')
+}
+
+function toggleHeading(level: 1 | 2 | 3) {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleHeading({ level }).run()
+    return
+  }
+
+  toggleMarkdownLinePrefix(`${'#'.repeat(level)} `, /^#{1,6}\s+/)
+}
+
+function toggleBulletList() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleBulletList().run()
+    return
+  }
+
+  toggleMarkdownLinePrefix('- ', /^\s*[-*+]\s+/)
+}
+
+function toggleOrderedList() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleOrderedList().run()
+    return
+  }
+
+  toggleMarkdownLinePrefix('1. ', /^\s*\d+\.\s+/)
+}
+
+function toggleTaskList() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleTaskList().run()
+    return
+  }
+
+  toggleMarkdownLinePrefix('- [ ] ', /^\s*[-*+]\s+\[[ xX]\]\s+/)
+}
+
+function toggleBlockquote() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleBlockquote().run()
+    return
+  }
+
+  toggleMarkdownLinePrefix('> ', /^\s*>\s?/)
+}
+
+function toggleCodeBlock() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().toggleCodeBlock().run()
+    return
+  }
+
+  toggleMarkdownCodeBlock()
+}
+
 function insertTable() {
+  if (editMode.value === 'markdown') {
+    insertMarkdownTable()
+    return
+  }
+
   editor
     .chain()
     .focus()
@@ -542,27 +692,332 @@ function insertTable() {
 }
 
 function addTableRow() {
+  if (editMode.value === 'markdown') {
+    editMarkdownTable('addRow')
+    return
+  }
+
   editor.chain().focus().addRowAfter().run()
 }
 
 function addTableColumn() {
+  if (editMode.value === 'markdown') {
+    editMarkdownTable('addColumn')
+    return
+  }
+
   editor.chain().focus().addColumnAfter().run()
 }
 
 function deleteTableRow() {
+  if (editMode.value === 'markdown') {
+    editMarkdownTable('deleteRow')
+    return
+  }
+
   editor.chain().focus().deleteRow().run()
 }
 
 function deleteTableColumn() {
+  if (editMode.value === 'markdown') {
+    editMarkdownTable('deleteColumn')
+    return
+  }
+
   editor.chain().focus().deleteColumn().run()
 }
 
 function deleteTable() {
+  if (editMode.value === 'markdown') {
+    editMarkdownTable('deleteTable')
+    return
+  }
+
   editor.chain().focus().deleteTable().run()
 }
 
 function handleMarkdownInput() {
+  updateMarkdownSelection()
   scheduleAutoSave(localMarkdown.value)
+}
+
+function updateMarkdownSelection() {
+  const textarea = markdownTextarea.value
+  if (textarea) {
+    lastMarkdownSelection = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    }
+  }
+
+  markdownSelectionVersion.value += 1
+}
+
+function toggleMarkdownInlineWrap(marker: string) {
+  const selection = getMarkdownSelection()
+  if (!selection) return
+
+  const { start, end } = selection
+  const content = localMarkdown.value
+  const markerLength = marker.length
+  const hasOuterMarkers =
+    start >= markerLength &&
+    content.slice(start - markerLength, start) === marker &&
+    content.slice(end, end + markerLength) === marker
+
+  if (hasOuterMarkers) {
+    replaceMarkdownRange(
+      start - markerLength,
+      end + markerLength,
+      content.slice(start, end),
+      start - markerLength,
+      end - markerLength,
+    )
+    return
+  }
+
+  const selectedText = content.slice(start, end)
+  const nextText = `${marker}${selectedText}${marker}`
+  const nextStart = selectedText ? start : start + markerLength
+  const nextEnd = selectedText ? end + markerLength * 2 : nextStart
+  replaceMarkdownRange(start, end, nextText, nextStart, nextEnd)
+}
+
+function toggleMarkdownLinePrefix(prefix: string, markerPattern: RegExp) {
+  const range = getMarkdownLineRange()
+  if (!range) return
+
+  const selectedText = localMarkdown.value.slice(range.start, range.end)
+  const lines = selectedText.split('\n')
+  const contentLines = lines.filter((line) => line.length > 0)
+  const hasMarker =
+    contentLines.length > 0 && contentLines.every((line) => markerPattern.test(line))
+  const nextText = lines
+    .map((line) => {
+      if (line.length === 0) return hasMarker ? line : prefix
+
+      const withoutMarker = line.replace(markerPattern, '')
+      return hasMarker ? withoutMarker : `${prefix}${withoutMarker}`
+    })
+    .join('\n')
+
+  replaceMarkdownRange(range.start, range.end, nextText, range.start, range.start + nextText.length)
+}
+
+function toggleMarkdownCodeBlock() {
+  const selection = getMarkdownSelection()
+  if (!selection) return
+
+  const { start, end } = selection
+  const selectedText = localMarkdown.value.slice(start, end)
+  const fencedMatch = selectedText.match(/^```\n([\s\S]*)\n```$/)
+
+  if (fencedMatch) {
+    replaceMarkdownRange(start, end, fencedMatch[1], start, start + fencedMatch[1].length)
+    return
+  }
+
+  const nextText = `\`\`\`\n${selectedText}\n\`\`\``
+  const cursorOffset = selectedText ? nextText.length : 4
+  replaceMarkdownRange(start, end, nextText, start + cursorOffset, start + cursorOffset)
+}
+
+function insertMarkdownTable() {
+  insertMarkdownBlock(
+    [
+      '|  |  |  |',
+      '| --- | --- | --- |',
+      '|  |  |  |',
+      '|  |  |  |',
+    ].join('\n'),
+  )
+}
+
+function editMarkdownTable(action: 'addRow' | 'addColumn' | 'deleteRow' | 'deleteColumn' | 'deleteTable') {
+  const tableRange = findMarkdownTableRange()
+  if (!tableRange) return
+
+  if (action === 'deleteTable') {
+    replaceMarkdownRange(tableRange.start, tableRange.end, '', tableRange.start, tableRange.start)
+    return
+  }
+
+  const tableText = localMarkdown.value.slice(tableRange.start, tableRange.end)
+  const lines = tableText.split('\n')
+  const columnIndex = findMarkdownTableColumnIndex()
+  const currentLineIndex = findCurrentMarkdownTableLineIndex(tableRange.startLine)
+  let nextLines = lines
+
+  if (action === 'addRow') {
+    const columnCount = parseMarkdownTableRow(lines[0]).length
+    const row = stringifyMarkdownTableRow(Array.from({ length: columnCount }, () => ''))
+    const insertAt = Math.max(currentLineIndex + 1, 2)
+    nextLines = [...lines.slice(0, insertAt), row, ...lines.slice(insertAt)]
+  }
+
+  if (action === 'addColumn') {
+    nextLines = lines.map((line, index) => {
+      const cells = parseMarkdownTableRow(line)
+      const nextValue = index === 1 ? '---' : ''
+      const insertAt = Math.min(columnIndex + 1, cells.length)
+      return stringifyMarkdownTableRow([...cells.slice(0, insertAt), nextValue, ...cells.slice(insertAt)])
+    })
+  }
+
+  if (action === 'deleteRow') {
+    if (lines.length <= 2 || currentLineIndex <= 1) return
+    nextLines = lines.filter((_, index) => index !== currentLineIndex)
+  }
+
+  if (action === 'deleteColumn') {
+    const columnCount = parseMarkdownTableRow(lines[0]).length
+    if (columnCount <= 1) return
+    nextLines = lines.map((line) => {
+      const cells = parseMarkdownTableRow(line)
+      return stringifyMarkdownTableRow(cells.filter((_, index) => index !== columnIndex))
+    })
+  }
+
+  const nextText = nextLines.join('\n')
+  replaceMarkdownRange(tableRange.start, tableRange.end, nextText, tableRange.start, tableRange.start)
+}
+
+function insertMarkdownBlock(block: string) {
+  const selection = getMarkdownSelection()
+  if (!selection) return
+
+  const { start, end } = selection
+  const content = localMarkdown.value
+  const before = start > 0 && content[start - 1] !== '\n' ? '\n\n' : ''
+  const after = end < content.length && content[end] !== '\n' ? '\n\n' : ''
+  const nextText = `${before}${block}${after}`
+  const nextStart = start + before.length
+  replaceMarkdownRange(start, end, nextText, nextStart, nextStart + block.length)
+}
+
+function getMarkdownSelection() {
+  const textarea = markdownTextarea.value
+  if (!textarea) return lastMarkdownSelection
+
+  lastMarkdownSelection = {
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+  }
+
+  return lastMarkdownSelection
+}
+
+function getMarkdownLineRange() {
+  const selection = getMarkdownSelection()
+  if (!selection) return null
+
+  const content = localMarkdown.value
+  const start = content.lastIndexOf('\n', Math.max(selection.start - 1, 0)) + 1
+  const selectedEnd =
+    selection.end > selection.start && content[selection.end - 1] === '\n'
+      ? selection.end - 1
+      : selection.end
+  const lineEnd = content.indexOf('\n', selectedEnd)
+  const end = lineEnd === -1 ? content.length : lineEnd
+
+  return { start, end }
+}
+
+function replaceMarkdownRange(
+  start: number,
+  end: number,
+  text: string,
+  selectionStart = start + text.length,
+  selectionEnd = selectionStart,
+) {
+  localMarkdown.value = `${localMarkdown.value.slice(0, start)}${text}${localMarkdown.value.slice(end)}`
+  scheduleAutoSave(localMarkdown.value)
+  markdownSelectionVersion.value += 1
+
+  void nextTick(() => {
+    const textarea = markdownTextarea.value
+    if (!textarea) return
+
+    textarea.focus()
+    textarea.setSelectionRange(selectionStart, selectionEnd)
+    markdownSelectionVersion.value += 1
+  })
+}
+
+function findMarkdownTableRange() {
+  const selection = getMarkdownSelection()
+  if (!selection) return null
+
+  const content = localMarkdown.value
+  const lines = content.split('\n')
+  let offset = 0
+  let currentLineIndex = 0
+
+  for (const [index, line] of lines.entries()) {
+    const lineEnd = offset + line.length
+    if (selection.start >= offset && selection.start <= lineEnd) {
+      currentLineIndex = index
+      break
+    }
+    offset = lineEnd + 1
+  }
+
+  if (!isMarkdownTableLine(lines[currentLineIndex])) return null
+
+  let startLine = currentLineIndex
+  while (startLine > 0 && isMarkdownTableLine(lines[startLine - 1])) {
+    startLine -= 1
+  }
+
+  let endLine = currentLineIndex
+  while (endLine < lines.length - 1 && isMarkdownTableLine(lines[endLine + 1])) {
+    endLine += 1
+  }
+
+  const tableLines = lines.slice(startLine, endLine + 1)
+  if (tableLines.length < 2 || !isMarkdownTableSeparator(tableLines[1])) return null
+
+  const start = lines.slice(0, startLine).join('\n').length + (startLine > 0 ? 1 : 0)
+  const end = start + tableLines.join('\n').length
+  return { start, end, startLine, endLine }
+}
+
+function findCurrentMarkdownTableLineIndex(startLine: number) {
+  const selection = getMarkdownSelection()
+  if (!selection) return 0
+
+  const beforeSelection = localMarkdown.value.slice(0, selection.start)
+  return beforeSelection.split('\n').length - 1 - startLine
+}
+
+function findMarkdownTableColumnIndex() {
+  const selection = getMarkdownSelection()
+  if (!selection) return 0
+
+  const lineStart = localMarkdown.value.lastIndexOf('\n', Math.max(selection.start - 1, 0)) + 1
+  const currentLine = localMarkdown.value.slice(lineStart, selection.start)
+  return Math.max(currentLine.split('|').length - 2, 0)
+}
+
+function isMarkdownTableLine(line = '') {
+  return /^\s*\|.*\|\s*$/.test(line)
+}
+
+function isMarkdownTableSeparator(line = '') {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line)
+}
+
+function parseMarkdownTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function stringifyMarkdownTableRow(cells: string[]) {
+  return `| ${cells.join(' | ')} |`
 }
 
 function scheduleAutoSave(content: string) {
