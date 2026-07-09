@@ -20,30 +20,60 @@
 
     <template v-else>
       <div class="editor-toolbar">
-        <input
-          id="note-title-input"
-          v-model="localTitle"
-          class="title-input"
-          type="text"
-          placeholder="タイトル"
-          @blur="handleTitleSave"
-          @keydown.enter="handleTitleSave"
-        />
+        <div class="title-field">
+          <input
+            id="note-title-input"
+            v-model="localTitle"
+            class="title-input"
+            :class="{ 'is-waiting-title': isWaitingForFirstLineTitle }"
+            type="text"
+            placeholder="タイトル"
+            @input="disableAutoTitleFromContent"
+            @blur="handleTitleSave"
+            @keydown.enter="handleTitleSave"
+          />
+          <div
+            v-if="isWaitingForFirstLineTitle"
+            class="title-loading"
+            aria-hidden="true"
+          >
+            <span>新しいノートを作成中</span>
+            <span class="loading-dots">
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </span>
+          </div>
+        </div>
 
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中...</span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
-          <button
-            class="mode-toggle-btn"
-            type="button"
-            :title="editMode === 'wysiwyg' ? 'Markdownモードに切り替え' : 'プレビューモードに切り替え'"
-            @click="toggleEditMode"
-          >
-            <CodeIcon v-if="editMode === 'wysiwyg'" :size="16" />
-            <FileTextIcon v-else :size="16" />
-            <span>{{ editMode === 'wysiwyg' ? 'Markdownへ' : 'Previewへ' }}</span>
-          </button>
+          <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
+            <button
+              class="mode-segment-btn"
+              :class="{ 'is-active': editMode === 'markdown' }"
+              type="button"
+              title="Markdownモード"
+              aria-label="Markdownモード"
+              :aria-pressed="editMode === 'markdown'"
+              @click="setEditMode('markdown')"
+            >
+              <SquareMIcon :size="17" />
+            </button>
+            <button
+              class="mode-segment-btn"
+              :class="{ 'is-active': editMode === 'wysiwyg' }"
+              type="button"
+              title="リッチテキストモード"
+              aria-label="リッチテキストモード"
+              :aria-pressed="editMode === 'wysiwyg'"
+              @click="setEditMode('wysiwyg')"
+            >
+              <SquarePenIcon :size="17" />
+            </button>
+          </div>
 
           <button
             class="icon-btn"
@@ -287,6 +317,8 @@ import {
   PinIcon,
   QuoteIcon,
   Rows3Icon,
+  SquareMIcon,
+  SquarePenIcon,
   StarIcon,
   StrikethroughIcon,
   Table2Icon,
@@ -384,6 +416,7 @@ const editor = new Editor({
 
     if (localMarkdown.value !== markdown) {
       localMarkdown.value = markdown
+      updateAutoTitleFromMarkdown(markdown)
       scheduleAutoSave(markdown)
     }
   },
@@ -399,7 +432,10 @@ watch(
 
     const noteChanged = activeNoteId !== note.id
     activeNoteId = note.id
-    localTitle.value = note.title
+    localTitle.value =
+      noteStore.autoTitleNoteId === note.id && extractTitleFromFirstMarkdownLine(note.content) === ''
+        ? ''
+        : note.title
 
     if (noteChanged) {
       localMarkdown.value = note.content
@@ -446,8 +482,16 @@ const isTableActionVisible = computed(() => {
   return findMarkdownTableRange() !== null
 })
 
+const isWaitingForFirstLineTitle = computed(() => {
+  if (!noteStore.activeNote) return false
+  if (noteStore.autoTitleNoteId !== noteStore.activeNote.id) return false
+
+  return extractTitleFromFirstMarkdownLine(localMarkdown.value) === ''
+})
+
 function handleTitleSave() {
   if (!noteStore.activeNote) return
+  if (isWaitingForFirstLineTitle.value && localTitle.value.trim() === '') return
   if (localTitle.value === noteStore.activeNote.title) return
 
   noteStore
@@ -455,8 +499,17 @@ function handleTitleSave() {
     .then(() => showSaved())
 }
 
-function toggleEditMode() {
-  if (editMode.value === 'wysiwyg') {
+function disableAutoTitleFromContent() {
+  if (!noteStore.activeNote) return
+  if (noteStore.autoTitleNoteId !== noteStore.activeNote.id) return
+
+  noteStore.autoTitleNoteId = null
+}
+
+function setEditMode(mode: 'wysiwyg' | 'markdown') {
+  if (editMode.value === mode) return
+
+  if (mode === 'markdown') {
     applyRichEditorToMarkdown()
     editMode.value = 'markdown'
     return
@@ -464,7 +517,7 @@ function toggleEditMode() {
 
   scheduleAutoSave(localMarkdown.value)
   if (setEditorFromMarkdown(localMarkdown.value)) {
-    editMode.value = 'wysiwyg'
+    editMode.value = mode
   }
 }
 
@@ -738,7 +791,29 @@ function deleteTable() {
 
 function handleMarkdownInput() {
   updateMarkdownSelection()
+  updateAutoTitleFromMarkdown(localMarkdown.value)
   scheduleAutoSave(localMarkdown.value)
+}
+
+function updateAutoTitleFromMarkdown(markdown: string) {
+  if (!noteStore.activeNote) return
+  if (noteStore.autoTitleNoteId !== noteStore.activeNote.id) return
+
+  const title = extractTitleFromFirstMarkdownLine(markdown)
+  if (!title) return
+  if (localTitle.value === title) return
+
+  localTitle.value = title
+}
+
+function extractTitleFromFirstMarkdownLine(markdown: string) {
+  const firstLine = markdown.split(/\r?\n/, 1)[0] ?? ''
+  const match = firstLine.match(/^##\s+(.*)$/)
+  const title = match?.[1]?.trim()
+
+  if (!title) return ''
+
+  return Array.from(title).slice(0, 200).join('')
 }
 
 function updateMarkdownSelection() {
@@ -1030,11 +1105,18 @@ function scheduleAutoSave(content: string) {
 
     noteStore
       .saveNote(noteStore.activeNote.id, {
-        title: localTitle.value,
+        title: getSavableTitle(),
         content,
       })
       .then(() => showSaved())
   }, 1000)
+}
+
+function getSavableTitle() {
+  const title = localTitle.value.trim()
+  if (title) return localTitle.value
+
+  return noteStore.activeNote?.title ?? '新しいノート'
 }
 
 function showSaved() {
@@ -1055,24 +1137,97 @@ function formatDate(iso: string): string {
 </script>
 
 <style scoped>
-.mode-toggle-btn {
-  padding: 4px 10px;
-  background-color: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
+.title-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.title-field .title-input {
+  width: 100%;
+}
+
+.title-loading {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: background-color 0.2s, border-color 0.2s;
+  color: var(--text-secondary);
+  font-size: 18px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.title-input.is-waiting-title {
+  color: transparent;
+  caret-color: var(--text-primary);
+}
+
+.title-input.is-waiting-title::placeholder {
+  color: transparent;
+}
+
+.loading-dots {
+  display: inline-flex;
+  width: 0.9em;
+}
+
+.loading-dots span {
+  opacity: 0;
+  animation: title-dot-appear 1.4s infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes title-dot-appear {
+  0%, 18% {
+    opacity: 0;
+  }
+  30%, 78% {
+    opacity: 1;
+  }
+  90%, 100% {
+    opacity: 0;
+  }
+}
+
+.mode-segment {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background-color: var(--bg-input);
   margin-right: 8px;
 }
 
-.mode-toggle-btn:hover {
+.mode-segment-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 26px;
+  color: var(--text-secondary);
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.mode-segment-btn + .mode-segment-btn {
+  border-left: 1px solid var(--border);
+}
+
+.mode-segment-btn:hover {
   background-color: var(--bg-hover);
-  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.mode-segment-btn.is-active {
+  background-color: var(--text-secondary);
+  color: var(--bg-editor);
 }
 
 .markdown-textarea {

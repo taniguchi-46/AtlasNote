@@ -3,6 +3,12 @@ import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
 
+const DEFAULT_NOTE_TITLE = '新しいノート'
+
+function createInitialNoteContent() {
+  return '## '
+}
+
 export const useNoteStore = defineStore('notes', () => {
   // State
   const summaries = ref<note.Summary[]>([])
@@ -10,6 +16,7 @@ export const useNoteStore = defineStore('notes', () => {
   const isLoading = ref(false)
   const isSaving = ref(false)
   const error = ref<string | null>(null)
+  const autoTitleNoteId = ref<string | null>(null)
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -41,6 +48,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function selectNote(id: string) {
     isLoading.value = true
     error.value = null
+    autoTitleNoteId.value = null
     try {
       activeNote.value = await getNote(id)
     } catch (e) {
@@ -50,13 +58,16 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
-  async function newNote(title = '新しいノート', content = '', notebookId: string | null = null) {
+  async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
     isSaving.value = true
     error.value = null
     try {
+      const initialTitle = title.trim() || DEFAULT_NOTE_TITLE
+      const shouldCreateInitialContent = !content.trim()
+      const initialContent = shouldCreateInitialContent ? createInitialNoteContent() : content
       const created = await createNote({
-        title,
-        content,
+        title: initialTitle,
+        content: initialContent,
         ...(notebookId ? { notebookId } : {}),
       })
       if (!summaries.value) {
@@ -72,6 +83,7 @@ export const useNoteStore = defineStore('notes', () => {
         createdAt: created.createdAt,
         updatedAt: created.updatedAt,
       } as note.Summary)
+      autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの作成に失敗しました'
@@ -145,6 +157,7 @@ export const useNoteStore = defineStore('notes', () => {
     isLoading,
     isSaving,
     error,
+    autoTitleNoteId,
     pinnedNotes,
     favoriteNotes,
     trashedNotes,
