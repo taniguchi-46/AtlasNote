@@ -4,6 +4,12 @@ frontend/node_modules/
 
 # Build outputs
 build/
+!build/
+build/*
+!build/appicon.png
+!build/windows/
+build/windows/*
+!build/windows/icon.ico
 dist/
 frontend/dist/
 bin/

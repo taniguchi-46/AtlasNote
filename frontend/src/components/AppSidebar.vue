@@ -1,12 +1,5 @@
 <template>
   <aside class="sidebar" aria-label="サイドバー">
-    <!-- Brand -->
-    <div class="sidebar-brand">
-      <div class="brand-icon">
-        <span>A</span>
-      </div>
-      <span class="brand-name">Atlas Note</span>
-    </div>
 
     <!-- New Note Button -->
     <button
@@ -107,6 +100,7 @@ import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import NotebookTreeItem from './NotebookTreeItem.vue'
+import atlasNoteLogo from '../assets/AtlasNote_logo.png'
 import type { SidebarSection } from '../stores/useAppStore'
 
 const noteStore = useNoteStore()
