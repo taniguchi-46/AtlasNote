@@ -206,6 +206,11 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
+  async function emptyTrash() {
+    const ids = trashedNotes.value.map((n: note.Summary) => n.id)
+    await permanentlyDeleteNotes(ids)
+  }
+
   async function toggleFavorite(id: string) {
     const n = summaries.value.find((s: note.Summary) => s.id === id)
     if (!n) return
@@ -240,6 +245,7 @@ export const useNoteStore = defineStore('notes', () => {
     moveNotesToNotebook,
     permanentlyDeleteNote,
     permanentlyDeleteNotes,
+    emptyTrash,
     toggleFavorite,
     togglePinned,
   }

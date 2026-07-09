@@ -3,6 +3,15 @@
     <!-- Header -->
     <div class="note-list-header">
       <h2 class="note-list-title">{{ sectionTitle }}</h2>
+      <button
+        v-if="isTrashSection"
+        class="empty-trash-btn"
+        type="button"
+        :disabled="noteStore.isSaving || noteStore.trashedNotes.length === 0"
+        @click="emptyTrash"
+      >
+        ゴミ箱を空にする
+      </button>
       <span class="note-list-count">{{ displayedNotes.length }}</span>
     </div>
 
@@ -248,6 +257,24 @@ function clearSelectedNotes(ids: string[]) {
   }
 }
 
+async function emptyTrash() {
+  const count = noteStore.trashedNotes.length
+  if (count === 0) return
+
+  const confirmed = window.confirm(
+    `ゴミ箱内の${count}件のノートを完全に削除します。この操作は元に戻せません。`,
+  )
+  if (!confirmed) return
+
+  await noteStore.emptyTrash()
+  selectedNoteIds.value = new Set()
+  lastSelectedNoteId.value = null
+}
+
+const isTrashSection = computed(() =>
+  appStore.sidebarSection === 'trash' && !notebookStore.activeNotebookId
+)
+
 const sectionTitle = computed(() => {
   if (notebookStore.activeNotebookId) {
     const nb = notebookStore.notebooks.find(n => n.id === notebookStore.activeNotebookId)
@@ -314,6 +341,25 @@ function formatDate(iso: string): string {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 4px 0;
   min-width: 160px;
+}
+
+.empty-trash-btn {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.empty-trash-btn:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.empty-trash-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .context-menu-item {
