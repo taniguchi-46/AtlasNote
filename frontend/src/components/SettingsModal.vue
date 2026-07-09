@@ -38,15 +38,6 @@
           <section v-if="activeTab === 'general'">
             <h3>一般</h3>
             <div class="setting-group">
-              <label>表示フォント</label>
-              <select v-model="settingsStore.fontFamily">
-                <option value="Meiryo">Meiryo</option>
-                <option value="Yu Gothic UI">Yu Gothic UI</option>
-                <option value="Noto Sans JP">Noto Sans JP</option>
-                <option value="BIZ UDPGothic">BIZ UDPGothic</option>
-              </select>
-            </div>
-            <div class="setting-group">
               <label>グローバルショートカット</label>
               <p class="setting-desc">（現在開発中...）</p>
             </div>
@@ -55,13 +46,77 @@
           <!-- エディター設定 -->
           <section v-if="activeTab === 'editor'">
             <h3>エディター</h3>
-            <div class="setting-group">
-              <label>タイポグラフィ</label>
-              <p class="setting-desc">（行間や文字サイズを設定できます）</p>
+            <div class="settings-section">
+              <h4>タイポグラフィ</h4>
+              <div class="setting-group">
+                <label>フォント指定</label>
+                <select v-model="settingsStore.fontFamily">
+                  <option value="Meiryo">Meiryo</option>
+                  <option value="Yu Gothic UI">Yu Gothic UI</option>
+                  <option value="Noto Sans JP">Noto Sans JP</option>
+                  <option value="BIZ UDPGothic">BIZ UDPGothic</option>
+                </select>
+              </div>
+              <div class="setting-group">
+                <label>フォントサイズ指定</label>
+                <select v-model="settingsStore.editorFontSize">
+                  <option v-for="size in fontSizeOptions" :key="size" :value="size">
+                    {{ size }}
+                  </option>
+                </select>
+              </div>
             </div>
-            <div class="setting-group">
-              <label>ファイル設定</label>
-              <p class="setting-desc">（添付ファイルの保存先など）</p>
+
+            <div class="settings-section">
+              <h4>エディタ</h4>
+              <div class="setting-group">
+                <label>新規ノート1行目のスタイル</label>
+                <select v-model="settingsStore.editorFirstLineStyle">
+                  <option value="heading1">H1</option>
+                  <option value="heading2">H2</option>
+                  <option value="heading3">H3</option>
+                  <option value="paragraph">普通</option>
+                </select>
+              </div>
+              <div class="setting-group">
+                <div class="setting-label-row">
+                  <label>行の長さ</label>
+                  <span>{{ settingsStore.editorLineLength }}</span>
+                </div>
+                <input
+                  v-model.number="settingsStore.editorLineLength"
+                  type="range"
+                  min="520"
+                  max="1200"
+                  step="20"
+                />
+              </div>
+              <div class="setting-group">
+                <div class="setting-label-row">
+                  <label>行間</label>
+                  <span>{{ settingsStore.editorLineHeight.toFixed(1) }}</span>
+                </div>
+                <input
+                  v-model.number="settingsStore.editorLineHeight"
+                  type="range"
+                  min="1.2"
+                  max="2.4"
+                  step="0.1"
+                />
+              </div>
+              <div class="setting-group">
+                <div class="setting-label-row">
+                  <label>段落の間隔</label>
+                  <span>{{ settingsStore.editorParagraphSpacing.toFixed(1) }}</span>
+                </div>
+                <input
+                  v-model.number="settingsStore.editorParagraphSpacing"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                />
+              </div>
             </div>
           </section>
 
@@ -99,6 +154,7 @@ const tabs = [
   { id: 'backup', name: 'バックアップ' },
 ]
 const activeTab = ref('theme')
+const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
 </script>
 
 <style scoped>
@@ -194,6 +250,17 @@ const activeTab = ref('theme')
   padding-bottom: 8px;
 }
 
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-section h4 {
+  margin: 0 0 16px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .setting-group {
   margin-bottom: 24px;
   color: var(--text-primary);
@@ -205,6 +272,24 @@ const activeTab = ref('theme')
   font-weight: 500;
   margin-bottom: 8px;
   color: var(--text-primary);
+}
+
+.setting-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 240px;
+  margin-bottom: 8px;
+}
+
+.setting-label-row label {
+  margin-bottom: 0;
+}
+
+.setting-label-row span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .setting-desc {
@@ -221,6 +306,11 @@ select {
   color: var(--text-primary);
   font-size: 14px;
   width: 200px;
+}
+
+input[type='range'] {
+  width: 240px;
+  accent-color: var(--brand-primary);
 }
 
 .primary-btn {

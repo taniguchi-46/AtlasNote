@@ -3,6 +3,13 @@
 ───────────────────────────────────────── */
 :root,
 [data-theme='dark'] {
+  /* Typography */
+  --editor-font-family: var(--font-family-base, 'Inter', 'Segoe UI', ui-sans-serif, system-ui, -apple-system, sans-serif);
+  --editor-font-size: 14px;
+  --editor-line-height: 1.8;
+  --editor-line-max-width: none;
+  --editor-paragraph-spacing: 1em;
+
   /* Surface */
   --bg-app: #0d1117;
   --bg-sidebar: #161b22;
@@ -593,8 +600,12 @@ ul {
 
 .ProseMirror {
   padding: 20px 24px;
-  font-size: 14px;
-  line-height: 1.8;
+  width: 100%;
+  max-width: var(--editor-line-max-width);
+  margin: 0 auto;
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
   color: var(--text-primary);
   min-height: 100%;
   outline: none;
@@ -651,6 +662,14 @@ ul {
   height: 0;
 }
 
+.ProseMirror p {
+  margin: 0 0 var(--editor-paragraph-spacing);
+}
+
+.ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
 .ProseMirror h1 {
   font-size: 24px;
   font-weight: 700;
@@ -680,6 +699,14 @@ ul {
 
 .ProseMirror ul {
   list-style-type: disc;
+}
+
+.ProseMirror ul ul {
+  list-style-type: circle;
+}
+
+.ProseMirror ul ul ul {
+  list-style-type: square;
 }
 
 .ProseMirror ol {

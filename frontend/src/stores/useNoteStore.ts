@@ -2,11 +2,19 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
+import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
 
-function createInitialNoteContent() {
-  return '## '
+function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
+  const markers: Record<EditorFirstLineStyle, string> = {
+    heading1: '# ',
+    heading2: '## ',
+    heading3: '### ',
+    paragraph: '',
+  }
+
+  return markers[firstLineStyle]
 }
 
 export const useNoteStore = defineStore('notes', () => {
@@ -62,9 +70,12 @@ export const useNoteStore = defineStore('notes', () => {
     isSaving.value = true
     error.value = null
     try {
+      const settingsStore = useSettingsStore()
       const initialTitle = title.trim() || DEFAULT_NOTE_TITLE
       const shouldCreateInitialContent = !content.trim()
-      const initialContent = shouldCreateInitialContent ? createInitialNoteContent() : content
+      const initialContent = shouldCreateInitialContent
+        ? createInitialNoteContent(settingsStore.editorFirstLineStyle)
+        : content
       const created = await createNote({
         title: initialTitle,
         content: initialContent,

@@ -343,6 +343,7 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useSettingsStore } from '../stores/useSettingsStore'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 
 const CustomTableCell = TableCell.extend({
@@ -355,6 +356,7 @@ const CustomTableHeader = TableHeader.extend({
 
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
+const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
@@ -808,8 +810,10 @@ function updateAutoTitleFromMarkdown(markdown: string) {
 
 function extractTitleFromFirstMarkdownLine(markdown: string) {
   const firstLine = markdown.split(/\r?\n/, 1)[0] ?? ''
-  const match = firstLine.match(/^##\s+(.*)$/)
-  const title = match?.[1]?.trim()
+  const headingMatch = firstLine.match(/^#{1,6}\s+(.*)$/)
+  const title = settingsStore.editorFirstLineStyle === 'paragraph'
+    ? firstLine.trim()
+    : headingMatch?.[1]?.trim()
 
   if (!title) return ''
 
@@ -1230,17 +1234,43 @@ function formatDate(iso: string): string {
   color: var(--bg-editor);
 }
 
+.prose-editor :deep(.ProseMirror) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--editor-line-max-width);
+  margin: 0 auto;
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+}
+
+.prose-editor :deep(.ProseMirror > *) {
+  margin-top: 0;
+  margin-bottom: 0;
+  line-height: var(--editor-line-height);
+}
+
+.prose-editor :deep(.ProseMirror > * + *) {
+  margin-top: var(--editor-paragraph-spacing);
+}
+
+.prose-editor :deep(.ProseMirror li) {
+  line-height: var(--editor-line-height);
+}
+
 .markdown-textarea {
   width: 100%;
+  max-width: var(--editor-line-max-width);
   height: 100%;
   min-height: 400px;
+  margin: 0 auto;
   border: none;
   resize: none;
   background-color: transparent;
   color: var(--text-primary);
-  font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 14px;
-  line-height: 1.6;
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  line-height: calc(var(--editor-line-height) * 1em + var(--editor-paragraph-spacing) * 0.25);
   padding: 24px;
   outline: none;
 }
