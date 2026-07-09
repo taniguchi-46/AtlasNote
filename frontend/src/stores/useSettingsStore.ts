@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 
@@ -33,6 +34,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const editorLineLength = ref(readNumberInRange('atlas-editor-line-length', 760, 520, 1200))
   const editorLineHeight = ref(readNumberInRange('atlas-editor-line-height', 1.8, 1.2, 2.4))
   const editorParagraphSpacing = ref(readNumberInRange('atlas-editor-paragraph-spacing', 1, 0, 2))
+  const savedDefaultNotebookIcon = localStorage.getItem('atlas-default-notebook-icon') ?? DEFAULT_NOTEBOOK_ICON
+  const defaultNotebookIcon = ref(
+    isKnownNotebookIcon(savedDefaultNotebookIcon) ? savedDefaultNotebookIcon : DEFAULT_NOTEBOOK_ICON,
+  )
   
   watch(fontFamily, (newFont) => {
     localStorage.setItem('atlas-font-family', newFont)
@@ -63,6 +68,17 @@ export const useSettingsStore = defineStore('settings', () => {
   watch(editorFirstLineStyle, (newFirstLineStyle) => {
     localStorage.setItem('atlas-editor-first-line-style', newFirstLineStyle)
   }, { immediate: true })
+
+  watch(defaultNotebookIcon, (newDefaultNotebookIcon) => {
+    const icon = isKnownNotebookIcon(newDefaultNotebookIcon)
+      ? newDefaultNotebookIcon
+      : DEFAULT_NOTEBOOK_ICON
+    if (icon !== newDefaultNotebookIcon) {
+      defaultNotebookIcon.value = icon
+      return
+    }
+    localStorage.setItem('atlas-default-notebook-icon', icon)
+  }, { immediate: true })
   
   function openSettings() {
     isSettingsOpen.value = true
@@ -80,6 +96,7 @@ export const useSettingsStore = defineStore('settings', () => {
     editorLineLength,
     editorLineHeight,
     editorParagraphSpacing,
+    defaultNotebookIcon,
     openSettings,
     closeSettings
   }

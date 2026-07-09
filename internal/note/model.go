@@ -57,6 +57,7 @@ type Notebook struct {
 	ID        string    `json:"id"`
 	ParentID  *string   `json:"parentId"`
 	Name      string    `json:"name"`
+	Icon      string    `json:"icon"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -64,10 +65,12 @@ type Notebook struct {
 type NotebookCreateInput struct {
 	ParentID *string `json:"parentId"`
 	Name     string  `json:"name"`
+	Icon     *string `json:"icon"`
 }
 
 type NotebookUpdateInput struct {
 	ParentID    *string `json:"parentId"`
 	ClearParent *bool   `json:"clearParent"`
 	Name        *string `json:"name"`
+	Icon        *string `json:"icon"`
 }

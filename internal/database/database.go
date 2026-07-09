@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
 	id TEXT PRIMARY KEY,
 	parent_id TEXT,
 	name TEXT NOT NULL,
+	icon TEXT NOT NULL DEFAULT 'default:note',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
@@ -118,12 +119,23 @@ CREATE TABLE IF NOT EXISTS notebooks (
 	id TEXT PRIMARY KEY,
 	parent_id TEXT,
 	name TEXT NOT NULL,
+	icon TEXT NOT NULL DEFAULT 'default:note',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
 	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
 );
 `); err != nil {
 		return fmt.Errorf("ensure notebooks table: %w", err)
+	}
+
+	notebookColumns, err := tableColumns(ctx, db, "notebooks")
+	if err != nil {
+		return err
+	}
+	if !notebookColumns["icon"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE notebooks ADD COLUMN icon TEXT NOT NULL DEFAULT 'default:note'"); err != nil {
+			return fmt.Errorf("add notebooks.icon column: %w", err)
+		}
 	}
 
 	columns, err := tableColumns(ctx, db, "notes")

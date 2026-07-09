@@ -3,14 +3,24 @@ package note
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+const defaultNotebookIcon = "default:note"
+
+var notebookIconPattern = regexp.MustCompile(`^(default|user):[A-Za-z0-9_-]+$`)
 
 func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput) (Notebook, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return Notebook{}, fmt.Errorf("%w: notebook name is required", ErrValidation)
+	}
+
+	icon, err := normalizeNotebookIcon(input.Icon)
+	if err != nil {
+		return Notebook{}, err
 	}
 
 	id, err := newID()
@@ -23,6 +33,7 @@ func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput)
 		ID:        id,
 		ParentID:  input.ParentID,
 		Name:      name,
+		Icon:      icon,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -52,6 +63,14 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 		nb.Name = name
 	}
 
+	if input.Icon != nil {
+		icon, err := normalizeNotebookIcon(input.Icon)
+		if err != nil {
+			return Notebook{}, err
+		}
+		nb.Icon = icon
+	}
+
 	if input.ClearParent != nil && *input.ClearParent {
 		nb.ParentID = nil
 	} else if input.ParentID != nil {
@@ -72,4 +91,20 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 
 func (s *Service) DeleteNotebook(ctx context.Context, id string) error {
 	return s.repository.DeleteNotebook(ctx, id)
+}
+
+func normalizeNotebookIcon(icon *string) (string, error) {
+	if icon == nil {
+		return defaultNotebookIcon, nil
+	}
+
+	value := strings.TrimSpace(*icon)
+	if value == "" {
+		return defaultNotebookIcon, nil
+	}
+	if len(value) > 80 || !notebookIconPattern.MatchString(value) {
+		return "", fmt.Errorf("%w: notebook icon is invalid", ErrValidation)
+	}
+
+	return value, nil
 }

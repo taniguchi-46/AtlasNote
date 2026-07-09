@@ -2,10 +2,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotebooks, createNotebook, updateNotebook, deleteNotebook } from '../api/notebooks'
+import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
 
 export interface NotebookNode extends note.Notebook {
 	children: NotebookNode[]
-	icon?: string
 }
 
 export const useNotebookStore = defineStore('notebooks', () => {
@@ -52,11 +52,12 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		}
 	}
 
-	async function newNotebook(name: string, parentId: string | null = null) {
+	async function newNotebook(name: string, parentId: string | null = null, icon = DEFAULT_NOTEBOOK_ICON) {
 		error.value = null
 		try {
 			const nb = await createNotebook({
 				name,
+				icon,
 				...(parentId ? { parentId } : {}),
 			})
 			if (!notebooks.value) {
@@ -131,11 +132,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
 	}
 
 	async function updateNotebookIcon(id: string, icon: string) {
-		// MVP Mock: Update local state only
-		const index = notebooks.value.findIndex(n => n.id === id)
-		if (index !== -1) {
-			const node = notebooks.value[index] as NotebookNode
-			node.icon = icon
+		error.value = null
+		try {
+			const updated = await updateNotebook(id, { icon })
+			const index = notebooks.value.findIndex(n => n.id === id)
+			if (index !== -1) {
+				notebooks.value[index] = updated
+			}
+		} catch (e) {
+			error.value = e instanceof Error ? e.message : 'ノートブックアイコンの更新に失敗しました'
 		}
 	}
 

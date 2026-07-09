@@ -136,3 +136,54 @@ func TestServiceUpdateCanClearNotebook(t *testing.T) {
 		t.Fatalf("expected notebook id to be cleared, got %v", *updated.NotebookID)
 	}
 }
+
+func TestServiceCreateAndUpdateNotebookIcon(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+
+	service := note.NewService(note.NewRepository(db), store)
+
+	created, err := service.CreateNotebook(ctx, note.NotebookCreateInput{
+		Name: "Project",
+		Icon: ptr("default:calendar"),
+	})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+	if created.Icon != "default:calendar" {
+		t.Fatalf("created icon = %q", created.Icon)
+	}
+
+	updated, err := service.UpdateNotebook(ctx, created.ID, note.NotebookUpdateInput{
+		Icon: ptr("default:pen"),
+	})
+	if err != nil {
+		t.Fatalf("update notebook icon: %v", err)
+	}
+	if updated.Icon != "default:pen" {
+		t.Fatalf("updated icon = %q", updated.Icon)
+	}
+
+	withoutIcon, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Default"})
+	if err != nil {
+		t.Fatalf("create notebook without icon: %v", err)
+	}
+	if withoutIcon.Icon != "default:note" {
+		t.Fatalf("default icon = %q", withoutIcon.Icon)
+	}
+}

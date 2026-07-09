@@ -1,7 +1,5 @@
 <template>
   <aside class="sidebar" aria-label="サイドバー">
-
-    <!-- New Note Button -->
     <button
       id="btn-new-note"
       class="new-note-btn"
@@ -13,7 +11,6 @@
       <span>新規ノート</span>
     </button>
 
-    <!-- Nav Sections -->
     <nav class="sidebar-nav" aria-label="メインナビゲーション">
       <button
         v-for="item in navItems"
@@ -48,25 +45,13 @@
       </button>
     </div>
 
-    <!-- Notebooks Section -->
     <div class="sidebar-notebooks-section">
       <div class="notebooks-header">
         <span>ノートブック</span>
-        <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="startAddRootNotebook">
+        <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="openRootCreateModal">
           <PlusIcon :size="14" />
         </button>
       </div>
-      <input
-        v-if="isAddingRootNotebook"
-        ref="rootNotebookInputRef"
-        v-model="rootNotebookName"
-        class="notebook-rename-input"
-        type="text"
-        placeholder="ノートブック名"
-        @blur="saveRootNotebook"
-        @keydown.enter="saveRootNotebook"
-        @keydown.escape="cancelAddRootNotebook"
-      />
       <div class="notebooks-tree">
         <NotebookTreeItem
           v-for="node in notebookStore.notebookTree"
@@ -76,10 +61,8 @@
       </div>
     </div>
 
-    <!-- Spacer -->
     <div class="sidebar-spacer" />
 
-    <!-- Theme Toggle -->
     <button
       id="btn-theme-toggle"
       class="theme-toggle"
@@ -90,25 +73,28 @@
       <SunIcon v-if="appStore.theme === 'dark'" :size="16" />
       <MoonIcon v-else :size="16" />
     </button>
+
+    <NotebookCreateModal
+      :open="isRootCreateModalOpen"
+      @close="isRootCreateModalOpen = false"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { PlusIcon, FileTextIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import NotebookTreeItem from './NotebookTreeItem.vue'
-import atlasNoteLogo from '../assets/AtlasNote_logo.png'
+import NotebookCreateModal from './NotebookCreateModal.vue'
 import type { SidebarSection } from '../stores/useAppStore'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
-const isAddingRootNotebook = ref(false)
-const rootNotebookName = ref('')
-const rootNotebookInputRef = ref<HTMLInputElement | null>(null)
+const isRootCreateModalOpen = ref(false)
 const trashContextMenu = ref({
   visible: false,
   x: 0,
@@ -194,31 +180,11 @@ async function emptyTrashFromContextMenu() {
 }
 
 function createNewNote() {
-  // If a notebook is selected, associate the new note with it
   noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
 }
 
-function startAddRootNotebook() {
-  isAddingRootNotebook.value = true
-  rootNotebookName.value = ''
-  nextTick(() => {
-    rootNotebookInputRef.value?.focus()
-  })
-}
-
-function saveRootNotebook() {
-  if (!isAddingRootNotebook.value) return
-  const name = rootNotebookName.value.trim()
-  isAddingRootNotebook.value = false
-  rootNotebookName.value = ''
-  if (name) {
-    notebookStore.newNotebook(name)
-  }
-}
-
-function cancelAddRootNotebook() {
-  isAddingRootNotebook.value = false
-  rootNotebookName.value = ''
+function openRootCreateModal() {
+  isRootCreateModalOpen.value = true
 }
 
 onBeforeUnmount(() => {

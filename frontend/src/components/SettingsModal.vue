@@ -41,6 +41,16 @@
               <label>グローバルショートカット</label>
               <p class="setting-desc">（現在開発中...）</p>
             </div>
+            <div class="settings-section">
+              <h4>ノートブック</h4>
+              <div class="setting-group">
+                <label>既定アイコン</label>
+                <NotebookIconPicker
+                  v-model="settingsStore.defaultNotebookIcon"
+                  allow-user-icon-delete
+                />
+              </div>
+            </div>
           </section>
 
           <!-- エディター設定 -->
@@ -143,6 +153,7 @@ import { ref } from 'vue'
 import { XIcon } from '@lucide/vue'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useAppStore } from '../stores/useAppStore'
+import NotebookIconPicker from './NotebookIconPicker.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()

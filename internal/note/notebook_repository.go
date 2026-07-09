@@ -13,8 +13,8 @@ const notebooksTable = "notebooks"
 
 func (r *Repository) CreateNotebook(ctx context.Context, nb Notebook) error {
 	query, args, err := psql.Insert(notebooksTable).
-		Columns("id", "parent_id", "name", "created_at", "updated_at").
-		Values(nb.ID, nb.ParentID, nb.Name, formatTime(nb.CreatedAt), formatTime(nb.UpdatedAt)).
+		Columns("id", "parent_id", "name", "icon", "created_at", "updated_at").
+		Values(nb.ID, nb.ParentID, nb.Name, nb.Icon, formatTime(nb.CreatedAt), formatTime(nb.UpdatedAt)).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build notebook insert: %w", err)
@@ -28,7 +28,7 @@ func (r *Repository) CreateNotebook(ctx context.Context, nb Notebook) error {
 }
 
 func (r *Repository) ListNotebooks(ctx context.Context) ([]Notebook, error) {
-	query, args, err := psql.Select("id", "parent_id", "name", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "parent_id", "name", "icon", "created_at", "updated_at").
 		From(notebooksTable).
 		ToSql()
 	if err != nil {
@@ -46,7 +46,7 @@ func (r *Repository) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 		var nb Notebook
 		var createdAt string
 		var updatedAt string
-		if err := rows.Scan(&nb.ID, &nb.ParentID, &nb.Name, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&nb.ID, &nb.ParentID, &nb.Name, &nb.Icon, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan notebook: %w", err)
 		}
 
@@ -71,7 +71,7 @@ func (r *Repository) ListNotebooks(ctx context.Context) ([]Notebook, error) {
 }
 
 func (r *Repository) GetNotebook(ctx context.Context, id string) (Notebook, error) {
-	query, args, err := psql.Select("id", "parent_id", "name", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "parent_id", "name", "icon", "created_at", "updated_at").
 		From(notebooksTable).
 		Where(sq.Eq{"id": id}).
 		Limit(1).
@@ -87,6 +87,7 @@ func (r *Repository) GetNotebook(ctx context.Context, id string) (Notebook, erro
 		&nb.ID,
 		&nb.ParentID,
 		&nb.Name,
+		&nb.Icon,
 		&createdAt,
 		&updatedAt,
 	)
@@ -113,6 +114,7 @@ func (r *Repository) UpdateNotebook(ctx context.Context, nb Notebook) error {
 	query, args, err := psql.Update(notebooksTable).
 		Set("parent_id", nb.ParentID).
 		Set("name", nb.Name).
+		Set("icon", nb.Icon).
 		Set("updated_at", formatTime(nb.UpdatedAt)).
 		Where(sq.Eq{"id": nb.ID}).
 		ToSql()

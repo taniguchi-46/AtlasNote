@@ -6,22 +6,16 @@
       @click="selectNotebook"
     >
       <div class="icon-wrapper" @click.stop="toggleIconPicker">
-        <component :is="currentIconComponent" :size="14" class="notebook-icon" />
-        
-        <!-- Icon Picker Popover -->
+        <img :src="currentIcon.src" :alt="currentIcon.label" class="notebook-icon" />
+
         <div v-if="isIconPickerOpen" class="icon-picker" @click.stop>
-          <button 
-            v-for="(comp, name) in availableIcons" 
-            :key="name" 
-            class="icon-picker-btn"
-            :class="{ active: node.icon === name }"
-            @click="selectIcon(name as string)"
-          >
-            <component :is="comp" :size="14" />
-          </button>
+          <NotebookIconPicker
+            :model-value="node.icon"
+            @update:model-value="selectIcon"
+          />
         </div>
       </div>
-      
+
       <input
         v-if="isEditing"
         ref="inputRef"
@@ -33,9 +27,8 @@
       />
       <span v-else class="notebook-name">{{ node.name }}</span>
 
-        <!-- Actions -->
       <div class="notebook-actions" @click.stop>
-        <button class="notebook-action-btn" type="button" title="子ノートブックを追加" @click="startAddSubNotebook">
+        <button class="notebook-action-btn" type="button" title="子ノートブックを追加" @click="openChildCreateModal">
           <PlusIcon :size="12" />
         </button>
         <button class="notebook-action-btn" type="button" title="名前を変更" @click="startRename">
@@ -52,19 +45,6 @@
       </div>
     </div>
 
-    <input
-      v-if="isAddingChild"
-      ref="childInputRef"
-      v-model="childName"
-      class="notebook-rename-input child-create-input"
-      type="text"
-      placeholder="子ノートブック名"
-      @blur="saveSubNotebook"
-      @keydown.enter="saveSubNotebook"
-      @keydown.escape="cancelAddSubNotebook"
-    />
-
-    <!-- Children -->
     <div v-if="node.children && node.children.length > 0" class="notebook-children">
       <NotebookTreeItem
         v-for="child in node.children"
@@ -72,17 +52,23 @@
         :node="child"
       />
     </div>
+
+    <NotebookCreateModal
+      :open="isChildCreateModalOpen"
+      :parent-id="node.id"
+      @close="isChildCreateModalOpen = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, computed } from 'vue'
-import { 
-  FolderIcon, PlusIcon, Edit2Icon, Trash2Icon,
-  BookIcon, BookmarkIcon, BriefcaseIcon, CoffeeIcon, GlobeIcon, HeartIcon, LayoutIcon
-} from '@lucide/vue'
+import { computed, nextTick, ref } from 'vue'
+import { PlusIcon, Edit2Icon, Trash2Icon } from '@lucide/vue'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
+import NotebookCreateModal from './NotebookCreateModal.vue'
+import NotebookIconPicker from './NotebookIconPicker.vue'
+import { resolveNotebookIcon } from '../utils/notebookIcons'
 
 const props = defineProps<{
   node: NotebookNode
@@ -94,35 +80,18 @@ const appStore = useAppStore()
 const isEditing = ref(false)
 const editName = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
-const isAddingChild = ref(false)
-const childName = ref('')
-const childInputRef = ref<HTMLInputElement | null>(null)
+const isChildCreateModalOpen = ref(false)
 const isConfirmingDelete = ref(false)
 const isIconPickerOpen = ref(false)
 
-const availableIcons: Record<string, any> = {
-  folder: FolderIcon,
-  book: BookIcon,
-  bookmark: BookmarkIcon,
-  briefcase: BriefcaseIcon,
-  coffee: CoffeeIcon,
-  globe: GlobeIcon,
-  heart: HeartIcon,
-  layout: LayoutIcon
-}
-
-const currentIconComponent = computed(() => {
-  return props.node.icon && availableIcons[props.node.icon] 
-    ? availableIcons[props.node.icon] 
-    : FolderIcon
-})
+const currentIcon = computed(() => resolveNotebookIcon(props.node.icon))
 
 function toggleIconPicker() {
   isIconPickerOpen.value = !isIconPickerOpen.value
 }
 
-function selectIcon(iconName: string) {
-  notebookStore.updateNotebookIcon(props.node.id, iconName)
+async function selectIcon(iconName: string) {
+  await notebookStore.updateNotebookIcon(props.node.id, iconName)
   isIconPickerOpen.value = false
 }
 
@@ -131,27 +100,8 @@ function selectNotebook() {
   appStore.setSidebarSection('notes')
 }
 
-function startAddSubNotebook() {
-  isAddingChild.value = true
-  childName.value = ''
-  nextTick(() => {
-    childInputRef.value?.focus()
-  })
-}
-
-function saveSubNotebook() {
-  if (!isAddingChild.value) return
-  const trimmed = childName.value.trim()
-  isAddingChild.value = false
-  childName.value = ''
-  if (trimmed) {
-    notebookStore.newNotebook(trimmed, props.node.id)
-  }
-}
-
-function cancelAddSubNotebook() {
-  isAddingChild.value = false
-  childName.value = ''
+function openChildCreateModal() {
+  isChildCreateModalOpen.value = true
 }
 
 function startRename() {
@@ -183,3 +133,34 @@ function deleteSelf() {
   }, 3000)
 }
 </script>
+
+<style scoped>
+.icon-wrapper {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.notebook-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.icon-picker {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 100;
+  width: 260px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-editor);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+</style>
