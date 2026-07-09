@@ -23,7 +23,10 @@
         v-for="note in displayedNotes"
         :key="note.id"
         class="note-item"
-        :class="{ 'is-active': noteStore.activeNote?.id === note.id }"
+        :class="{
+          'is-active': noteStore.activeNote?.id === note.id,
+          'is-selected': selectedNoteIds.has(note.id),
+        }"
         role="listitem"
         @contextmenu.prevent="showContextMenu($event, note)"
       >
@@ -31,7 +34,7 @@
           :id="`note-item-${note.id}`"
           class="note-item-btn"
           type="button"
-          @click="noteStore.selectNote(note.id)"
+          @click="handleNoteClick($event, note)"
         >
           <!-- Icons row -->
           <div class="note-item-meta">
@@ -49,16 +52,48 @@
       v-if="contextMenu.visible" 
       class="context-menu" 
       :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
+      @click.stop
     >
+      <div v-if="contextMenu.targetIds.length > 1" class="context-menu-label">
+        {{ contextMenu.targetIds.length }}件を選択中
+      </div>
       <template v-if="!contextMenu.isTrashed">
-        <button class="context-menu-item" @click="handleContextAction('favorite')">
-          <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
-          {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
-        </button>
-        <button class="context-menu-item" @click="handleContextAction('pin')">
-          <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
-          {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
-        </button>
+        <template v-if="contextMenu.targetIds.length === 1">
+          <button class="context-menu-item" @click="handleContextAction('favorite')">
+            <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
+            {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
+          </button>
+          <button class="context-menu-item" @click="handleContextAction('pin')">
+            <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
+            {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
+          </button>
+          <div class="context-menu-divider"></div>
+        </template>
+        <div class="context-menu-submenu">
+          <button class="context-menu-item" type="button">
+            <FolderInputIcon :size="14" class="mr-2" />
+            ノートブックへ移動
+            <ChevronRightIcon :size="14" class="context-menu-chevron" />
+          </button>
+          <div class="context-submenu-panel">
+            <button
+              class="context-menu-item"
+              type="button"
+              @click="handleMoveToNotebook(null)"
+            >
+              未分類
+            </button>
+            <button
+              v-for="notebook in notebookOptions"
+              :key="notebook.id"
+              class="context-menu-item"
+              type="button"
+              @click="handleMoveToNotebook(notebook.id)"
+            >
+              {{ notebook.label }}
+            </button>
+          </div>
+        </div>
         <div class="context-menu-divider"></div>
         <button class="context-menu-item danger" @click="handleContextAction('trash')">
           <Trash2Icon :size="14" class="mr-2" />
@@ -81,7 +116,16 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { FileTextIcon, StarIcon, PinIcon, Trash2Icon, RotateCcwIcon } from '@lucide/vue'
+import {
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderInputIcon,
+  StarIcon,
+  PinIcon,
+  Trash2Icon,
+  RotateCcwIcon,
+} from '@lucide/vue'
+import type { note } from '../../wailsjs/go/models'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
@@ -89,23 +133,62 @@ import { useNotebookStore } from '../stores/useNotebookStore'
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
+const selectedNoteIds = ref<Set<string>>(new Set())
+const lastSelectedNoteId = ref<string | null>(null)
 
 const contextMenu = ref({
   visible: false,
   x: 0,
   y: 0,
   noteId: '',
+  targetIds: [] as string[],
   isTrashed: false,
   isFavorite: false,
   isPinned: false,
 })
 
-function showContextMenu(event: MouseEvent, note: any) {
+function handleNoteClick(event: MouseEvent, note: note.Summary) {
+  if (event.shiftKey) {
+    toggleNoteSelection(note.id)
+    return
+  }
+
+  selectedNoteIds.value = new Set()
+  lastSelectedNoteId.value = note.id
+  noteStore.selectNote(note.id)
+}
+
+function toggleNoteSelection(noteId: string) {
+  const nextSelectedIds = new Set(selectedNoteIds.value)
+
+  if (nextSelectedIds.has(noteId)) {
+    nextSelectedIds.delete(noteId)
+    selectedNoteIds.value = nextSelectedIds
+    return
+  }
+
+  nextSelectedIds.add(noteId)
+  selectedNoteIds.value = nextSelectedIds
+  lastSelectedNoteId.value = noteId
+}
+
+function showContextMenu(event: MouseEvent, note: note.Summary) {
+  const displayedIds = new Set(displayedNotes.value.map(n => n.id))
+  const targetIds = selectedNoteIds.value.has(note.id)
+    ? Array.from(selectedNoteIds.value).filter(id => displayedIds.has(id))
+    : [note.id]
+
+  if (!selectedNoteIds.value.has(note.id)) {
+    selectedNoteIds.value = new Set([note.id])
+    lastSelectedNoteId.value = note.id
+  }
+
   contextMenu.value = {
     visible: true,
     x: event.clientX,
     y: event.clientY,
     noteId: note.id,
+    targetIds,
     isTrashed: note.isTrashed,
     isFavorite: note.isFavorite,
     isPinned: note.isPinned,
@@ -120,28 +203,49 @@ function closeContextMenu() {
   document.removeEventListener('click', closeContextMenu)
 }
 
-function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'restore' | 'delete') {
+async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'restore' | 'delete') {
   const id = contextMenu.value.noteId
   if (!id) return
+  const targetIds = contextMenu.value.targetIds.length > 0 ? contextMenu.value.targetIds : [id]
   
   switch (action) {
     case 'favorite':
-      noteStore.toggleFavorite(id)
+      await noteStore.toggleFavorite(id)
       break
     case 'pin':
-      noteStore.togglePinned(id)
+      await noteStore.togglePinned(id)
       break
     case 'trash':
-      noteStore.trashNote(id)
+      await noteStore.trashNotes(targetIds)
+      clearSelectedNotes(targetIds)
       break
     case 'restore':
-      noteStore.restoreNote(id)
+      await noteStore.restoreNotes(targetIds)
+      clearSelectedNotes(targetIds)
       break
     case 'delete':
-      noteStore.permanentlyDeleteNote(id)
+      await noteStore.permanentlyDeleteNotes(targetIds)
+      clearSelectedNotes(targetIds)
       break
   }
   closeContextMenu()
+}
+
+async function handleMoveToNotebook(notebookId: string | null) {
+  const targetIds = contextMenu.value.targetIds
+  if (targetIds.length === 0) return
+
+  await noteStore.moveNotesToNotebook(targetIds, notebookId)
+  clearSelectedNotes(targetIds)
+  closeContextMenu()
+}
+
+function clearSelectedNotes(ids: string[]) {
+  const idSet = new Set(ids)
+  selectedNoteIds.value = new Set(Array.from(selectedNoteIds.value).filter(id => !idSet.has(id)))
+  if (lastSelectedNoteId.value && idSet.has(lastSelectedNoteId.value)) {
+    lastSelectedNoteId.value = null
+  }
 }
 
 const sectionTitle = computed(() => {
@@ -158,7 +262,7 @@ const sectionTitle = computed(() => {
 })
 
 const displayedNotes = computed(() => {
-  let list = []
+  let list: note.Summary[] = []
   switch (appStore.sidebarSection) {
     case 'favorites': list = noteStore.favoriteNotes; break
     case 'pinned': list = noteStore.pinnedNotes; break
@@ -169,6 +273,24 @@ const displayedNotes = computed(() => {
     list = list.filter(n => n.notebookId === notebookStore.activeNotebookId)
   }
   return list
+})
+
+const notebookOptions = computed(() => {
+  const depthById = new Map<string, number>()
+  const getDepth = (notebook: note.Notebook): number => {
+    if (!notebook.parentId) return 0
+    if (depthById.has(notebook.id)) return depthById.get(notebook.id) ?? 0
+
+    const parent = notebookStore.notebooks.find(n => n.id === notebook.parentId)
+    const depth = parent ? getDepth(parent) + 1 : 0
+    depthById.set(notebook.id, depth)
+    return depth
+  }
+
+  return notebookStore.notebooks.map(notebook => ({
+    id: notebook.id,
+    label: `${'  '.repeat(getDepth(notebook))}${notebook.name}`,
+  }))
 })
 
 function formatDate(iso: string): string {
@@ -231,5 +353,51 @@ function formatDate(iso: string): string {
 
 .filled {
   fill: currentColor;
+}
+
+.note-item.is-selected {
+  background: var(--bg-active);
+  outline: 1px solid var(--border-strong);
+}
+
+.note-item.is-selected .note-item-title {
+  color: var(--text-active);
+}
+
+.context-menu-label {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.context-menu-submenu {
+  position: relative;
+}
+
+.context-menu-submenu:hover .context-submenu-panel,
+.context-menu-submenu:focus-within .context-submenu-panel {
+  display: block;
+}
+
+.context-menu-chevron {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.context-submenu-panel {
+  display: none;
+  position: absolute;
+  top: -4px;
+  left: 100%;
+  z-index: 10000;
+  min-width: 180px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 </style>

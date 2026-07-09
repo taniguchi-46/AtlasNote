@@ -17,6 +17,19 @@ function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   return markers[firstLineStyle]
 }
 
+function toSummary(updated: note.Note): note.Summary {
+  return {
+    id: updated.id,
+    notebookId: updated.notebookId,
+    title: updated.title,
+    isFavorite: updated.isFavorite,
+    isPinned: updated.isPinned,
+    isTrashed: updated.isTrashed,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+  } as note.Summary
+}
+
 export const useNoteStore = defineStore('notes', () => {
   // State
   const summaries = ref<note.Summary[]>([])
@@ -84,16 +97,7 @@ export const useNoteStore = defineStore('notes', () => {
       if (!summaries.value) {
         summaries.value = []
       }
-      summaries.value.unshift({
-        id: created.id,
-        notebookId: created.notebookId,
-        title: created.title,
-        isFavorite: created.isFavorite,
-        isPinned: created.isPinned,
-        isTrashed: created.isTrashed,
-        createdAt: created.createdAt,
-        updatedAt: created.updatedAt,
-      } as note.Summary)
+      summaries.value.unshift(toSummary(created))
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
     } catch (e) {
@@ -113,16 +117,7 @@ export const useNoteStore = defineStore('notes', () => {
       }
       const idx = summaries.value.findIndex((n: note.Summary) => n.id === id)
       if (idx !== -1) {
-        summaries.value[idx] = {
-          id: updated.id,
-          notebookId: updated.notebookId,
-          title: updated.title,
-          isFavorite: updated.isFavorite,
-          isPinned: updated.isPinned,
-          isTrashed: updated.isTrashed,
-          createdAt: updated.createdAt,
-          updatedAt: updated.updatedAt,
-        } as note.Summary
+        summaries.value[idx] = toSummary(updated)
       }
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
@@ -139,6 +134,45 @@ export const useNoteStore = defineStore('notes', () => {
     await saveNote(id, { isTrashed: false })
   }
 
+  async function updateNotes(ids: string[], input: note.UpdateInput) {
+    if (ids.length === 0) return
+
+    isSaving.value = true
+    error.value = null
+    try {
+      for (const id of ids) {
+        const updated = await updateNote(id, input)
+        if (activeNote.value?.id === id) {
+          activeNote.value = updated
+        }
+        const idx = summaries.value.findIndex((n: note.Summary) => n.id === id)
+        if (idx !== -1) {
+          summaries.value[idx] = toSummary(updated)
+        }
+      }
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
+      throw e
+    } finally {
+      isSaving.value = false
+    }
+  }
+
+  async function trashNotes(ids: string[]) {
+    await updateNotes(ids, { isTrashed: true })
+  }
+
+  async function restoreNotes(ids: string[]) {
+    await updateNotes(ids, { isTrashed: false })
+  }
+
+  async function moveNotesToNotebook(ids: string[], notebookId: string | null) {
+    await updateNotes(
+      ids,
+      notebookId ? { notebookId } : ({ clearNotebook: true } as note.UpdateInput),
+    )
+  }
+
   async function permanentlyDeleteNote(id: string) {
     error.value = null
     try {
@@ -147,6 +181,28 @@ export const useNoteStore = defineStore('notes', () => {
       if (activeNote.value?.id === id) activeNote.value = null
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの削除に失敗しました'
+    }
+  }
+
+  async function permanentlyDeleteNotes(ids: string[]) {
+    if (ids.length === 0) return
+
+    isSaving.value = true
+    error.value = null
+    try {
+      for (const id of ids) {
+        await deleteNote(id)
+      }
+      const idSet = new Set(ids)
+      summaries.value = summaries.value.filter((n: note.Summary) => !idSet.has(n.id))
+      if (activeNote.value && idSet.has(activeNote.value.id)) {
+        activeNote.value = null
+      }
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'
+      throw e
+    } finally {
+      isSaving.value = false
     }
   }
 
@@ -179,7 +235,11 @@ export const useNoteStore = defineStore('notes', () => {
     saveNote,
     trashNote,
     restoreNote,
+    trashNotes,
+    restoreNotes,
+    moveNotesToNotebook,
     permanentlyDeleteNote,
+    permanentlyDeleteNotes,
     toggleFavorite,
     togglePinned,
   }
