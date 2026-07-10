@@ -4,6 +4,12 @@ import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIco
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 
+export const SIDEBAR_WIDTH_MIN = 180
+export const SIDEBAR_WIDTH_MAX = 360
+export const NOTE_LIST_WIDTH_MIN = 220
+export const NOTE_LIST_WIDTH_MAX = 480
+export const EDITOR_WIDTH_MIN = 360
+
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26] as const
 const FIRST_LINE_STYLE_OPTIONS: EditorFirstLineStyle[] = ['heading1', 'heading2', 'heading3', 'paragraph']
 
@@ -24,6 +30,14 @@ function readStringOption<T extends readonly string[]>(key: string, fallback: T[
 
 export const useSettingsStore = defineStore('settings', () => {
   const isSettingsOpen = ref(false)
+
+  // Layout Settings
+  const sidebarWidth = ref(
+    readNumberInRange('atlas-sidebar-width', 220, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX),
+  )
+  const noteListWidth = ref(
+    readNumberInRange('atlas-note-list-width', 280, NOTE_LIST_WIDTH_MIN, NOTE_LIST_WIDTH_MAX),
+  )
   
   // Editor Settings
   const fontFamily = ref(localStorage.getItem('atlas-font-family') ?? 'Meiryo')
@@ -38,6 +52,14 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultNotebookIcon = ref(
     isKnownNotebookIcon(savedDefaultNotebookIcon) ? savedDefaultNotebookIcon : DEFAULT_NOTEBOOK_ICON,
   )
+
+  watch(sidebarWidth, (newSidebarWidth) => {
+    localStorage.setItem('atlas-sidebar-width', String(newSidebarWidth))
+  }, { immediate: true })
+
+  watch(noteListWidth, (newNoteListWidth) => {
+    localStorage.setItem('atlas-note-list-width', String(newNoteListWidth))
+  }, { immediate: true })
   
   watch(fontFamily, (newFont) => {
     localStorage.setItem('atlas-font-family', newFont)
@@ -88,8 +110,18 @@ export const useSettingsStore = defineStore('settings', () => {
     isSettingsOpen.value = false
   }
 
+  function setSidebarWidth(width: number) {
+    sidebarWidth.value = Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
+  }
+
+  function setNoteListWidth(width: number) {
+    noteListWidth.value = Math.min(NOTE_LIST_WIDTH_MAX, Math.max(NOTE_LIST_WIDTH_MIN, Math.round(width)))
+  }
+
   return {
     isSettingsOpen,
+    sidebarWidth,
+    noteListWidth,
     fontFamily,
     editorFontSize,
     editorFirstLineStyle,
@@ -98,6 +130,8 @@ export const useSettingsStore = defineStore('settings', () => {
     editorParagraphSpacing,
     defaultNotebookIcon,
     openSettings,
-    closeSettings
+    closeSettings,
+    setSidebarWidth,
+    setNoteListWidth,
   }
 })
