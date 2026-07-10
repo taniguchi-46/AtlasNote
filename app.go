@@ -8,6 +8,7 @@ import (
 
 	"atlasnote/internal/config"
 	"atlasnote/internal/database"
+	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
 
@@ -17,6 +18,7 @@ import (
 type App struct {
 	ctx            context.Context
 	db             *sql.DB
+	dataLock       *datalock.Lock
 	notes          *note.Service
 	dataDir        string
 	startupErr     error
@@ -44,6 +46,11 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	if a.db != nil {
 		_ = a.db.Close()
+		a.db = nil
+	}
+	if a.dataLock != nil {
+		_ = a.dataLock.Release()
+		a.dataLock = nil
 	}
 }
 
@@ -166,9 +173,17 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 	a.dataDir = paths.DataDir
+	dataLock, err := datalock.Acquire(paths.LockPath)
+	if err != nil {
+		a.startupErr = err
+		return
+	}
+	a.dataLock = dataLock
 
 	db, err := database.Open(ctx, paths.DatabasePath)
 	if err != nil {
+		_ = a.dataLock.Release()
+		a.dataLock = nil
 		a.startupErr = err
 		return
 	}
@@ -176,6 +191,8 @@ func (a *App) initialize(ctx context.Context) {
 	store, err := storage.NewMarkdownStore(paths.NotesDir)
 	if err != nil {
 		_ = db.Close()
+		_ = a.dataLock.Release()
+		a.dataLock = nil
 		a.startupErr = err
 		return
 	}
@@ -183,6 +200,8 @@ func (a *App) initialize(ctx context.Context) {
 	service := note.NewService(note.NewRepository(db), store)
 	if err := service.Recover(ctx); err != nil {
 		_ = db.Close()
+		_ = a.dataLock.Release()
+		a.dataLock = nil
 		a.startupErr = err
 		return
 	}

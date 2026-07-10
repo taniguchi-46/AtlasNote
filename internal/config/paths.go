@@ -11,6 +11,7 @@ type Paths struct {
 	DataDir      string
 	DatabasePath string
 	NotesDir     string
+	LockPath     string
 }
 
 func LoadPaths() (Paths, error) {
@@ -29,5 +30,6 @@ func LoadPaths() (Paths, error) {
 		DataDir:      dataDir,
 		DatabasePath: filepath.Join(dataDir, "atlasnote.db"),
 		NotesDir:     filepath.Join(dataDir, "notes"),
+		LockPath:     filepath.Join(dataDir, "atlasnote.lock"),
 	}, nil
 }
