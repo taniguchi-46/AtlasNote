@@ -48,6 +48,13 @@
 
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中...</span>
+          <span
+            v-else-if="saveFailed"
+            class="save-error-indicator"
+            role="status"
+          >
+            保存失敗
+          </span>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
           <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
@@ -345,6 +352,7 @@ import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
+import type { note } from '../api/notes'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -360,6 +368,7 @@ const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
+const saveFailed = ref(false)
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
@@ -369,6 +378,8 @@ const editorStateVersion = ref(0)
 const markdownSelectionVersion = ref(0)
 let lastMarkdownSelection = { start: 0, end: 0 }
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
+let saveRequestId = 0
 let activeNoteId: string | null = null
 
 const editor = new Editor({
@@ -440,6 +451,7 @@ watch(
         : note.title
 
     if (noteChanged) {
+      resetSaveFeedback()
       localMarkdown.value = note.content
       isRichDirty.value = false
       if (editMode.value === 'wysiwyg') {
@@ -465,6 +477,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  if (savedMessageTimer) {
+    clearTimeout(savedMessageTimer)
+  }
   editor.destroy()
 })
 
@@ -496,9 +511,7 @@ function handleTitleSave() {
   if (isWaitingForFirstLineTitle.value && localTitle.value.trim() === '') return
   if (localTitle.value === noteStore.activeNote.title) return
 
-  noteStore
-    .saveNote(noteStore.activeNote.id, { title: localTitle.value })
-    .then(() => showSaved())
+  void saveEditorNote(noteStore.activeNote.id, { title: localTitle.value })
 }
 
 function disableAutoTitleFromContent() {
@@ -1107,13 +1120,26 @@ function scheduleAutoSave(content: string) {
   autoSaveTimer = setTimeout(() => {
     if (!noteStore.activeNote) return
 
-    noteStore
-      .saveNote(noteStore.activeNote.id, {
-        title: getSavableTitle(),
-        content,
-      })
-      .then(() => showSaved())
+    void saveEditorNote(noteStore.activeNote.id, {
+      title: getSavableTitle(),
+      content,
+    })
   }, 1000)
+}
+
+async function saveEditorNote(id: string, input: note.UpdateInput) {
+  const requestId = ++saveRequestId
+  resetSaveFeedback(false)
+
+  const saved = await noteStore.saveNote(id, input)
+  if (requestId !== saveRequestId) return
+
+  if (saved) {
+    showSaved()
+    return
+  }
+
+  saveFailed.value = true
 }
 
 function getSavableTitle() {
@@ -1124,10 +1150,24 @@ function getSavableTitle() {
 }
 
 function showSaved() {
+  saveFailed.value = false
   savedMessage.value = true
-  setTimeout(() => {
+  savedMessageTimer = setTimeout(() => {
     savedMessage.value = false
+    savedMessageTimer = null
   }, 2000)
+}
+
+function resetSaveFeedback(invalidatePendingRequest = true) {
+  if (invalidatePendingRequest) {
+    saveRequestId += 1
+  }
+  if (savedMessageTimer) {
+    clearTimeout(savedMessageTimer)
+    savedMessageTimer = null
+  }
+  savedMessage.value = false
+  saveFailed.value = false
 }
 
 function formatDate(iso: string): string {

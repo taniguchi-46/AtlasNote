@@ -119,8 +119,10 @@ export const useNoteStore = defineStore('notes', () => {
       if (idx !== -1) {
         summaries.value[idx] = toSummary(updated)
       }
+      return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
+      return false
     } finally {
       isSaving.value = false
     }

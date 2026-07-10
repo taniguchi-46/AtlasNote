@@ -607,6 +607,12 @@ body.is-pane-resizing * {
   padding: 0 8px;
 }
 
+.save-error-indicator {
+  font-size: 11px;
+  color: var(--color-danger);
+  padding: 0 8px;
+}
+
 .icon-btn {
   display: grid;
   place-items: center;
