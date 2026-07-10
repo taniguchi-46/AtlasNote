@@ -1,14 +1,13 @@
 <template>
   <aside class="sidebar" aria-label="サイドバー">
     <button
-      id="btn-new-note"
+      id="btn-new-notebook"
       class="new-note-btn"
       type="button"
-      :disabled="noteStore.isSaving"
-      @click="createNewNote"
+      @click="openRootCreateModal"
     >
-      <PlusIcon :size="16" />
-      <span>新規ノート</span>
+      <span>ノートブック</span>
+      <PlusIcon :size="16" class="new-note-btn-icon" />
     </button>
 
     <nav class="sidebar-nav" aria-label="メインナビゲーション">
@@ -179,10 +178,6 @@ async function emptyTrashFromContextMenu() {
   closeTrashContextMenu()
 }
 
-function createNewNote() {
-  noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
-}
-
 function openRootCreateModal() {
   isRootCreateModalOpen.value = true
 }
@@ -236,5 +231,10 @@ onBeforeUnmount(() => {
 
 .mr-2 {
   margin-right: 8px;
+}
+
+.new-note-btn-icon {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 </style>

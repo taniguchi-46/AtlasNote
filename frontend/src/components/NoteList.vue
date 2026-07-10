@@ -1,5 +1,18 @@
 <template>
   <section class="note-list-pane" aria-label="ノート一覧">
+    <div class="note-list-action-bar">
+      <button
+        id="btn-new-note"
+        class="note-list-new-note-btn"
+        type="button"
+        :disabled="noteStore.isSaving"
+        @click="createNewNote"
+      >
+        <PlusIcon :size="15" />
+        <span>新しいノート</span>
+      </button>
+    </div>
+
     <!-- Header -->
     <div class="note-list-header">
       <h2 class="note-list-title">{{ sectionTitle }}</h2>
@@ -129,6 +142,7 @@ import {
   ChevronRightIcon,
   FileTextIcon,
   FolderInputIcon,
+  PlusIcon,
   StarIcon,
   PinIcon,
   Trash2Icon,
@@ -271,6 +285,10 @@ async function emptyTrash() {
   lastSelectedNoteId.value = null
 }
 
+function createNewNote() {
+  noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
+}
+
 const isTrashSection = computed(() =>
   appStore.sidebarSection === 'trash' && !notebookStore.activeNotebookId
 )
@@ -332,6 +350,38 @@ function formatDate(iso: string): string {
 </script>
 
 <style scoped>
+.note-list-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.note-list-new-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.15s, opacity 0.12s;
+}
+
+.note-list-new-note-btn:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+
+.note-list-new-note-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .context-menu {
   position: fixed;
   z-index: 9999;
