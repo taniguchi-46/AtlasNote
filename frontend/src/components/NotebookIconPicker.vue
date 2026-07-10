@@ -1,20 +1,23 @@
 <template>
   <div class="notebook-icon-picker">
-    <div class="notebook-icon-grid" aria-label="ノートブックアイコン">
+    <RadioGroupRoot
+      v-model="selectedIcon"
+      class="notebook-icon-grid"
+      aria-label="ノートブックアイコン"
+    >
       <div
         v-for="icon in icons"
         :key="icon.id"
         class="notebook-icon-option-wrapper"
       >
-        <button
+        <RadioGroupItem
           class="notebook-icon-option"
-          :class="{ 'is-selected': modelValue === icon.id }"
-          type="button"
+          :value="icon.id"
+          :aria-label="icon.label"
           :title="icon.label"
-          @click="$emit('update:modelValue', icon.id)"
         >
           <img :src="icon.src" :alt="icon.label" />
-        </button>
+        </RadioGroupItem>
         <button
           v-if="allowUserIconDelete && icon.source === 'user'"
           class="notebook-icon-delete-btn"
@@ -25,7 +28,7 @@
           &times;
         </button>
       </div>
-    </div>
+    </RadioGroupRoot>
 
     <div class="notebook-user-icon-row">
       <input
@@ -45,6 +48,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
 import {
   DEFAULT_NOTEBOOK_ICON,
   USER_ICON_ACCEPT,
@@ -67,6 +71,10 @@ const emit = defineEmits<{
 const version = ref(0)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const error = ref('')
+const selectedIcon = computed({
+  get: () => props.modelValue,
+  set: (value: string) => emit('update:modelValue', value),
+})
 const icons = computed(() => {
   version.value
   return getNotebookIconOptions()
@@ -163,7 +171,7 @@ function deleteUserIcon(iconId: string) {
   background: var(--bg-hover);
 }
 
-.notebook-icon-option.is-selected {
+.notebook-icon-option[data-state='checked'] {
   border-color: var(--brand-primary);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
 }

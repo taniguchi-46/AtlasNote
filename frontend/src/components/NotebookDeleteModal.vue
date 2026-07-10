@@ -1,17 +1,22 @@
 <template>
-  <div v-if="open" class="notebook-delete-overlay" @click.self="cancel">
-    <form class="notebook-delete-modal" @submit.prevent="confirm">
+  <AlertDialogRoot :open="open" @update:open="handleOpenChange">
+    <AlertDialogPortal>
+      <AlertDialogOverlay class="notebook-delete-overlay" />
+      <AlertDialogContent as-child>
+        <form class="notebook-delete-modal" @submit.prevent="confirm">
       <header class="notebook-delete-header">
-        <h2>ノートブックを削除</h2>
-        <button class="icon-btn" type="button" title="閉じる" :disabled="isDeleting" @click="cancel">
-          <XIcon :size="18" />
-        </button>
+        <AlertDialogTitle as="h2">ノートブックを削除</AlertDialogTitle>
+        <AlertDialogCancel as-child>
+          <button class="icon-btn" type="button" title="閉じる" :disabled="isDeleting">
+            <XIcon :size="18" />
+          </button>
+        </AlertDialogCancel>
       </header>
 
       <div class="notebook-delete-body">
-        <p class="notebook-delete-message">
+        <AlertDialogDescription class="notebook-delete-message">
           「{{ notebookName }}」を削除します。ノートの扱いを選択してください。
-        </p>
+        </AlertDialogDescription>
 
         <label class="notebook-delete-option">
           <input
@@ -37,20 +42,33 @@
       </div>
 
       <footer class="notebook-delete-footer">
-        <button class="secondary-btn" type="button" :disabled="isDeleting" @click="cancel">
-          キャンセル
-        </button>
+        <AlertDialogCancel as-child>
+          <button class="secondary-btn" type="button" :disabled="isDeleting">
+            キャンセル
+          </button>
+        </AlertDialogCancel>
         <button class="danger-btn" type="submit" :disabled="isDeleting">
           削除
         </button>
       </footer>
-    </form>
-  </div>
+        </form>
+      </AlertDialogContent>
+    </AlertDialogPortal>
+  </AlertDialogRoot>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { XIcon } from '@lucide/vue'
+import {
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogOverlay,
+  AlertDialogPortal,
+  AlertDialogRoot,
+  AlertDialogTitle,
+} from 'reka-ui'
 import type { NotebookDeleteMode } from '../api/notebooks'
 
 const props = defineProps<{
@@ -78,6 +96,10 @@ function cancel() {
   emit('cancel')
 }
 
+function handleOpenChange(open: boolean) {
+  if (!open) cancel()
+}
+
 function confirm() {
   emit('confirm', selectedMode.value)
 }
@@ -88,13 +110,15 @@ function confirm() {
   position: fixed;
   inset: 0;
   z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: rgba(0, 0, 0, 0.5);
 }
 
 .notebook-delete-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1101;
+  transform: translate(-50%, -50%);
   width: min(460px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   display: flex;

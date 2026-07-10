@@ -5,16 +5,27 @@
       :class="{ 'is-active': notebookStore.activeNotebookId === node.id }"
       @click="selectNotebook"
     >
-      <div class="icon-wrapper" @click.stop="toggleIconPicker">
-        <img :src="currentIcon.src" :alt="currentIcon.label" class="notebook-icon" />
-
-        <div v-if="isIconPickerOpen" class="icon-picker" @click.stop>
-          <NotebookIconPicker
-            :model-value="node.icon"
-            @update:model-value="selectIcon"
-          />
-        </div>
-      </div>
+      <PopoverRoot v-model:open="isIconPickerOpen">
+        <PopoverTrigger as-child>
+          <button class="icon-wrapper" type="button" title="アイコンを変更" @click.stop>
+            <img :src="currentIcon.src" :alt="currentIcon.label" class="notebook-icon" />
+          </button>
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            class="icon-picker"
+            side="right"
+            align="start"
+            :side-offset="6"
+            @click.stop
+          >
+            <NotebookIconPicker
+              :model-value="node.icon"
+              @update:model-value="selectIcon"
+            />
+          </PopoverContent>
+        </PopoverPortal>
+      </PopoverRoot>
 
       <input
         v-if="isEditing"
@@ -72,7 +83,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { PlusIcon, Edit2Icon, Trash2Icon } from '@lucide/vue'
+import { Edit2Icon, PlusIcon, Trash2Icon } from '@lucide/vue'
+import {
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
+} from 'reka-ui'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
 import type { NotebookDeleteMode } from '../api/notebooks'
@@ -98,10 +115,6 @@ const deleteError = ref('')
 const isIconPickerOpen = ref(false)
 
 const currentIcon = computed(() => resolveNotebookIcon(props.node.icon))
-
-function toggleIconPicker() {
-  isIconPickerOpen.value = !isIconPickerOpen.value
-}
 
 async function selectIcon(iconName: string) {
   await notebookStore.updateNotebookIcon(props.node.id, iconName)
@@ -167,6 +180,10 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .notebook-icon {
@@ -177,10 +194,7 @@ async function deleteSelf(mode: NotebookDeleteMode) {
 }
 
 .icon-picker {
-  position: absolute;
-  top: 28px;
-  left: 0;
-  z-index: 100;
+  z-index: 1200;
   width: 260px;
   padding: 10px;
   border: 1px solid var(--border);
@@ -188,4 +202,5 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   background: var(--bg-editor);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
 }
+
 </style>

@@ -1,29 +1,39 @@
 <template>
-  <div v-if="settingsStore.isSettingsOpen" class="settings-modal-overlay" @click.self="settingsStore.closeSettings">
-    <div class="settings-modal-content">
+  <DialogRoot
+    :open="settingsStore.isSettingsOpen"
+    @update:open="handleOpenChange"
+  >
+    <DialogPortal>
+      <DialogOverlay class="settings-modal-overlay" />
+      <DialogContent class="settings-modal-content">
+        <VisuallyHidden>
+          <DialogDescription>アプリケーション設定を変更します</DialogDescription>
+        </VisuallyHidden>
       <header class="settings-header">
-        <h2>設定</h2>
-        <button class="icon-btn close-btn" title="閉じる" @click="settingsStore.closeSettings">
-          <XIcon :size="20" />
-        </button>
+        <DialogTitle as="h2">設定</DialogTitle>
+        <DialogClose as-child>
+          <button class="icon-btn close-btn" title="閉じる" type="button">
+            <XIcon :size="20" />
+          </button>
+        </DialogClose>
       </header>
 
-      <div class="settings-body">
-        <aside class="settings-sidebar">
-          <button 
+      <TabsRoot v-model="activeTab" class="settings-body">
+        <TabsList class="settings-sidebar" aria-label="設定カテゴリー">
+          <TabsTrigger
             v-for="tab in tabs" 
             :key="tab.id"
+            :value="tab.id"
             class="settings-tab"
-            :class="{ active: activeTab === tab.id }"
-            @click="activeTab = tab.id"
           >
             {{ tab.name }}
-          </button>
-        </aside>
+          </TabsTrigger>
+        </TabsList>
 
         <main class="settings-panel">
           <!-- テーマ設定 -->
-          <section v-if="activeTab === 'theme'">
+          <TabsContent value="theme" as-child>
+            <section>
             <h3>テーマ</h3>
             <div class="setting-group">
               <label>アプリケーションテーマ</label>
@@ -32,10 +42,12 @@
                 <option value="dark">ダーク</option>
               </select>
             </div>
-          </section>
+            </section>
+          </TabsContent>
 
           <!-- 一般設定 -->
-          <section v-if="activeTab === 'general'">
+          <TabsContent value="general" as-child>
+            <section>
             <h3>一般</h3>
             <div class="setting-group">
               <label>グローバルショートカット</label>
@@ -51,10 +63,12 @@
                 />
               </div>
             </div>
-          </section>
+            </section>
+          </TabsContent>
 
           <!-- エディター設定 -->
-          <section v-if="activeTab === 'editor'">
+          <TabsContent value="editor" as-child>
+            <section>
             <h3>エディター</h3>
             <div class="settings-section">
               <h4>タイポグラフィ</h4>
@@ -128,10 +142,12 @@
                 />
               </div>
             </div>
-          </section>
+            </section>
+          </TabsContent>
 
           <!-- バックアップ設定 -->
-          <section v-if="activeTab === 'backup'">
+          <TabsContent value="backup" as-child>
+            <section>
             <h3>バックアップ</h3>
             <div class="setting-group">
               <label>自動バックアップ</label>
@@ -141,16 +157,32 @@
               <label>バックアップの復元</label>
               <button class="primary-btn" disabled>復元する</button>
             </div>
-          </section>
+            </section>
+          </TabsContent>
         </main>
-      </div>
-    </div>
-  </div>
+      </TabsRoot>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { XIcon } from '@lucide/vue'
+import {
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+  TabsContent,
+  TabsList,
+  TabsRoot,
+  TabsTrigger,
+  VisuallyHidden,
+} from 'reka-ui'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useAppStore } from '../stores/useAppStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
@@ -166,23 +198,31 @@ const tabs = [
 ]
 const activeTab = ref('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
+
+function handleOpenChange(open: boolean) {
+  if (open) {
+    settingsStore.openSettings()
+    return
+  }
+
+  settingsStore.closeSettings()
+}
 </script>
 
 <style scoped>
 .settings-modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1000;
 }
 
 .settings-modal-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1001;
+  transform: translate(-50%, -50%);
   background-color: var(--bg-editor);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -238,7 +278,7 @@ const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
   background-color: var(--bg-hover);
 }
 
-.settings-tab.active {
+.settings-tab[data-state='active'] {
   background-color: var(--bg-active);
   color: var(--brand-primary);
   font-weight: 500;

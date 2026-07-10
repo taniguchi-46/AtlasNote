@@ -1,11 +1,19 @@
 <template>
-  <div v-if="open" class="notebook-create-overlay" @click.self="close">
-    <form class="notebook-create-modal" @submit.prevent="submit">
+  <DialogRoot :open="open" @update:open="handleOpenChange">
+    <DialogPortal>
+      <DialogOverlay class="notebook-create-overlay" />
+      <DialogContent as-child @open-auto-focus="handleOpenAutoFocus">
+        <form class="notebook-create-modal" @submit.prevent="submit">
       <header class="notebook-create-header">
-        <h2>ノートブックを作成</h2>
-        <button class="icon-btn" type="button" title="閉じる" @click="close">
-          <XIcon :size="18" />
-        </button>
+        <DialogTitle as="h2">ノートブックを作成</DialogTitle>
+        <VisuallyHidden>
+          <DialogDescription>ノートブック名とアイコンを指定して作成します</DialogDescription>
+        </VisuallyHidden>
+        <DialogClose as-child>
+          <button class="icon-btn" type="button" title="閉じる">
+            <XIcon :size="18" />
+          </button>
+        </DialogClose>
       </header>
 
       <div class="notebook-create-body">
@@ -29,16 +37,30 @@
       </div>
 
       <footer class="notebook-create-footer">
-        <button class="secondary-btn" type="button" @click="close">キャンセル</button>
+        <DialogClose as-child>
+          <button class="secondary-btn" type="button">キャンセル</button>
+        </DialogClose>
         <button class="primary-btn" type="submit">作成</button>
       </footer>
-    </form>
-  </div>
+        </form>
+      </DialogContent>
+    </DialogPortal>
+  </DialogRoot>
 </template>
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { XIcon } from '@lucide/vue'
+import {
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogRoot,
+  DialogTitle,
+  VisuallyHidden,
+} from 'reka-ui'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
@@ -66,10 +88,18 @@ watch(() => props.open, (open) => {
   name.value = ''
   selectedIcon.value = settingsStore.defaultNotebookIcon
   error.value = ''
+})
+
+function handleOpenChange(open: boolean) {
+  if (!open) close()
+}
+
+function handleOpenAutoFocus(event: Event) {
+  event.preventDefault()
   nextTick(() => {
     nameInputRef.value?.focus()
   })
-})
+}
 
 async function submit() {
   const trimmed = name.value.trim()
@@ -100,13 +130,15 @@ function close() {
   position: fixed;
   inset: 0;
   z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: rgba(0, 0, 0, 0.5);
 }
 
 .notebook-create-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1101;
+  transform: translate(-50%, -50%);
   width: min(420px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   display: flex;

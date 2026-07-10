@@ -39,98 +39,101 @@
 
     <!-- Note items -->
     <ul v-else class="note-list" role="list">
-      <li
+      <ContextMenuRoot
         v-for="note in displayedNotes"
         :key="note.id"
-        class="note-item"
-        :class="{
-          'is-active': noteStore.activeNote?.id === note.id,
-          'is-selected': selectedNoteIds.has(note.id),
-        }"
-        role="listitem"
-        @contextmenu.prevent="showContextMenu($event, note)"
+        @update:open="handleContextMenuOpen($event, note)"
       >
-        <button
-          :id="`note-item-${note.id}`"
-          class="note-item-btn"
-          type="button"
-          @click="handleNoteClick($event, note)"
-        >
-          <!-- Icons row -->
-          <div class="note-item-meta">
-            <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
-            <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
-            <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
-          </div>
-          <p class="note-item-title">{{ note.title || '(無題)' }}</p>
-        </button>
-      </li>
-    </ul>
+        <ContextMenuTrigger as-child>
+          <li
+            class="note-item"
+            :class="{
+              'is-active': noteStore.activeNote?.id === note.id,
+              'is-selected': selectedNoteIds.has(note.id),
+            }"
+            role="listitem"
+          >
+            <button
+              :id="`note-item-${note.id}`"
+              class="note-item-btn"
+              type="button"
+              @click="handleNoteClick($event, note)"
+            >
+              <!-- Icons row -->
+              <div class="note-item-meta">
+                <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
+                <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
+                <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
+              </div>
+              <p class="note-item-title">{{ note.title || '(無題)' }}</p>
+            </button>
+          </li>
+        </ContextMenuTrigger>
 
-    <!-- Context Menu -->
-    <div 
-      v-if="contextMenu.visible" 
-      class="context-menu" 
-      :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
-      @click.stop
-    >
-      <div v-if="contextMenu.targetIds.length > 1" class="context-menu-label">
-        {{ contextMenu.targetIds.length }}件を選択中
-      </div>
-      <template v-if="!contextMenu.isTrashed">
-        <template v-if="contextMenu.targetIds.length === 1">
-          <button class="context-menu-item" @click="handleContextAction('favorite')">
-            <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
-            {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
-          </button>
-          <button class="context-menu-item" @click="handleContextAction('pin')">
-            <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
-            {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
-          </button>
-          <div class="context-menu-divider"></div>
-        </template>
-        <div class="context-menu-submenu">
-          <button class="context-menu-item" type="button">
-            <FolderInputIcon :size="14" class="mr-2" />
-            ノートブックへ移動
-            <ChevronRightIcon :size="14" class="context-menu-chevron" />
-          </button>
-          <div class="context-submenu-panel">
-            <button
-              class="context-menu-item"
-              type="button"
-              @click="handleMoveToNotebook(null)"
-            >
-              未分類
-            </button>
-            <button
-              v-for="notebook in notebookOptions"
-              :key="notebook.id"
-              class="context-menu-item"
-              type="button"
-              @click="handleMoveToNotebook(notebook.id)"
-            >
-              {{ notebook.label }}
-            </button>
-          </div>
-        </div>
-        <div class="context-menu-divider"></div>
-        <button class="context-menu-item danger" @click="handleContextAction('trash')">
-          <Trash2Icon :size="14" class="mr-2" />
-          ゴミ箱へ移動
-        </button>
-      </template>
-      <template v-else>
-        <button class="context-menu-item" @click="handleContextAction('restore')">
-          <RotateCcwIcon :size="14" class="mr-2" />
-          元に戻す
-        </button>
-        <button class="context-menu-item danger" @click="handleContextAction('delete')">
-          <Trash2Icon :size="14" class="mr-2" />
-          完全に削除
-        </button>
-      </template>
-    </div>
+        <ContextMenuPortal>
+          <ContextMenuContent class="context-menu" :data-theme="appStore.theme">
+            <ContextMenuLabel v-if="contextMenu.targetIds.length > 1" class="context-menu-label">
+              {{ contextMenu.targetIds.length }}件を選択中
+            </ContextMenuLabel>
+            <template v-if="!contextMenu.isTrashed">
+              <template v-if="contextMenu.targetIds.length === 1">
+                <ContextMenuItem class="context-menu-item" @select="handleContextAction('favorite')">
+                  <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
+                  {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
+                </ContextMenuItem>
+                <ContextMenuItem class="context-menu-item" @select="handleContextAction('pin')">
+                  <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
+                  {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
+                </ContextMenuItem>
+                <ContextMenuSeparator class="context-menu-divider" />
+              </template>
+
+              <ContextMenuSub>
+                <ContextMenuSubTrigger class="context-menu-item">
+                  <FolderInputIcon :size="14" class="mr-2" />
+                  ノートブックへ移動
+                  <ChevronRightIcon :size="14" class="context-menu-chevron" />
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent
+                  class="context-submenu-panel"
+                  :data-theme="appStore.theme"
+                  :side-offset="4"
+                  :align-offset="-4"
+                >
+                  <ContextMenuItem class="context-menu-item" @select="handleMoveToNotebook(null)">
+                    未分類
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    v-for="notebook in notebookOptions"
+                    :key="notebook.id"
+                    class="context-menu-item"
+                    @select="handleMoveToNotebook(notebook.id)"
+                  >
+                    {{ notebook.label }}
+                  </ContextMenuItem>
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+
+              <ContextMenuSeparator class="context-menu-divider" />
+              <ContextMenuItem class="context-menu-item danger" @select="handleContextAction('trash')">
+                <Trash2Icon :size="14" class="mr-2" />
+                ゴミ箱へ移動
+              </ContextMenuItem>
+            </template>
+            <template v-else>
+              <ContextMenuItem class="context-menu-item" @select="handleContextAction('restore')">
+                <RotateCcwIcon :size="14" class="mr-2" />
+                元に戻す
+              </ContextMenuItem>
+              <ContextMenuItem class="context-menu-item danger" @select="handleContextAction('delete')">
+                <Trash2Icon :size="14" class="mr-2" />
+                完全に削除
+              </ContextMenuItem>
+            </template>
+          </ContextMenuContent>
+        </ContextMenuPortal>
+      </ContextMenuRoot>
+    </ul>
   </section>
 </template>
 
@@ -146,6 +149,18 @@ import {
   Trash2Icon,
   RotateCcwIcon,
 } from '@lucide/vue'
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuPortal,
+  ContextMenuRoot,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from 'reka-ui'
 import type { note } from '../../wailsjs/go/models'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
@@ -158,9 +173,6 @@ const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
 
 const contextMenu = ref({
-  visible: false,
-  x: 0,
-  y: 0,
   noteId: '',
   targetIds: [] as string[],
   isTrashed: false,
@@ -193,7 +205,7 @@ function toggleNoteSelection(noteId: string) {
   lastSelectedNoteId.value = noteId
 }
 
-function showContextMenu(event: MouseEvent, note: note.Summary) {
+function prepareContextMenu(note: note.Summary) {
   const displayedIds = new Set(displayedNotes.value.map(n => n.id))
   const targetIds = selectedNoteIds.value.has(note.id)
     ? Array.from(selectedNoteIds.value).filter(id => displayedIds.has(id))
@@ -205,23 +217,16 @@ function showContextMenu(event: MouseEvent, note: note.Summary) {
   }
 
   contextMenu.value = {
-    visible: true,
-    x: event.clientX,
-    y: event.clientY,
     noteId: note.id,
     targetIds,
     isTrashed: note.isTrashed,
     isFavorite: note.isFavorite,
     isPinned: note.isPinned,
   }
-  
-  // Close menu when clicking elsewhere
-  document.addEventListener('click', closeContextMenu)
 }
 
-function closeContextMenu() {
-  contextMenu.value.visible = false
-  document.removeEventListener('click', closeContextMenu)
+function handleContextMenuOpen(open: boolean, note: note.Summary) {
+  if (open) prepareContextMenu(note)
 }
 
 async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'restore' | 'delete') {
@@ -249,7 +254,6 @@ async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'resto
       clearSelectedNotes(targetIds)
       break
   }
-  closeContextMenu()
 }
 
 async function handleMoveToNotebook(notebookId: string | null) {
@@ -258,7 +262,6 @@ async function handleMoveToNotebook(notebookId: string | null) {
 
   await noteStore.moveNotesToNotebook(targetIds, notebookId)
   clearSelectedNotes(targetIds)
-  closeContextMenu()
 }
 
 function clearSelectedNotes(ids: string[]) {
@@ -373,15 +376,15 @@ function formatDate(iso: string): string {
   opacity: 0.5;
 }
 
-.context-menu {
-  position: fixed;
-  z-index: 9999;
+:global(.context-menu) {
+  z-index: 1300;
   background-color: var(--bg-editor);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 4px 0;
   min-width: 160px;
+  outline: none;
 }
 
 .empty-trash-btn {
@@ -406,7 +409,7 @@ function formatDate(iso: string): string {
   opacity: 0.45;
 }
 
-.context-menu-item {
+:global(.context-menu-item) {
   display: flex;
   align-items: center;
   width: 100%;
@@ -419,19 +422,20 @@ function formatDate(iso: string): string {
   cursor: pointer;
 }
 
-.context-menu-item:hover {
+:global(.context-menu-item[data-highlighted]) {
   background-color: var(--bg-hover);
+  outline: none;
 }
 
-.context-menu-item.danger {
+:global(.context-menu-item.danger) {
   color: var(--color-danger);
 }
 
-.context-menu-item.danger:hover {
+:global(.context-menu-item.danger[data-highlighted]) {
   background-color: rgba(248, 81, 73, 0.1);
 }
 
-.context-menu-divider {
+:global(.context-menu-divider) {
   height: 1px;
   background-color: var(--border);
   margin: 4px 0;
@@ -454,33 +458,20 @@ function formatDate(iso: string): string {
   color: var(--text-active);
 }
 
-.context-menu-label {
+:global(.context-menu-label) {
   padding: 6px 12px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
 }
 
-.context-menu-submenu {
-  position: relative;
-}
-
-.context-menu-submenu:hover .context-submenu-panel,
-.context-menu-submenu:focus-within .context-submenu-panel {
-  display: block;
-}
-
-.context-menu-chevron {
+:global(.context-menu-chevron) {
   margin-left: auto;
   color: var(--text-muted);
 }
 
-.context-submenu-panel {
-  display: none;
-  position: absolute;
-  top: -4px;
-  left: 100%;
-  z-index: 10000;
+:global(.context-submenu-panel) {
+  z-index: 1301;
   min-width: 180px;
   max-height: 260px;
   overflow-y: auto;
@@ -489,5 +480,6 @@ function formatDate(iso: string): string {
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  outline: none;
 }
 </style>
