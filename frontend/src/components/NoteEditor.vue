@@ -53,17 +53,6 @@
           <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
             <button
               class="mode-segment-btn"
-              :class="{ 'is-active': editMode === 'markdown' }"
-              type="button"
-              title="Markdownモード"
-              aria-label="Markdownモード"
-              :aria-pressed="editMode === 'markdown'"
-              @click="setEditMode('markdown')"
-            >
-              <SquareMIcon :size="17" />
-            </button>
-            <button
-              class="mode-segment-btn"
               :class="{ 'is-active': editMode === 'wysiwyg' }"
               type="button"
               title="リッチテキストモード"
@@ -72,6 +61,17 @@
               @click="setEditMode('wysiwyg')"
             >
               <SquarePenIcon :size="17" />
+            </button>
+            <button
+              class="mode-segment-btn"
+              :class="{ 'is-active': editMode === 'markdown' }"
+              type="button"
+              title="Markdownモード"
+              aria-label="Markdownモード"
+              :aria-pressed="editMode === 'markdown'"
+              @click="setEditMode('markdown')"
+            >
+              <SquareMIcon :size="17" />
             </button>
           </div>
 
