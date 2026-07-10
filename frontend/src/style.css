@@ -210,7 +210,8 @@ ul {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  height: 36px;
+  padding: 0 10px;
   border-radius: 8px;
   background: var(--brand-primary);
   color: #fff;
@@ -287,8 +288,8 @@ ul {
 .theme-toggle {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   color: var(--text-secondary);
   transition: background 0.12s, color 0.12s;
@@ -511,7 +512,8 @@ ul {
 
 .primary-btn {
   margin-top: 8px;
-  padding: 8px 20px;
+  height: 36px;
+  padding: 0 20px;
   border-radius: 8px;
   background: var(--brand-primary);
   color: #fff;

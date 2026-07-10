@@ -186,8 +186,8 @@ const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
   background-color: var(--bg-editor);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 700px;
-  height: 500px;
+  width: min(700px, calc(100vw - 32px));
+  height: min(500px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
@@ -325,7 +325,8 @@ input[type='range'] {
 }
 
 .primary-btn {
-  padding: 6px 16px;
+  height: 36px;
+  padding: 0 16px;
   background-color: var(--brand-primary);
   color: white;
   border: none;
@@ -341,11 +342,13 @@ input[type='range'] {
 }
 
 .close-btn {
+  width: 32px;
+  height: 32px;
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px;
+  padding: 0;
   border-radius: 4px;
   display: flex;
   align-items: center;

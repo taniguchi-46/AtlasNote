@@ -20,7 +20,7 @@
 
     <div class="topbar-right">
       <!-- 新しいノート -->
-      <button class="icon-btn primary" title="新しいノート" type="button" @click="$emit('new-note')">
+      <button class="icon-btn" title="新しいノート" type="button" @click="$emit('new-note')">
         <FilePlusIcon :size="18" />
       </button>
       
@@ -116,11 +116,13 @@ defineEmits<{
 }
 
 .icon-btn {
+  width: 32px;
+  height: 32px;
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 6px;
+  padding: 0;
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -131,10 +133,6 @@ defineEmits<{
 .icon-btn:hover {
   background-color: var(--bg-hover);
   color: var(--text-primary);
-}
-
-.icon-btn.primary {
-  color: var(--brand-primary);
 }
 
 .icon-btn.active {

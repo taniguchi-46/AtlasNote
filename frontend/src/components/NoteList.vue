@@ -1,21 +1,20 @@
 <template>
   <section class="note-list-pane" aria-label="ノート一覧">
-    <div class="note-list-action-bar">
+    <!-- Header -->
+    <div class="note-list-header">
+      <h2 class="note-list-title">{{ sectionTitle }}</h2>
+      <span class="note-list-count">{{ displayedNotes.length }}</span>
       <button
+        v-if="!isTrashSection"
         id="btn-new-note"
         class="note-list-new-note-btn"
         type="button"
         :disabled="noteStore.isSaving"
         @click="createNewNote"
       >
+        <span>新規</span>
         <PlusIcon :size="15" />
-        <span>新しいノート</span>
       </button>
-    </div>
-
-    <!-- Header -->
-    <div class="note-list-header">
-      <h2 class="note-list-title">{{ sectionTitle }}</h2>
       <button
         v-if="isTrashSection"
         class="empty-trash-btn"
@@ -25,7 +24,6 @@
       >
         ゴミ箱を空にする
       </button>
-      <span class="note-list-count">{{ displayedNotes.length }}</span>
     </div>
 
     <!-- Loading -->
@@ -352,20 +350,11 @@ function formatDate(iso: string): string {
 </script>
 
 <style scoped>
-.note-list-action-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 .note-list-new-note-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: 36px;
   padding: 0 12px;
   border-radius: 6px;
   background: var(--brand-primary);
@@ -396,12 +385,15 @@ function formatDate(iso: string): string {
 }
 
 .empty-trash-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
   flex-shrink: 0;
-  padding: 4px 8px;
+  padding: 0 12px;
   border-radius: 6px;
   color: var(--color-danger);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   transition: background 0.12s, opacity 0.12s;
 }
 
