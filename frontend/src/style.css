@@ -327,9 +327,14 @@ ul {
   color: var(--text-primary);
   letter-spacing: -0.01em;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .note-list-count {
+  flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
@@ -979,6 +984,7 @@ ul {
 
 .notebook-name {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1004,12 +1010,9 @@ ul {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.12s;
-  position: absolute;
-  right: 6px;
-  background: inherit;
-  padding-left: 8px;
 }
 
 .notebook-row:hover .notebook-actions {
