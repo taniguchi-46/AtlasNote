@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
+import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
@@ -48,6 +49,7 @@ export const useNoteStore = defineStore('notes', () => {
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
   let nextRevision = 0
+  const noteSelectionRequests = createLatestRequestGuard()
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -96,16 +98,26 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function selectNote(id: string) {
+    const isLatestRequest = noteSelectionRequests.begin()
     await flushPendingDraft()
+    if (!isLatestRequest()) return
+
     isLoading.value = true
     error.value = null
     autoTitleNoteId.value = null
     try {
-      activeNote.value = await getNote(id)
+      const selectedNote = await getNote(id)
+      if (isLatestRequest()) {
+        activeNote.value = selectedNote
+      }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
+      if (isLatestRequest()) {
+        error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
+      }
     } finally {
-      isLoading.value = false
+      if (isLatestRequest()) {
+        isLoading.value = false
+      }
     }
   }
 
