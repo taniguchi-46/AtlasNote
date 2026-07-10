@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 export type Theme = 'light' | 'dark'
-export type SidebarSection = 'notes' | 'favorites' | 'pinned' | 'trash'
+export type SidebarSection = 'notes' | 'uncategorized' | 'favorites' | 'pinned' | 'trash'
 
 export const useAppStore = defineStore('app', () => {
   const theme = ref<Theme>(

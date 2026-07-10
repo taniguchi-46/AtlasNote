@@ -299,6 +299,7 @@ const sectionTitle = computed(() => {
     return nb ? nb.name : 'すべてのノート'
   }
   switch (appStore.sidebarSection) {
+    case 'uncategorized': return '未分類'
     case 'favorites': return 'お気に入り'
     case 'pinned': return 'ピン留め'
     case 'trash': return 'ゴミ箱'
@@ -309,6 +310,7 @@ const sectionTitle = computed(() => {
 const displayedNotes = computed(() => {
   let list: note.Summary[] = []
   switch (appStore.sidebarSection) {
+    case 'uncategorized': list = noteStore.activeNotes.filter(n => !n.notebookId); break
     case 'favorites': list = noteStore.favoriteNotes; break
     case 'pinned': list = noteStore.pinnedNotes; break
     case 'trash': list = noteStore.trashedNotes; break

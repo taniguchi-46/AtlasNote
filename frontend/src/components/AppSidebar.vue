@@ -82,7 +82,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { PlusIcon, FileTextIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
+import { PlusIcon, FileTextIcon, FolderOpenIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
@@ -117,6 +117,12 @@ const navItems = computed<Array<{
     label: 'すべてのノート',
     icon: FileTextIcon,
     count: noteStore.activeNotes.length,
+  },
+  {
+    section: 'uncategorized',
+    label: '未分類',
+    icon: FolderOpenIcon,
+    count: noteStore.activeNotes.filter(note => !note.notebookId).length,
   },
   {
     section: 'favorites',
