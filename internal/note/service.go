@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	ErrNotFound   = errors.New("note not found")
-	ErrValidation = errors.New("note validation failed")
+	ErrNotFound         = errors.New("note not found")
+	ErrValidation       = errors.New("note validation failed")
+	ErrContentAvailable = errors.New("markdown content is available")
 )
 
 type Service struct {
@@ -310,38 +311,75 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Service) Recover(ctx context.Context) error {
+func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return RecoveryReport{}, err
+	}
+
+	records, err := s.repository.ListRecords(ctx)
+	if err != nil {
+		return RecoveryReport{}, err
+	}
+	report := RecoveryReport{MissingNotes: make([]MissingContent, 0)}
+	expected := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		contentPath, err := s.store.ContentPath(record.ID)
+		if err != nil {
+			return RecoveryReport{}, err
+		}
+		if record.ContentPath != contentPath {
+			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
+		}
+		exists, err := s.store.Exists(ctx, record.ID)
+		if err != nil {
+			return RecoveryReport{}, err
+		}
+		if !exists {
+			report.MissingNotes = append(report.MissingNotes, MissingContent{
+				ID:          record.ID,
+				Title:       record.Title,
+				ContentPath: contentPath,
+			})
+		}
+		expected[contentPath] = struct{}{}
+	}
+
+	if err := s.store.QuarantineOrphans(ctx, expected); err != nil {
+		return RecoveryReport{}, err
+	}
+	return report, nil
+}
+
+func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return err
 	}
-
-	records, err := s.repository.ListRecords(ctx)
+	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-	expected := make(map[string]struct{}, len(records))
-	for _, record := range records {
-		contentPath, err := s.store.ContentPath(record.ID)
-		if err != nil {
-			return err
-		}
-		if record.ContentPath != contentPath {
-			return fmt.Errorf("note %s has invalid content path", record.ID)
-		}
-		exists, err := s.store.Exists(ctx, record.ID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("markdown content is missing for note %s", record.ID)
-		}
-		expected[contentPath] = struct{}{}
+	contentPath, err := s.store.ContentPath(record.ID)
+	if err != nil {
+		return err
+	}
+	if record.ContentPath != contentPath {
+		return fmt.Errorf("note %s has invalid content path", record.ID)
+	}
+	exists, err := s.store.Exists(ctx, record.ID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("%w for note %s", ErrContentAvailable, record.ID)
 	}
 
-	return s.store.QuarantineOrphans(ctx, expected)
+	return s.repository.Delete(ctx, record.ID)
 }
 
 func (s *Service) recoverPendingLocked(ctx context.Context) error {

@@ -511,7 +511,7 @@ func TestServiceRecoverPendingUpdate(t *testing.T) {
 		t.Fatalf("create pending update: %v", err)
 	}
 
-	if err := service.Recover(ctx); err != nil {
+	if _, err := service.Recover(ctx); err != nil {
 		t.Fatalf("recover pending update: %v", err)
 	}
 	got, err := service.Get(ctx, created.ID)
@@ -558,7 +558,7 @@ func TestServiceRecoverRejectsTamperedPendingMarkdown(t *testing.T) {
 		t.Fatalf("create pending update: %v", err)
 	}
 
-	err = service.Recover(ctx)
+	_, err = service.Recover(ctx)
 	if err == nil || !strings.Contains(err.Error(), "temp hash mismatch") {
 		t.Fatalf("expected temp hash mismatch, got %v", err)
 	}
@@ -595,7 +595,7 @@ func TestServiceRecoverPendingDelete(t *testing.T) {
 		t.Fatalf("delete pending note record: %v", err)
 	}
 
-	if err := service.Recover(ctx); err != nil {
+	if _, err := service.Recover(ctx); err != nil {
 		t.Fatalf("recover pending delete: %v", err)
 	}
 	if _, err := repository.Get(ctx, created.ID); err != note.ErrNotFound {
@@ -648,7 +648,7 @@ func TestServiceDeleteReturnsCommitFailureAndRecoverRetries(t *testing.T) {
 	}
 
 	restartedService := note.NewService(repository, store)
-	if err := restartedService.Recover(ctx); err != nil {
+	if _, err := restartedService.Recover(ctx); err != nil {
 		t.Fatalf("recover pending delete: %v", err)
 	}
 	staged, err = store.DeleteStagedExists(ctx, created.ID, operations[0].ID)
@@ -667,24 +667,108 @@ func TestServiceDeleteReturnsCommitFailureAndRecoverRetries(t *testing.T) {
 	}
 }
 
-func TestServiceRecoverRejectsMissingMarkdown(t *testing.T) {
+func TestServiceRecoverReportsMissingMarkdownAndKeepsHealthyNotesAvailable(t *testing.T) {
 	t.Parallel()
 
 	ctx, repository, store, service, _ := newRecoveryTestService(t)
-	created, err := service.Create(ctx, note.CreateInput{Title: "Missing", Content: "content"})
+	missing, err := service.Create(ctx, note.CreateInput{Title: "Missing", Content: "content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	healthy, err := service.Create(ctx, note.CreateInput{Title: "Healthy", Content: "healthy content"})
+	if err != nil {
+		t.Fatalf("create healthy note: %v", err)
+	}
+	healthySecond, err := service.Create(ctx, note.CreateInput{Title: "Healthy 2", Content: "second healthy content"})
+	if err != nil {
+		t.Fatalf("create second healthy note: %v", err)
+	}
+	if err := store.Delete(ctx, missing.ID); err != nil {
+		t.Fatalf("delete markdown fixture: %v", err)
+	}
+
+	report, err := service.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recover with missing markdown: %v", err)
+	}
+	if len(report.MissingNotes) != 1 || report.MissingNotes[0].ID != missing.ID {
+		t.Fatalf("missing notes = %#v", report.MissingNotes)
+	}
+	if _, err := repository.Get(ctx, missing.ID); err != nil {
+		t.Fatalf("note record should be preserved: %v", err)
+	}
+	got, err := service.Get(ctx, healthy.ID)
+	if err != nil || got.Content != "healthy content" {
+		t.Fatalf("get healthy note after recovery = %#v, %v", got, err)
+	}
+	got, err = service.Get(ctx, healthySecond.ID)
+	if err != nil || got.Content != "second healthy content" {
+		t.Fatalf("get second healthy note after recovery = %#v, %v", got, err)
+	}
+}
+
+func TestServiceRecoverClearsMissingDiagnosticAfterRestore(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, store, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Restore", Content: "original"})
 	if err != nil {
 		t.Fatalf("create note: %v", err)
 	}
 	if err := store.Delete(ctx, created.ID); err != nil {
 		t.Fatalf("delete markdown fixture: %v", err)
 	}
-
-	err = service.Recover(ctx)
-	if err == nil || !strings.Contains(err.Error(), "markdown content is missing") {
-		t.Fatalf("expected missing markdown error, got %v", err)
+	report, err := service.Recover(ctx)
+	if err != nil || len(report.MissingNotes) != 1 {
+		t.Fatalf("initial recovery report = %#v, %v", report, err)
 	}
-	if _, err := repository.Get(ctx, created.ID); err != nil {
-		t.Fatalf("note record should be preserved: %v", err)
+
+	if err := store.Write(ctx, created.ID, "restored content"); err != nil {
+		t.Fatalf("restore markdown: %v", err)
+	}
+	report, err = service.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recover restored markdown: %v", err)
+	}
+	if len(report.MissingNotes) != 0 {
+		t.Fatalf("missing notes after restore = %#v", report.MissingNotes)
+	}
+	got, err := service.Get(ctx, created.ID)
+	if err != nil || got.Content != "restored content" {
+		t.Fatalf("restored note = %#v, %v", got, err)
+	}
+}
+
+func TestServiceDeleteMissingRequiresContentToRemainMissing(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, service, _ := newRecoveryTestService(t)
+	missing, err := service.Create(ctx, note.CreateInput{Title: "Missing", Content: "content"})
+	if err != nil {
+		t.Fatalf("create missing note: %v", err)
+	}
+	healthy, err := service.Create(ctx, note.CreateInput{Title: "Healthy", Content: "healthy"})
+	if err != nil {
+		t.Fatalf("create healthy note: %v", err)
+	}
+	if err := store.Delete(ctx, missing.ID); err != nil {
+		t.Fatalf("delete markdown fixture: %v", err)
+	}
+	if err := service.DeleteMissing(ctx, missing.ID); err != nil {
+		t.Fatalf("delete missing note: %v", err)
+	}
+	if _, err := repository.Get(ctx, missing.ID); !errors.Is(err, note.ErrNotFound) {
+		t.Fatalf("missing note record remains: %v", err)
+	}
+	if _, err := service.Get(ctx, healthy.ID); err != nil {
+		t.Fatalf("healthy note unavailable: %v", err)
+	}
+
+	if err := service.DeleteMissing(ctx, healthy.ID); !errors.Is(err, note.ErrContentAvailable) {
+		t.Fatalf("expected available-content rejection, got %v", err)
+	}
+	if _, err := repository.Get(ctx, healthy.ID); err != nil {
+		t.Fatalf("healthy note record was deleted: %v", err)
 	}
 }
 
@@ -696,7 +780,7 @@ func TestServiceRecoverQuarantinesOrphanMarkdown(t *testing.T) {
 		t.Fatalf("write orphan markdown: %v", err)
 	}
 
-	if err := service.Recover(ctx); err != nil {
+	if _, err := service.Recover(ctx); err != nil {
 		t.Fatalf("recover orphan markdown: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(notesDir, "orphan.md")); !os.IsNotExist(err) {

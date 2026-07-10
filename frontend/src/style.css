@@ -607,6 +607,85 @@ body.is-pane-resizing * {
   padding: 0 8px;
 }
 
+.recovery-banner {
+  padding: 10px 16px;
+  background: rgba(210, 153, 34, 0.12);
+  border-bottom: 1px solid rgba(210, 153, 34, 0.35);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.recovery-header,
+.recovery-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.recovery-header p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+}
+
+.recovery-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recovery-item {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.recovery-note {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.recovery-note code {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recovery-title {
+  font-weight: 600;
+}
+
+.recovery-reinspect,
+.recovery-delete {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.recovery-delete {
+  color: var(--color-danger);
+}
+
+.recovery-reinspect:disabled,
+.recovery-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.recovery-error {
+  margin: 8px 0 0;
+  color: var(--color-danger);
+}
+
 .save-error-indicator {
   display: flex;
   align-items: center;

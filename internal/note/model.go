@@ -66,6 +66,16 @@ type StorageOperation struct {
 	CreatedAt   time.Time
 }
 
+type MissingContent struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	ContentPath string `json:"contentPath"`
+}
+
+type RecoveryReport struct {
+	MissingNotes []MissingContent `json:"missingNotes"`
+}
+
 type Notebook struct {
 	ID        string    `json:"id"`
 	ParentID  *string   `json:"parentId"`

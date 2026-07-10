@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"sync"
 
 	"atlasnote/internal/config"
@@ -22,15 +23,25 @@ type App struct {
 	notes          *note.Service
 	dataDir        string
 	startupErr     error
+	recoveryReport note.RecoveryReport
+	statusMu       sync.RWMutex
 	closeMu        sync.Mutex
 	closeRequested bool
 	allowClose     bool
 }
 
 type StartupStatus struct {
-	Ready   bool   `json:"ready"`
-	Message string `json:"message,omitempty"`
-	DataDir string `json:"dataDir,omitempty"`
+	Ready        bool                    `json:"ready"`
+	Degraded     bool                    `json:"degraded"`
+	Message      string                  `json:"message,omitempty"`
+	DataDir      string                  `json:"dataDir,omitempty"`
+	MissingNotes []MissingNoteDiagnostic `json:"missingNotes"`
+}
+
+type MissingNoteDiagnostic struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	FilePath string `json:"filePath"`
 }
 
 func NewApp() *App {
@@ -123,6 +134,30 @@ func (a *App) DeleteNote(id string) error {
 	return a.notes.Delete(a.ctx, id)
 }
 
+func (a *App) DeleteMissingNote(id string) (StartupStatus, error) {
+	if a.notes == nil {
+		return a.GetStartupStatus(), errors.New("note service is not initialized")
+	}
+	if err := a.notes.DeleteMissing(a.ctx, id); err != nil {
+		return a.GetStartupStatus(), err
+	}
+	return a.ReinspectRecovery()
+}
+
+func (a *App) ReinspectRecovery() (StartupStatus, error) {
+	if a.notes == nil {
+		return a.GetStartupStatus(), errors.New("note service is not initialized")
+	}
+	report, err := a.notes.Recover(a.ctx)
+	if err != nil {
+		return a.GetStartupStatus(), err
+	}
+	a.statusMu.Lock()
+	a.recoveryReport = report
+	a.statusMu.Unlock()
+	return a.GetStartupStatus(), nil
+}
+
 func (a *App) CreateNotebook(input note.NotebookCreateInput) (note.Notebook, error) {
 	if a.notes == nil {
 		return note.Notebook{}, errors.New("note service is not initialized")
@@ -152,17 +187,31 @@ func (a *App) DeleteNotebook(id string, input note.NotebookDeleteInput) error {
 }
 
 func (a *App) GetStartupStatus() StartupStatus {
+	a.statusMu.RLock()
+	defer a.statusMu.RUnlock()
+
 	if a.startupErr != nil {
 		return StartupStatus{
-			Ready:   false,
-			Message: a.startupErr.Error(),
-			DataDir: a.dataDir,
+			Ready:        false,
+			Message:      a.startupErr.Error(),
+			DataDir:      a.dataDir,
+			MissingNotes: []MissingNoteDiagnostic{},
 		}
 	}
 
+	missingNotes := make([]MissingNoteDiagnostic, 0, len(a.recoveryReport.MissingNotes))
+	for _, missing := range a.recoveryReport.MissingNotes {
+		missingNotes = append(missingNotes, MissingNoteDiagnostic{
+			ID:       missing.ID,
+			Title:    missing.Title,
+			FilePath: filepath.Join(a.dataDir, "notes", missing.ContentPath),
+		})
+	}
 	return StartupStatus{
-		Ready:   true,
-		DataDir: a.dataDir,
+		Ready:        true,
+		Degraded:     len(missingNotes) > 0,
+		DataDir:      a.dataDir,
+		MissingNotes: missingNotes,
 	}
 }
 
@@ -198,7 +247,8 @@ func (a *App) initialize(ctx context.Context) {
 	}
 
 	service := note.NewService(note.NewRepository(db), store)
-	if err := service.Recover(ctx); err != nil {
+	recoveryReport, err := service.Recover(ctx)
+	if err != nil {
 		_ = db.Close()
 		_ = a.dataLock.Release()
 		a.dataLock = nil
@@ -208,6 +258,7 @@ func (a *App) initialize(ctx context.Context) {
 
 	a.db = db
 	a.notes = service
+	a.recoveryReport = recoveryReport
 }
 
 func (a *App) ToggleAlwaysOnTop(b bool) {

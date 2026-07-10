@@ -86,11 +86,12 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   // Actions
-  async function fetchNotes() {
+  async function fetchNotes(excludedIds: string[] = []) {
     isLoading.value = true
     error.value = null
     try {
-      summaries.value = (await listNotes()) ?? []
+      const excluded = new Set(excludedIds)
+      summaries.value = ((await listNotes()) ?? []).filter((note) => !excluded.has(note.id))
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {

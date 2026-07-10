@@ -19,6 +19,34 @@
       <span class="startup-datadir">{{ startupStatus.dataDir }}</span>
     </div>
 
+    <section
+      v-else-if="startupStatus?.degraded"
+      class="recovery-banner"
+      aria-labelledby="recovery-title"
+    >
+      <div class="recovery-header">
+        <div>
+          <strong id="recovery-title">一部のノート本文が見つかりません</strong>
+          <p>正常なノートは引き続き利用できます。ファイルを元の場所へ戻してから再検査してください。</p>
+        </div>
+        <button type="button" class="recovery-reinspect" :disabled="isRecoveryBusy" @click="handleReinspectRecovery">
+          {{ isRecoveryBusy ? '確認中…' : '再検査' }}
+        </button>
+      </div>
+      <p v-if="recoveryError" class="recovery-error" role="alert">{{ recoveryError }}</p>
+      <ul class="recovery-list">
+        <li v-for="missing in startupStatus.missingNotes" :key="missing.id" class="recovery-item">
+          <div class="recovery-note">
+            <span class="recovery-title">{{ missing.title }}</span>
+            <code>{{ missing.filePath }}</code>
+          </div>
+          <button type="button" class="recovery-delete" :disabled="isRecoveryBusy" @click="handleDeleteMissingNote(missing.id, missing.title)">
+            DB情報を削除
+          </button>
+        </li>
+      </ul>
+    </section>
+
     <!-- 3-pane shell -->
     <div
       ref="appShellRef"
@@ -79,7 +107,12 @@ import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import SettingsModal from './components/SettingsModal.vue'
-import { getStartupStatus, type StartupStatus } from './api/startup'
+import {
+  deleteMissingNote,
+  getStartupStatus,
+  reinspectRecovery,
+  type StartupStatus,
+} from './api/startup'
 import { ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
 import { CancelClose, CompleteClose } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -100,6 +133,8 @@ const noteStore = useNoteStore()
 const appStore = useAppStore()
 const settingsStore = useSettingsStore()
 const startupStatus = ref<StartupStatus | null>(null)
+const isRecoveryBusy = ref(false)
+const recoveryError = ref('')
 const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true')
 const appShellRef = ref<HTMLElement | null>(null)
 const activeResize = ref<ResizablePane | null>(null)
@@ -135,6 +170,44 @@ async function handleToggleAlwaysOnTop() {
 
 function handleOpenSettings() {
   settingsStore.openSettings()
+}
+
+function missingNoteIds(status: StartupStatus | null) {
+  return status?.missingNotes.map((note) => note.id) ?? []
+}
+
+async function applyRecoveryStatus(status: StartupStatus) {
+  startupStatus.value = status
+  await noteStore.fetchNotes(missingNoteIds(status))
+}
+
+async function handleReinspectRecovery() {
+  isRecoveryBusy.value = true
+  recoveryError.value = ''
+  try {
+    await applyRecoveryStatus(await reinspectRecovery())
+  } catch (error) {
+    recoveryError.value = error instanceof Error ? error.message : '再検査に失敗しました'
+  } finally {
+    isRecoveryBusy.value = false
+  }
+}
+
+async function handleDeleteMissingNote(id: string, title: string) {
+  const confirmed = window.confirm(
+    `「${title}」のDB情報を削除します。Markdownファイルが復元されている場合は削除されません。続行しますか？`,
+  )
+  if (!confirmed) return
+
+  isRecoveryBusy.value = true
+  recoveryError.value = ''
+  try {
+    await applyRecoveryStatus(await deleteMissingNote(id))
+  } catch (error) {
+    recoveryError.value = error instanceof Error ? error.message : '欠落ノートの削除に失敗しました'
+  } finally {
+    isRecoveryBusy.value = false
+  }
 }
 
 async function handleBeforeClose() {
@@ -290,7 +363,7 @@ onMounted(async () => {
   try {
     startupStatus.value = await getStartupStatus()
     if (startupStatus.value.ready) {
-      await noteStore.fetchNotes()
+      await noteStore.fetchNotes(missingNoteIds(startupStatus.value))
     }
   } catch (_) {
     // Network or Wails not available (dev browser mode)
