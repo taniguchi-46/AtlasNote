@@ -351,6 +351,7 @@ import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 import type { note } from '../api/notes'
 
@@ -377,10 +378,29 @@ const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
 const markdownSelectionVersion = ref(0)
 let lastMarkdownSelection = { start: 0, end: 0 }
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
-let saveRequestId = 0
 let activeNoteId: string | null = null
+let editorRevision = 0
+const latestRevisionByNote = new Map<string, number>()
+
+const autoSave = createNoteAutoSave<note.Note>({
+  delayMs: 1000,
+  save: (snapshot) => noteStore.persistNote(snapshot.noteId, {
+    title: snapshot.title,
+    content: snapshot.content,
+  }),
+  shouldApply: (snapshot) => latestRevisionByNote.get(snapshot.noteId) === snapshot.revision,
+  isCurrent: (snapshot) =>
+    activeNoteId === snapshot.noteId && editorRevision === snapshot.revision,
+  applyResult: (snapshot, updated) => {
+    const applyToActiveNote = activeNoteId === snapshot.noteId && editorRevision === snapshot.revision
+    noteStore.applyPersistedNote(updated, applyToActiveNote)
+  },
+  onSaved: () => showSaved(),
+  onFailed: () => {
+    saveFailed.value = true
+  },
+})
 
 const editor = new Editor({
   extensions: [
@@ -439,11 +459,15 @@ watch(
   () => noteStore.activeNote,
   (note) => {
     if (!note) {
+      autoSave.cancel()
       activeNoteId = null
       return
     }
 
     const noteChanged = activeNoteId !== note.id
+    if (noteChanged && activeNoteId !== null) {
+      void autoSave.flush()
+    }
     activeNoteId = note.id
     localTitle.value =
       noteStore.autoTitleNoteId === note.id && extractTitleFromFirstMarkdownLine(note.content) === ''
@@ -451,6 +475,7 @@ watch(
         : note.title
 
     if (noteChanged) {
+      editorRevision += 1
       resetSaveFeedback()
       localMarkdown.value = note.content
       isRichDirty.value = false
@@ -477,6 +502,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  autoSave.cancel()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
   }
@@ -511,7 +537,8 @@ function handleTitleSave() {
   if (isWaitingForFirstLineTitle.value && localTitle.value.trim() === '') return
   if (localTitle.value === noteStore.activeNote.title) return
 
-  void saveEditorNote(noteStore.activeNote.id, { title: localTitle.value })
+  scheduleAutoSave(localMarkdown.value)
+  void autoSave.flush()
 }
 
 function disableAutoTitleFromContent() {
@@ -1113,33 +1140,18 @@ function stringifyMarkdownTableRow(cells: string[]) {
 }
 
 function scheduleAutoSave(content: string) {
-  if (autoSaveTimer) {
-    clearTimeout(autoSaveTimer)
+  if (!noteStore.activeNote) return
+
+  editorRevision += 1
+  const snapshot: NoteSaveSnapshot = {
+    noteId: noteStore.activeNote.id,
+    title: getSavableTitle(),
+    content,
+    revision: editorRevision,
   }
-
-  autoSaveTimer = setTimeout(() => {
-    if (!noteStore.activeNote) return
-
-    void saveEditorNote(noteStore.activeNote.id, {
-      title: getSavableTitle(),
-      content,
-    })
-  }, 1000)
-}
-
-async function saveEditorNote(id: string, input: note.UpdateInput) {
-  const requestId = ++saveRequestId
-  resetSaveFeedback(false)
-
-  const saved = await noteStore.saveNote(id, input)
-  if (requestId !== saveRequestId) return
-
-  if (saved) {
-    showSaved()
-    return
-  }
-
-  saveFailed.value = true
+  latestRevisionByNote.set(snapshot.noteId, snapshot.revision)
+  resetSaveFeedback()
+  autoSave.schedule(snapshot)
 }
 
 function getSavableTitle() {
@@ -1158,10 +1170,7 @@ function showSaved() {
   }, 2000)
 }
 
-function resetSaveFeedback(invalidatePendingRequest = true) {
-  if (invalidatePendingRequest) {
-    saveRequestId += 1
-  }
+function resetSaveFeedback() {
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
     savedMessageTimer = null

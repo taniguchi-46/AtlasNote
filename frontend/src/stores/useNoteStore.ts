@@ -107,25 +107,35 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
-  async function saveNote(id: string, input: note.UpdateInput) {
+  function applyPersistedNote(updated: note.Note, applyToActiveNote = true) {
+    if (applyToActiveNote && activeNote.value?.id === updated.id) {
+      activeNote.value = updated
+    }
+    const idx = summaries.value.findIndex((n: note.Summary) => n.id === updated.id)
+    if (idx !== -1) {
+      summaries.value[idx] = toSummary(updated)
+    }
+  }
+
+  async function persistNote(id: string, input: note.UpdateInput) {
     isSaving.value = true
     error.value = null
     try {
-      const updated = await updateNote(id, input)
-      if (activeNote.value?.id === id) {
-        activeNote.value = updated
-      }
-      const idx = summaries.value.findIndex((n: note.Summary) => n.id === id)
-      if (idx !== -1) {
-        summaries.value[idx] = toSummary(updated)
-      }
-      return true
+      return await updateNote(id, input)
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
-      return false
+      return null
     } finally {
       isSaving.value = false
     }
+  }
+
+  async function saveNote(id: string, input: note.UpdateInput) {
+    const updated = await persistNote(id, input)
+    if (!updated) return false
+
+    applyPersistedNote(updated)
+    return true
   }
 
   async function trashNote(id: string) {
@@ -239,6 +249,8 @@ export const useNoteStore = defineStore('notes', () => {
     fetchNotes,
     selectNote,
     newNote,
+    persistNote,
+    applyPersistedNote,
     saveNote,
     trashNote,
     restoreNote,
