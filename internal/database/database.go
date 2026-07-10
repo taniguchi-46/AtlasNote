@@ -77,6 +77,18 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
 CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
 `,
+	`
+CREATE TABLE IF NOT EXISTS note_storage_operations (
+	operation_id TEXT PRIMARY KEY,
+	note_id TEXT NOT NULL UNIQUE,
+	operation_type TEXT NOT NULL CHECK(operation_type IN ('upsert', 'delete')),
+	content_hash TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
+	ON note_storage_operations(note_id);
+`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -159,9 +171,19 @@ CREATE TABLE IF NOT EXISTS notebooks (
 	}
 
 	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS note_storage_operations (
+	operation_id TEXT PRIMARY KEY,
+	note_id TEXT NOT NULL UNIQUE,
+	operation_type TEXT NOT NULL CHECK(operation_type IN ('upsert', 'delete')),
+	content_hash TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
 CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
+CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
+	ON note_storage_operations(note_id);
 `); err != nil {
 		return fmt.Errorf("ensure indexes: %w", err)
 	}

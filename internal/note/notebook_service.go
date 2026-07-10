@@ -18,6 +18,12 @@ const (
 var notebookIconPattern = regexp.MustCompile(`^(default|user):[A-Za-z0-9_-]+$`)
 
 func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput) (Notebook, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return Notebook{}, err
+	}
+
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return Notebook{}, fmt.Errorf("%w: notebook name is required", ErrValidation)
@@ -51,10 +57,21 @@ func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput)
 }
 
 func (s *Service) ListNotebooks(ctx context.Context) ([]Notebook, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return nil, err
+	}
 	return s.repository.ListNotebooks(ctx)
 }
 
 func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookUpdateInput) (Notebook, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return Notebook{}, err
+	}
+
 	nb, err := s.repository.GetNotebook(ctx, id)
 	if err != nil {
 		return Notebook{}, err
@@ -95,6 +112,12 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 }
 
 func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookDeleteInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return err
+	}
+
 	switch input.Mode {
 	case NotebookDeleteModeTrashNotes:
 		return s.repository.DeleteNotebookWithNotesTrashed(ctx, id)

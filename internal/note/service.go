@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"atlasnote/internal/storage"
@@ -25,6 +26,7 @@ var (
 type Service struct {
 	repository *Repository
 	store      *storage.MarkdownStore
+	mu         sync.Mutex
 }
 
 func NewService(repository *Repository, store *storage.MarkdownStore) *Service {
@@ -35,7 +37,18 @@ func NewService(repository *Repository, store *storage.MarkdownStore) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return Note{}, err
+	}
+
 	title, content, err := validateInput(input.Title, input.Content)
+	if err != nil {
+		return Note{}, err
+	}
+	operationID, err := newID()
 	if err != nil {
 		return Note{}, err
 	}
@@ -59,19 +72,32 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
+	operation := StorageOperation{
+		ID:          operationID,
+		NoteID:      id,
+		Type:        StorageOperationUpsert,
+		ContentHash: storage.HashContent(content),
+		CreatedAt:   now,
+	}
 
-	if err := s.store.WriteTemp(ctx, id, content); err != nil {
+	if err := s.store.WriteTemp(ctx, id, operationID, content); err != nil {
 		return Note{}, err
 	}
 
-	if err := s.repository.Create(ctx, record); err != nil {
-		_ = s.store.RollbackTemp(context.Background(), id)
+	if err := s.repository.CreateWithStorageOperation(ctx, record, operation); err != nil {
+		_ = s.store.RollbackTemp(context.Background(), id, operationID)
 		return Note{}, fmt.Errorf("create note record: %w", err)
 	}
 
-	if err := s.store.CommitTemp(ctx, id); err != nil {
-		return Note{}, fmt.Errorf("commit markdown: %w", err)
+	if err := s.store.CommitTemp(ctx, id, operationID); err != nil {
+		rollbackErr := s.repository.RollbackCreatedNote(context.Background(), id, operationID)
+		if rollbackErr == nil {
+			_ = s.store.RollbackTemp(context.Background(), id, operationID)
+			return Note{}, fmt.Errorf("commit markdown: %w", err)
+		}
+		return Note{}, fmt.Errorf("commit markdown: %w; rollback note record: %v", err, rollbackErr)
 	}
+	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
 	return Note{
 		ID:         record.ID,
@@ -87,10 +113,21 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 }
 
 func (s *Service) List(ctx context.Context) ([]Summary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return nil, err
+	}
 	return s.repository.List(ctx)
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Note, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return Note{}, err
+	}
+
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return Note{}, err
@@ -115,10 +152,18 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 }
 
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Note, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return Note{}, err
+	}
+
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return Note{}, err
 	}
+	previous := record
 
 	content, err := s.store.Read(ctx, record.ID)
 	if err != nil {
@@ -154,21 +199,37 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	record.UpdatedAt = time.Now().UTC()
 
 	if input.Content != nil {
-		if err := s.store.WriteTemp(ctx, record.ID, content); err != nil {
+		operationID, err := newID()
+		if err != nil {
 			return Note{}, err
 		}
-	}
-
-	if err := s.repository.Update(ctx, record); err != nil {
-		if input.Content != nil {
-			_ = s.store.RollbackTemp(context.Background(), record.ID)
+		operation := StorageOperation{
+			ID:          operationID,
+			NoteID:      record.ID,
+			Type:        StorageOperationUpsert,
+			ContentHash: storage.HashContent(content),
+			CreatedAt:   time.Now().UTC(),
 		}
-		return Note{}, fmt.Errorf("update note record: %w", err)
-	}
 
-	if input.Content != nil {
-		if err := s.store.CommitTemp(ctx, record.ID); err != nil {
-			return Note{}, fmt.Errorf("commit markdown update: %w", err)
+		if err := s.store.WriteTemp(ctx, record.ID, operationID, content); err != nil {
+			return Note{}, err
+		}
+		if err := s.repository.UpdateWithStorageOperation(ctx, record, operation); err != nil {
+			_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
+			return Note{}, fmt.Errorf("update note record: %w", err)
+		}
+		if err := s.store.CommitTemp(ctx, record.ID, operationID); err != nil {
+			rollbackErr := s.repository.RollbackUpdatedNote(context.Background(), previous, operationID)
+			if rollbackErr == nil {
+				_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
+				return Note{}, fmt.Errorf("commit markdown update: %w", err)
+			}
+			return Note{}, fmt.Errorf("commit markdown update: %w; rollback note record: %v", err, rollbackErr)
+		}
+		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
+	} else {
+		if err := s.repository.Update(ctx, record); err != nil {
+			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
 	}
 
@@ -186,16 +247,181 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return err
+	}
+
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 
+	operationID, err := newID()
+	if err != nil {
+		return err
+	}
+	operation := StorageOperation{
+		ID:        operationID,
+		NoteID:    record.ID,
+		Type:      StorageOperationDelete,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := s.repository.BeginStorageOperation(ctx, operation); err != nil {
+		return fmt.Errorf("begin markdown delete: %w", err)
+	}
+	if err := s.store.StageDelete(ctx, record.ID, operationID); err != nil {
+		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
+		return err
+	}
 	if err := s.repository.Delete(ctx, id); err != nil {
+		restoreErr := s.store.RestoreDelete(context.Background(), record.ID, operationID)
+		if restoreErr == nil {
+			_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
+			return err
+		}
+		return fmt.Errorf("delete note record: %w; restore markdown: %v", err, restoreErr)
+	}
+	if err := s.store.CommitDelete(ctx, record.ID, operationID); err != nil {
+		return nil
+	}
+	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
+
+	return nil
+}
+
+func (s *Service) Recover(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
 		return err
 	}
 
-	return s.store.Delete(ctx, record.ID)
+	records, err := s.repository.ListRecords(ctx)
+	if err != nil {
+		return err
+	}
+	expected := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		contentPath, err := s.store.ContentPath(record.ID)
+		if err != nil {
+			return err
+		}
+		if record.ContentPath != contentPath {
+			return fmt.Errorf("note %s has invalid content path", record.ID)
+		}
+		exists, err := s.store.Exists(ctx, record.ID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("markdown content is missing for note %s", record.ID)
+		}
+		expected[contentPath] = struct{}{}
+	}
+
+	return s.store.QuarantineOrphans(ctx, expected)
+}
+
+func (s *Service) recoverPendingLocked(ctx context.Context) error {
+	operations, err := s.repository.ListStorageOperations(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, operation := range operations {
+		switch operation.Type {
+		case StorageOperationUpsert:
+			if err := s.recoverUpsertLocked(ctx, operation); err != nil {
+				return err
+			}
+		case StorageOperationDelete:
+			if err := s.recoverDeleteLocked(ctx, operation); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown note storage operation %q", operation.Type)
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) recoverUpsertLocked(ctx context.Context, operation StorageOperation) error {
+	if _, err := s.repository.Get(ctx, operation.NoteID); err != nil {
+		return fmt.Errorf("recover markdown for note %s: %w", operation.NoteID, err)
+	}
+
+	tempExists, err := s.store.TempExists(ctx, operation.NoteID, operation.ID)
+	if err != nil {
+		return err
+	}
+	if tempExists {
+		matches, err := s.store.TempContentMatches(ctx, operation.NoteID, operation.ID, operation.ContentHash)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return fmt.Errorf("markdown recovery temp hash mismatch for note %s", operation.NoteID)
+		}
+		if err := s.store.CommitTemp(ctx, operation.NoteID, operation.ID); err != nil {
+			return fmt.Errorf("recover markdown update: %w", err)
+		}
+	} else {
+		matches, err := s.store.ContentMatches(ctx, operation.NoteID, operation.ContentHash)
+		if err != nil {
+			return fmt.Errorf("verify recovered markdown: %w", err)
+		}
+		if !matches {
+			return fmt.Errorf("markdown recovery hash mismatch for note %s", operation.NoteID)
+		}
+	}
+
+	return s.repository.CompleteStorageOperation(ctx, operation.ID)
+}
+
+func (s *Service) recoverDeleteLocked(ctx context.Context, operation StorageOperation) error {
+	_, recordErr := s.repository.Get(ctx, operation.NoteID)
+	recordExists := recordErr == nil
+	if recordErr != nil && !errors.Is(recordErr, ErrNotFound) {
+		return recordErr
+	}
+
+	stagedExists, err := s.store.DeleteStagedExists(ctx, operation.NoteID, operation.ID)
+	if err != nil {
+		return err
+	}
+	contentExists, err := s.store.Exists(ctx, operation.NoteID)
+	if err != nil {
+		return err
+	}
+
+	if recordExists {
+		if !stagedExists {
+			if !contentExists {
+				return fmt.Errorf("markdown content is missing during delete recovery for note %s", operation.NoteID)
+			}
+			return s.repository.CompleteStorageOperation(ctx, operation.ID)
+		}
+		if err := s.repository.Delete(ctx, operation.NoteID); err != nil {
+			return err
+		}
+	}
+
+	if stagedExists {
+		if err := s.store.CommitDelete(ctx, operation.NoteID, operation.ID); err != nil {
+			return err
+		}
+	} else if contentExists {
+		if err := s.store.Delete(ctx, operation.NoteID); err != nil {
+			return err
+		}
+	}
+
+	return s.repository.CompleteStorageOperation(ctx, operation.ID)
 }
 
 func validateInput(title string, content string) (string, string, error) {

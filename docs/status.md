@@ -53,6 +53,7 @@ wails build
   - Markdown Storage
   - Note Repository / Service
   - Notebook Repository / Service
+  - SQLite / Markdown 操作ジャーナル、補償処理、起動時復旧
 - Wails API を実装。
   - ノート作成・一覧取得・単体取得・更新・削除
   - ノートブック作成・一覧取得・更新・削除
@@ -81,6 +82,8 @@ wails build
 ## 現在の設計方針
 
 - Markdown を保存データの正とする。
+- SQLite と Markdown の更新は操作ジャーナルで追跡し、通常失敗時は補償、異常終了時は次回起動時に復旧する。
+- 孤立Markdownは `notes/recovery/` へ退避し、DBレコードに対応する本文が欠損した場合はデータを自動削除せず起動エラーにする。
 - Markdown モードは Joplin 風に、Markdown 原文をそのまま編集する。
 - Rich / Preview モードは UpNote 風に、Markdown へ戻せる範囲の編集ビューとして扱う。
 - Rich 側では見出し記号の `##` は表示せず、Markdown モードでは `## title` のような記法を表示する。
@@ -219,3 +222,12 @@ wails doctor
 - テーブルコピーを Phase 2 へ移動。
 - テキスト整列を現行の table 仕様から削除。
 - 行・列操作は、現在実装済みの行追加、列追加、行削除、列削除、表削除へ統一。
+
+### 2026-07-10: SQLite / Markdown 整合性対策
+
+- `note_storage_operations` を追加し、本文を伴う作成・更新と完全削除の途中状態をSQLiteへ記録。
+- Markdown確定失敗時のSQLite補償処理と、操作ID付き一時ファイル・削除退避ファイルを追加。
+- 起動時に未完了操作を再開し、本文ハッシュ、`content_path`、Markdownファイルの存在を検証する処理を追加。
+- 孤立Markdownと未追跡の一時ファイルを `notes/recovery/` へ退避する処理を追加。
+- Serviceの操作を直列化し、重複する自動保存によるタイトルと本文の世代ずれを防止。
+- 更新・削除の異常終了復旧、本文欠損、孤立ファイル、同時更新、DBマイグレーションのテストを追加。

@@ -53,6 +53,19 @@ type Record struct {
 	UpdatedAt   time.Time
 }
 
+const (
+	StorageOperationUpsert = "upsert"
+	StorageOperationDelete = "delete"
+)
+
+type StorageOperation struct {
+	ID          string
+	NoteID      string
+	Type        string
+	ContentHash string
+	CreatedAt   time.Time
+}
+
 type Notebook struct {
 	ID        string    `json:"id"`
 	ParentID  *string   `json:"parentId"`

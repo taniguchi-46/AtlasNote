@@ -11,8 +11,13 @@ import (
 )
 
 const notesTable = "notes"
+const storageOperationsTable = "note_storage_operations"
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Question)
+
+type sqlExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
 
 type Repository struct {
 	db *sql.DB
@@ -23,6 +28,10 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 func (r *Repository) Create(ctx context.Context, record Record) error {
+	return insertRecord(ctx, r.db, record)
+}
+
+func insertRecord(ctx context.Context, executor sqlExecutor, record Record) error {
 	query, args, err := psql.Insert(notesTable).
 		Columns("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
 		Values(record.ID, record.NotebookID, record.Title, record.ContentPath, record.IsFavorite, record.IsPinned, record.IsTrashed, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
@@ -31,7 +40,7 @@ func (r *Repository) Create(ctx context.Context, record Record) error {
 		return fmt.Errorf("build note insert: %w", err)
 	}
 
-	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+	if _, err := executor.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert note: %w", err)
 	}
 
@@ -125,6 +134,10 @@ func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
 }
 
 func (r *Repository) Update(ctx context.Context, record Record) error {
+	return updateRecord(ctx, r.db, record)
+}
+
+func updateRecord(ctx context.Context, executor sqlExecutor, record Record) error {
 	query, args, err := psql.Update(notesTable).
 		Set("notebook_id", record.NotebookID).
 		Set("title", record.Title).
@@ -138,7 +151,7 @@ func (r *Repository) Update(ctx context.Context, record Record) error {
 		return fmt.Errorf("build note update: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
+	result, err := executor.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update note: %w", err)
 	}
@@ -155,12 +168,16 @@ func (r *Repository) Update(ctx context.Context, record Record) error {
 }
 
 func (r *Repository) Delete(ctx context.Context, id string) error {
+	return deleteRecord(ctx, r.db, id)
+}
+
+func deleteRecord(ctx context.Context, executor sqlExecutor, id string) error {
 	query, args, err := psql.Delete(notesTable).Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build note delete: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
+	result, err := executor.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
@@ -171,6 +188,205 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *Repository) CreateWithStorageOperation(ctx context.Context, record Record, operation StorageOperation) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note create tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := insertRecord(ctx, tx, record); err != nil {
+		return err
+	}
+	if err := insertStorageOperation(ctx, tx, operation); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note create tx: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) UpdateWithStorageOperation(ctx context.Context, record Record, operation StorageOperation) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note update tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := updateRecord(ctx, tx, record); err != nil {
+		return err
+	}
+	if err := insertStorageOperation(ctx, tx, operation); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note update tx: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) BeginStorageOperation(ctx context.Context, operation StorageOperation) error {
+	return insertStorageOperation(ctx, r.db, operation)
+}
+
+func (r *Repository) RollbackCreatedNote(ctx context.Context, noteID string, operationID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note create rollback tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := deleteRecord(ctx, tx, noteID); err != nil {
+		return err
+	}
+	if err := deleteStorageOperation(ctx, tx, operationID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note create rollback tx: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, operationID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note update rollback tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := updateRecord(ctx, tx, previous); err != nil {
+		return err
+	}
+	if err := deleteStorageOperation(ctx, tx, operationID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note update rollback tx: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Repository) CompleteStorageOperation(ctx context.Context, operationID string) error {
+	return deleteStorageOperation(ctx, r.db, operationID)
+}
+
+func (r *Repository) ListStorageOperations(ctx context.Context) ([]StorageOperation, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT operation_id, note_id, operation_type, content_hash, created_at
+FROM note_storage_operations
+ORDER BY created_at, operation_id
+`)
+	if err != nil {
+		return nil, fmt.Errorf("list note storage operations: %w", err)
+	}
+	defer rows.Close()
+
+	operations := make([]StorageOperation, 0)
+	for rows.Next() {
+		var operation StorageOperation
+		var createdAt string
+		if err := rows.Scan(&operation.ID, &operation.NoteID, &operation.Type, &operation.ContentHash, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan note storage operation: %w", err)
+		}
+		operation.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		operations = append(operations, operation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate note storage operations: %w", err)
+	}
+
+	return operations, nil
+}
+
+func (r *Repository) ListRecords(ctx context.Context) ([]Record, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, notebook_id, title, content_path, is_favorite, is_pinned, is_trashed, created_at, updated_at
+FROM notes
+`)
+	if err != nil {
+		return nil, fmt.Errorf("list note records: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]Record, 0)
+	for rows.Next() {
+		var record Record
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(
+			&record.ID,
+			&record.NotebookID,
+			&record.Title,
+			&record.ContentPath,
+			&record.IsFavorite,
+			&record.IsPinned,
+			&record.IsTrashed,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan note record: %w", err)
+		}
+
+		var err error
+		record.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		record.UpdatedAt, err = parseTime(updatedAt)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate note records: %w", err)
+	}
+
+	return records, nil
+}
+
+func insertStorageOperation(ctx context.Context, executor sqlExecutor, operation StorageOperation) error {
+	query, args, err := psql.Insert(storageOperationsTable).
+		Columns("operation_id", "note_id", "operation_type", "content_hash", "created_at").
+		Values(operation.ID, operation.NoteID, operation.Type, operation.ContentHash, formatTime(operation.CreatedAt)).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build note storage operation insert: %w", err)
+	}
+	if _, err := executor.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("insert note storage operation: %w", err)
+	}
+
+	return nil
+}
+
+func deleteStorageOperation(ctx context.Context, executor sqlExecutor, operationID string) error {
+	query, args, err := psql.Delete(storageOperationsTable).
+		Where(sq.Eq{"operation_id": operationID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build note storage operation delete: %w", err)
+	}
+	if _, err := executor.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete note storage operation: %w", err)
 	}
 
 	return nil

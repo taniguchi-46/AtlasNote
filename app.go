@@ -142,8 +142,15 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 
+	service := note.NewService(note.NewRepository(db), store)
+	if err := service.Recover(ctx); err != nil {
+		_ = db.Close()
+		a.startupErr = err
+		return
+	}
+
 	a.db = db
-	a.notes = note.NewService(note.NewRepository(db), store)
+	a.notes = service
 }
 
 func (a *App) ToggleAlwaysOnTop(b bool) {
