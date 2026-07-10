@@ -66,3 +66,29 @@ func TestNewAppReportsInitializationError(t *testing.T) {
 		t.Fatalf("data dir = %q", status.DataDir)
 	}
 }
+
+func TestCancelCloseClearsPendingCloseRequest(t *testing.T) {
+	app := &App{closeRequested: true}
+
+	app.CancelClose()
+
+	if app.closeRequested {
+		t.Fatal("expected pending close request to be cleared")
+	}
+	if app.allowClose {
+		t.Fatal("expected close to remain blocked")
+	}
+}
+
+func TestCompleteCloseAllowsNextCloseRequest(t *testing.T) {
+	app := &App{closeRequested: true}
+
+	app.CompleteClose()
+
+	if !app.allowClose {
+		t.Fatal("expected close to be allowed")
+	}
+	if app.closeRequested {
+		t.Fatal("expected pending close request to be cleared")
+	}
+}

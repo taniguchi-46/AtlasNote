@@ -608,9 +608,18 @@ body.is-pane-resizing * {
 }
 
 .save-error-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   color: var(--color-danger);
   padding: 0 8px;
+}
+
+.save-error-indicator button {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .icon-btn {

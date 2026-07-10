@@ -26,6 +26,8 @@ const { createNoteAutoSave } = await import(pathToFileUrl(outFile))
 try {
   await testSwitchKeepsSaveTargetFixed()
   await testStaleRevisionIsNotApplied()
+  await testFailedDraftSurvivesSwitchAndRetry()
+  await testFlushWaitsForInFlightSave()
   await testCancelDropsPendingSave()
   console.log('note auto-save tests passed')
 } finally {
@@ -110,9 +112,8 @@ async function testStaleRevisionIsNotApplied() {
   const newSave = autoSave.flush()
 
   deferredByRevision.get(2).resolve({ id: 'note-a', content: 'new' })
-  await newSave
   deferredByRevision.get(1).resolve({ id: 'note-a', content: 'old' })
-  await oldSave
+  await Promise.all([newSave, oldSave])
 
   assert.deepEqual(applied, [{ id: 'note-a', content: 'new' }])
 }
@@ -139,6 +140,82 @@ async function testCancelDropsPendingSave() {
   await Promise.resolve()
 
   assert.deepEqual(saves, [])
+}
+
+async function testFailedDraftSurvivesSwitchAndRetry() {
+  const drafts = new Map()
+  const attempts = []
+  const results = [null, { id: 'note-a', content: 'A edited content' }]
+  let activeNoteId = 'note-a'
+  const timers = fakeTimers()
+  const snapshot = {
+    noteId: 'note-a',
+    title: 'A title',
+    content: 'A edited content',
+    revision: 2,
+  }
+  drafts.set(snapshot.noteId, snapshot)
+
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: async (pendingSnapshot) => {
+      attempts.push(pendingSnapshot)
+      return results.shift()
+    },
+    shouldApply: (pendingSnapshot) =>
+      drafts.get(pendingSnapshot.noteId)?.revision === pendingSnapshot.revision,
+    isCurrent: (pendingSnapshot) =>
+      drafts.get(pendingSnapshot.noteId)?.revision === pendingSnapshot.revision,
+    applyResult: () => {},
+    onSaved: (pendingSnapshot) => drafts.delete(pendingSnapshot.noteId),
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+
+  autoSave.schedule(snapshot)
+  assert.equal(await autoSave.flush(), false)
+  activeNoteId = 'note-b'
+
+  assert.equal(activeNoteId, 'note-b')
+  assert.deepEqual(drafts.get('note-a'), snapshot)
+
+  activeNoteId = 'note-a'
+  autoSave.schedule(drafts.get(activeNoteId))
+  assert.equal(await autoSave.flush(), true)
+  assert.equal(drafts.has('note-a'), false)
+  assert.equal(attempts.length, 2)
+}
+
+async function testFlushWaitsForInFlightSave() {
+  const deferredByRevision = new Map([[1, deferred()], [2, deferred()]])
+  const timers = fakeTimers()
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: (snapshot) => deferredByRevision.get(snapshot.revision).promise,
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
+  timers.run()
+  autoSave.schedule({ noteId: 'note-a', title: 'B', content: 'B', revision: 2 })
+  const flushPromise = autoSave.flush()
+  let flushFinished = false
+  void flushPromise.then(() => {
+    flushFinished = true
+  })
+  await Promise.resolve()
+  assert.equal(flushFinished, false)
+
+  deferredByRevision.get(2).resolve({ id: 'note-a' })
+  await Promise.resolve()
+  assert.equal(flushFinished, false)
+
+  deferredByRevision.get(1).resolve({ id: 'note-a' })
+  assert.equal(await flushPromise, true)
 }
 
 function fakeTimers() {

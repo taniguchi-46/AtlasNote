@@ -24,6 +24,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer))
   let timer: TimerHandle | null = null
   let pendingSnapshot: NoteSaveSnapshot | null = null
+  let inFlightSave: Promise<boolean> | null = null
 
   function cancelTimer() {
     if (timer === null) return
@@ -38,7 +39,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
       if (options.isCurrent(snapshot)) {
         options.onFailed?.(snapshot)
       }
-      return
+      return false
     }
 
     if (options.shouldApply(snapshot)) {
@@ -47,15 +48,32 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     if (options.isCurrent(snapshot)) {
       options.onSaved?.(snapshot)
     }
+    return true
   }
 
   async function runPending() {
     cancelTimer()
     const snapshot = pendingSnapshot
     pendingSnapshot = null
-    if (!snapshot) return
+    if (!snapshot) {
+      return inFlightSave ? await inFlightSave : true
+    }
 
-    await saveSnapshot(snapshot)
+    const previousSave = inFlightSave
+    const save = (async () => {
+      if (previousSave) {
+        await previousSave
+      }
+      return saveSnapshot(snapshot)
+    })()
+    inFlightSave = save
+    try {
+      return await save
+    } finally {
+      if (inFlightSave === save) {
+        inFlightSave = null
+      }
+    }
   }
 
   function schedule(snapshot: NoteSaveSnapshot) {
@@ -66,8 +84,17 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     }, options.delayMs)
   }
 
-  function flush() {
-    return runPending()
+  async function flush() {
+    let succeeded = true
+
+    while (pendingSnapshot || inFlightSave) {
+      const result = pendingSnapshot
+        ? await runPending()
+        : await inFlightSave!
+      succeeded = result && succeeded
+    }
+
+    return succeeded
   }
 
   function cancel() {

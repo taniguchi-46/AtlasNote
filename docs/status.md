@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-07-10
+最終更新: 2026-07-11
 
 ## 概要
 
@@ -23,6 +23,7 @@ npm run dev
 npm run build
 npm run frontend:build
 npm run frontend:typecheck
+npm --prefix frontend run test:auto-save
 npm --prefix frontend run test:serializer
 go test ./...
 wails dev
@@ -239,3 +240,12 @@ wails doctor
 - 孤立Markdownと未追跡の一時ファイルを `notes/recovery/` へ退避する処理を追加。
 - Serviceの操作を直列化し、重複する自動保存によるタイトルと本文の世代ずれを防止。
 - 更新・削除の異常終了復旧、本文欠損、孤立ファイル、同時更新、DBマイグレーションのテストを追加。
+
+### 2026-07-11: 未保存状態と終了・保存失敗への対応
+
+- ノート単位でタイトル、Markdown本文、revision、保存状態をdirty draftとしてPiniaストアへ保持するようにした。
+- debounce中の保存と進行中の保存をflushし、ノート切替やエディタ破棄後も保存処理を継続できるようにした。
+- 保存失敗後もdraftを保持し、元のノートを開いたときに未保存内容を復元するようにした。
+- 保存失敗表示に再試行と確認付き破棄を追加し、最新revisionの保存成功時だけdirtyを解除するようにした。
+- Wailsの終了要求を一度保留し、全dirtyノートの保存成功、または確認済みの全破棄後に終了する処理を追加した。
+- 保存失敗後の切替・再試行、古いrevision、debounce直後のflush、複数の進行中保存を待機するテストを追加した。

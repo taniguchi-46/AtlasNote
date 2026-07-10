@@ -81,6 +81,8 @@ import NoteEditor from './components/NoteEditor.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import { getStartupStatus, type StartupStatus } from './api/startup'
 import { ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
+import { CancelClose, CompleteClose } from '../wailsjs/go/main/App'
+import { EventsOn } from '../wailsjs/runtime/runtime'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
 import {
@@ -102,6 +104,8 @@ const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true'
 const appShellRef = ref<HTMLElement | null>(null)
 const activeResize = ref<ResizablePane | null>(null)
 let resizeObserver: ResizeObserver | null = null
+let cancelBeforeCloseListener: (() => void) | null = null
+let isHandlingBeforeClose = false
 let resizeStartX = 0
 let resizeStartWidth = 0
 
@@ -131,6 +135,54 @@ async function handleToggleAlwaysOnTop() {
 
 function handleOpenSettings() {
   settingsStore.openSettings()
+}
+
+async function handleBeforeClose() {
+  if (isHandlingBeforeClose) return
+  isHandlingBeforeClose = true
+
+  try {
+    if (await noteStore.flushAllDirtyNotes()) {
+      await CompleteClose()
+      return
+    }
+
+    const shouldRetry = window.confirm(
+      '未保存の変更を保存できませんでした。再試行しますか？\nキャンセルするとアプリに戻ります。',
+    )
+    if (!shouldRetry) {
+      await CancelClose()
+      return
+    }
+
+    if (await noteStore.flushAllDirtyNotes()) {
+      await CompleteClose()
+      return
+    }
+
+    const shouldDiscard = window.confirm(
+      '再試行しても保存できませんでした。未保存の変更をすべて破棄して終了しますか？',
+    )
+    if (shouldDiscard) {
+      noteStore.discardAllDrafts()
+      await CompleteClose()
+      return
+    }
+
+    await CancelClose()
+  } catch (error) {
+    console.error('Failed to complete app close', error)
+    await CancelClose().catch(() => {})
+  } finally {
+    isHandlingBeforeClose = false
+  }
+}
+
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!noteStore.hasDirtyNotes) return
+
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -220,6 +272,15 @@ function handleResizerKeydown(pane: ResizablePane, event: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  try {
+    cancelBeforeCloseListener = EventsOn('app:before-close', () => {
+      void handleBeforeClose()
+    })
+  } catch (_) {
+    // Wails runtime is unavailable in browser-only development mode.
+  }
+
   resizeObserver = new ResizeObserver(normalizePaneWidths)
   if (appShellRef.value) {
     resizeObserver.observe(appShellRef.value)
@@ -245,6 +306,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
   document.body.classList.remove('is-pane-resizing')
 })

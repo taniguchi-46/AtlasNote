@@ -2,9 +2,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
+import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
+
+export type NoteDraft = NoteSaveSnapshot & {
+  status: 'dirty' | 'saving' | 'failed'
+  error: string | null
+}
 
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   const markers: Record<EditorFirstLineStyle, string> = {
@@ -38,6 +44,10 @@ export const useNoteStore = defineStore('notes', () => {
   const isSaving = ref(false)
   const error = ref<string | null>(null)
   const autoTitleNoteId = ref<string | null>(null)
+  const drafts = ref<Record<string, NoteDraft>>({})
+  const saveFeedbackVersion = ref(0)
+  const lastSavedNoteId = ref<string | null>(null)
+  let nextRevision = 0
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -52,6 +62,25 @@ export const useNoteStore = defineStore('notes', () => {
   const activeNotes = computed(() =>
     summaries.value.filter((n: note.Summary) => !n.isTrashed)
   )
+  const activeDraft = computed(() => {
+    const id = activeNote.value?.id
+    return id ? drafts.value[id] ?? null : null
+  })
+  const hasDirtyNotes = computed(() => Object.keys(drafts.value).length > 0)
+
+  function getDraft(noteId: string) {
+    return drafts.value[noteId] ?? null
+  }
+
+  function replaceDraft(noteId: string, draft: NoteDraft | null) {
+    const nextDrafts = { ...drafts.value }
+    if (draft) {
+      nextDrafts[noteId] = draft
+    } else {
+      delete nextDrafts[noteId]
+    }
+    drafts.value = nextDrafts
+  }
 
   // Actions
   async function fetchNotes() {
@@ -67,6 +96,7 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function selectNote(id: string) {
+    await flushPendingDraft()
     isLoading.value = true
     error.value = null
     autoTitleNoteId.value = null
@@ -80,6 +110,7 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
+    await flushPendingDraft()
     isSaving.value = true
     error.value = null
     try {
@@ -128,6 +159,95 @@ export const useNoteStore = defineStore('notes', () => {
     } finally {
       isSaving.value = false
     }
+  }
+
+  async function persistDraftSnapshot(snapshot: NoteSaveSnapshot) {
+    const current = getDraft(snapshot.noteId)
+    if (current?.revision === snapshot.revision) {
+      replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null })
+    }
+
+    return persistNote(snapshot.noteId, {
+      title: snapshot.title,
+      content: snapshot.content,
+    })
+  }
+
+  const autoSave = createNoteAutoSave<note.Note>({
+    delayMs: 1000,
+    save: persistDraftSnapshot,
+    shouldApply: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
+    isCurrent: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
+    applyResult: (snapshot, updated) => {
+      const applyToActiveNote = activeNote.value?.id === snapshot.noteId
+      applyPersistedNote(updated, applyToActiveNote)
+    },
+    onSaved: (snapshot) => {
+      if (getDraft(snapshot.noteId)?.revision !== snapshot.revision) return
+
+      replaceDraft(snapshot.noteId, null)
+      lastSavedNoteId.value = snapshot.noteId
+      saveFeedbackVersion.value += 1
+    },
+    onFailed: (snapshot) => {
+      const current = getDraft(snapshot.noteId)
+      if (current?.revision !== snapshot.revision) return
+
+      replaceDraft(snapshot.noteId, {
+        ...current,
+        status: 'failed',
+        error: error.value ?? 'ノートの保存に失敗しました',
+      })
+    },
+  })
+
+  function scheduleDraft(noteId: string, title: string, content: string) {
+    const snapshot: NoteSaveSnapshot = {
+      noteId,
+      title,
+      content,
+      revision: ++nextRevision,
+    }
+    replaceDraft(noteId, { ...snapshot, status: 'dirty', error: null })
+    autoSave.schedule(snapshot)
+    return snapshot
+  }
+
+  async function flushPendingDraft() {
+    return autoSave.flush()
+  }
+
+  async function retryDraftSave(noteId: string) {
+    const draft = getDraft(noteId)
+    if (!draft) return true
+
+    replaceDraft(noteId, { ...draft, status: 'dirty', error: null })
+    autoSave.schedule(draft)
+    await autoSave.flush()
+    return getDraft(noteId) === null
+  }
+
+  async function flushAllDirtyNotes() {
+    await autoSave.flush()
+
+    for (const draft of Object.values(drafts.value)) {
+      const current = getDraft(draft.noteId)
+      if (!current || current.revision !== draft.revision) continue
+
+      autoSave.schedule(current)
+      await autoSave.flush()
+    }
+
+    return Object.keys(drafts.value).length === 0
+  }
+
+  function discardDraft(noteId: string) {
+    replaceDraft(noteId, null)
+  }
+
+  function discardAllDrafts() {
+    autoSave.cancel()
+    drafts.value = {}
   }
 
   async function saveNote(id: string, input: note.UpdateInput) {
@@ -189,6 +309,7 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     try {
       await deleteNote(id)
+      discardDraft(id)
       summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
       if (activeNote.value?.id === id) activeNote.value = null
     } catch (e) {
@@ -206,6 +327,7 @@ export const useNoteStore = defineStore('notes', () => {
         await deleteNote(id)
       }
       const idSet = new Set(ids)
+      ids.forEach(discardDraft)
       summaries.value = summaries.value.filter((n: note.Summary) => !idSet.has(n.id))
       if (activeNote.value && idSet.has(activeNote.value.id)) {
         activeNote.value = null
@@ -242,6 +364,11 @@ export const useNoteStore = defineStore('notes', () => {
     isSaving,
     error,
     autoTitleNoteId,
+    drafts,
+    activeDraft,
+    hasDirtyNotes,
+    saveFeedbackVersion,
+    lastSavedNoteId,
     pinnedNotes,
     favoriteNotes,
     trashedNotes,
@@ -251,6 +378,13 @@ export const useNoteStore = defineStore('notes', () => {
     newNote,
     persistNote,
     applyPersistedNote,
+    getDraft,
+    scheduleDraft,
+    flushPendingDraft,
+    flushAllDirtyNotes,
+    retryDraftSave,
+    discardDraft,
+    discardAllDrafts,
     saveNote,
     trashNote,
     restoreNote,

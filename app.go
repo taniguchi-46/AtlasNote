@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 
 	"atlasnote/internal/config"
 	"atlasnote/internal/database"
@@ -14,11 +15,14 @@ import (
 )
 
 type App struct {
-	ctx        context.Context
-	db         *sql.DB
-	notes      *note.Service
-	dataDir    string
-	startupErr error
+	ctx            context.Context
+	db             *sql.DB
+	notes          *note.Service
+	dataDir        string
+	startupErr     error
+	closeMu        sync.Mutex
+	closeRequested bool
+	allowClose     bool
 }
 
 type StartupStatus struct {
@@ -41,6 +45,40 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.db != nil {
 		_ = a.db.Close()
 	}
+}
+
+func (a *App) beforeClose(ctx context.Context) bool {
+	a.closeMu.Lock()
+	if a.allowClose {
+		a.closeMu.Unlock()
+		return false
+	}
+	if a.closeRequested {
+		a.closeMu.Unlock()
+		return true
+	}
+	a.closeRequested = true
+	a.closeMu.Unlock()
+
+	runtime.EventsEmit(ctx, "app:before-close")
+	return true
+}
+
+func (a *App) CompleteClose() {
+	a.closeMu.Lock()
+	a.allowClose = true
+	a.closeRequested = false
+	a.closeMu.Unlock()
+
+	if a.ctx != nil {
+		runtime.Quit(a.ctx)
+	}
+}
+
+func (a *App) CancelClose() {
+	a.closeMu.Lock()
+	a.closeRequested = false
+	a.closeMu.Unlock()
 }
 
 func (a *App) CreateNote(input note.CreateInput) (note.Note, error) {

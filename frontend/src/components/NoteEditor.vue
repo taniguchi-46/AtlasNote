@@ -28,7 +28,7 @@
             :class="{ 'is-waiting-title': isWaitingForFirstLineTitle }"
             type="text"
             placeholder="タイトル"
-            @input="disableAutoTitleFromContent"
+            @input="handleTitleInput"
             @blur="handleTitleSave"
             @keydown.enter="handleTitleSave"
           />
@@ -48,13 +48,15 @@
 
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中...</span>
-          <span
+          <div
             v-else-if="saveFailed"
             class="save-error-indicator"
             role="status"
           >
-            保存失敗
-          </span>
+            <span>保存失敗</span>
+            <button type="button" @click="handleRetrySave">再試行</button>
+            <button type="button" @click="handleDiscardDraft">破棄</button>
+          </div>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
           <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
@@ -351,9 +353,7 @@ import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
-import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
-import type { note } from '../api/notes'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -369,7 +369,7 @@ const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
-const saveFailed = ref(false)
+const saveFailed = computed(() => noteStore.activeDraft?.status === 'failed')
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
@@ -380,27 +380,6 @@ const markdownSelectionVersion = ref(0)
 let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
-let editorRevision = 0
-const latestRevisionByNote = new Map<string, number>()
-
-const autoSave = createNoteAutoSave<note.Note>({
-  delayMs: 1000,
-  save: (snapshot) => noteStore.persistNote(snapshot.noteId, {
-    title: snapshot.title,
-    content: snapshot.content,
-  }),
-  shouldApply: (snapshot) => latestRevisionByNote.get(snapshot.noteId) === snapshot.revision,
-  isCurrent: (snapshot) =>
-    activeNoteId === snapshot.noteId && editorRevision === snapshot.revision,
-  applyResult: (snapshot, updated) => {
-    const applyToActiveNote = activeNoteId === snapshot.noteId && editorRevision === snapshot.revision
-    noteStore.applyPersistedNote(updated, applyToActiveNote)
-  },
-  onSaved: () => showSaved(),
-  onFailed: () => {
-    saveFailed.value = true
-  },
-})
 
 const editor = new Editor({
   extensions: [
@@ -459,28 +438,25 @@ watch(
   () => noteStore.activeNote,
   (note) => {
     if (!note) {
-      autoSave.cancel()
       activeNoteId = null
       return
     }
 
     const noteChanged = activeNoteId !== note.id
-    if (noteChanged && activeNoteId !== null) {
-      void autoSave.flush()
-    }
     activeNoteId = note.id
+    const draft = noteStore.getDraft(note.id)
+    const editableContent = draft?.content ?? note.content
     localTitle.value =
-      noteStore.autoTitleNoteId === note.id && extractTitleFromFirstMarkdownLine(note.content) === ''
+      draft?.title ?? (noteStore.autoTitleNoteId === note.id && extractTitleFromFirstMarkdownLine(editableContent) === ''
         ? ''
-        : note.title
+        : note.title)
 
     if (noteChanged) {
-      editorRevision += 1
       resetSaveFeedback()
-      localMarkdown.value = note.content
+      localMarkdown.value = editableContent
       isRichDirty.value = false
       if (editMode.value === 'wysiwyg') {
-        if (!setEditorFromMarkdown(note.content)) {
+        if (!setEditorFromMarkdown(editableContent)) {
           editMode.value = 'markdown'
         }
       }
@@ -501,8 +477,17 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => noteStore.saveFeedbackVersion,
+  () => {
+    if (noteStore.lastSavedNoteId === noteStore.activeNote?.id) {
+      showSaved()
+    }
+  },
+)
+
 onBeforeUnmount(() => {
-  autoSave.cancel()
+  void noteStore.flushPendingDraft()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
   }
@@ -535,10 +520,43 @@ const isWaitingForFirstLineTitle = computed(() => {
 function handleTitleSave() {
   if (!noteStore.activeNote) return
   if (isWaitingForFirstLineTitle.value && localTitle.value.trim() === '') return
-  if (localTitle.value === noteStore.activeNote.title) return
+  const draft = noteStore.getDraft(noteStore.activeNote.id)
+  if (localTitle.value === (draft?.title ?? noteStore.activeNote.title)) {
+    if (draft) {
+      void noteStore.flushPendingDraft()
+    }
+    return
+  }
 
   scheduleAutoSave(localMarkdown.value)
-  void autoSave.flush()
+  void noteStore.flushPendingDraft()
+}
+
+function handleTitleInput() {
+  disableAutoTitleFromContent()
+  scheduleAutoSave(localMarkdown.value)
+}
+
+async function handleRetrySave() {
+  const noteId = noteStore.activeNote?.id
+  if (!noteId) return
+
+  await noteStore.retryDraftSave(noteId)
+}
+
+function handleDiscardDraft() {
+  const note = noteStore.activeNote
+  if (!note) return
+  if (!window.confirm('未保存の変更を破棄して、最後に保存した内容へ戻しますか？')) return
+
+  noteStore.discardDraft(note.id)
+  localTitle.value = note.title
+  localMarkdown.value = note.content
+  isRichDirty.value = false
+  if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(note.content)) {
+    editMode.value = 'markdown'
+  }
+  resetSaveFeedback()
 }
 
 function disableAutoTitleFromContent() {
@@ -1142,16 +1160,8 @@ function stringifyMarkdownTableRow(cells: string[]) {
 function scheduleAutoSave(content: string) {
   if (!noteStore.activeNote) return
 
-  editorRevision += 1
-  const snapshot: NoteSaveSnapshot = {
-    noteId: noteStore.activeNote.id,
-    title: getSavableTitle(),
-    content,
-    revision: editorRevision,
-  }
-  latestRevisionByNote.set(snapshot.noteId, snapshot.revision)
   resetSaveFeedback()
-  autoSave.schedule(snapshot)
+  noteStore.scheduleDraft(noteStore.activeNote.id, getSavableTitle(), content)
 }
 
 function getSavableTitle() {
@@ -1162,7 +1172,6 @@ function getSavableTitle() {
 }
 
 function showSaved() {
-  saveFailed.value = false
   savedMessage.value = true
   savedMessageTimer = setTimeout(() => {
     savedMessage.value = false
@@ -1176,7 +1185,6 @@ function resetSaveFeedback() {
     savedMessageTimer = null
   }
   savedMessage.value = false
-  saveFailed.value = false
 }
 
 function formatDate(iso: string): string {
