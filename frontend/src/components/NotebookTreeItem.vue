@@ -37,8 +37,8 @@
         <button
           class="notebook-action-btn danger"
           type="button"
-          :title="isConfirmingDelete ? 'もう一度押すと削除' : '削除'"
-          @click="deleteSelf"
+          title="削除"
+          @click="openDeleteModal"
         >
           <Trash2Icon :size="12" />
         </button>
@@ -58,6 +58,15 @@
       :parent-id="node.id"
       @close="isChildCreateModalOpen = false"
     />
+
+    <NotebookDeleteModal
+      :open="isDeleteModalOpen"
+      :notebook-name="node.name"
+      :is-deleting="isDeleting"
+      :error="deleteError"
+      @cancel="closeDeleteModal"
+      @confirm="deleteSelf"
+    />
   </div>
 </template>
 
@@ -66,7 +75,9 @@ import { computed, nextTick, ref } from 'vue'
 import { PlusIcon, Edit2Icon, Trash2Icon } from '@lucide/vue'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
+import type { NotebookDeleteMode } from '../api/notebooks'
 import NotebookCreateModal from './NotebookCreateModal.vue'
+import NotebookDeleteModal from './NotebookDeleteModal.vue'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import { resolveNotebookIcon } from '../utils/notebookIcons'
 
@@ -81,7 +92,9 @@ const isEditing = ref(false)
 const editName = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const isChildCreateModalOpen = ref(false)
-const isConfirmingDelete = ref(false)
+const isDeleteModalOpen = ref(false)
+const isDeleting = ref(false)
+const deleteError = ref('')
 const isIconPickerOpen = ref(false)
 
 const currentIcon = computed(() => resolveNotebookIcon(props.node.icon))
@@ -104,6 +117,17 @@ function openChildCreateModal() {
   isChildCreateModalOpen.value = true
 }
 
+function openDeleteModal() {
+  deleteError.value = ''
+  isDeleteModalOpen.value = true
+}
+
+function closeDeleteModal() {
+  if (isDeleting.value) return
+  isDeleteModalOpen.value = false
+  deleteError.value = ''
+}
+
 function startRename() {
   editName.value = props.node.name
   isEditing.value = true
@@ -121,16 +145,17 @@ function saveRename() {
   }
 }
 
-function deleteSelf() {
-  if (isConfirmingDelete.value) {
-    notebookStore.removeNotebook(props.node.id)
-    isConfirmingDelete.value = false
-    return
+async function deleteSelf(mode: NotebookDeleteMode) {
+  isDeleting.value = true
+  deleteError.value = ''
+  try {
+    await notebookStore.removeNotebook(props.node.id, mode)
+    isDeleteModalOpen.value = false
+  } catch (e) {
+    deleteError.value = e instanceof Error ? e.message : 'ノートブックの削除に失敗しました'
+  } finally {
+    isDeleting.value = false
   }
-  isConfirmingDelete.value = true
-  window.setTimeout(() => {
-    isConfirmingDelete.value = false
-  }, 3000)
 }
 </script>
 

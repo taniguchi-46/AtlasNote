@@ -99,11 +99,11 @@ func (a *App) UpdateNotebook(id string, input note.NotebookUpdateInput) (note.No
 	return a.notes.UpdateNotebook(a.ctx, id, input)
 }
 
-func (a *App) DeleteNotebook(id string) error {
+func (a *App) DeleteNotebook(id string, input note.NotebookDeleteInput) error {
 	if a.notes == nil {
 		return errors.New("note service is not initialized")
 	}
-	return a.notes.DeleteNotebook(a.ctx, id)
+	return a.notes.DeleteNotebook(a.ctx, id, input)
 }
 
 func (a *App) GetStartupStatus() StartupStatus {

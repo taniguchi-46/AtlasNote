@@ -74,3 +74,7 @@ type NotebookUpdateInput struct {
 	Name        *string `json:"name"`
 	Icon        *string `json:"icon"`
 }
+
+type NotebookDeleteInput struct {
+	Mode string `json:"mode"`
+}

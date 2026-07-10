@@ -10,6 +10,11 @@ import (
 
 const defaultNotebookIcon = "default:note"
 
+const (
+	NotebookDeleteModeTrashNotes = "trashNotes"
+	NotebookDeleteModeKeepNotes  = "keepNotes"
+)
+
 var notebookIconPattern = regexp.MustCompile(`^(default|user):[A-Za-z0-9_-]+$`)
 
 func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput) (Notebook, error) {
@@ -89,8 +94,15 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 	return nb, nil
 }
 
-func (s *Service) DeleteNotebook(ctx context.Context, id string) error {
-	return s.repository.DeleteNotebook(ctx, id)
+func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookDeleteInput) error {
+	switch input.Mode {
+	case NotebookDeleteModeTrashNotes:
+		return s.repository.DeleteNotebookWithNotesTrashed(ctx, id)
+	case NotebookDeleteModeKeepNotes:
+		return s.repository.DeleteNotebookKeepingNotes(ctx, id)
+	default:
+		return fmt.Errorf("%w: notebook delete mode is invalid", ErrValidation)
+	}
 }
 
 func normalizeNotebookIcon(icon *string) (string, error) {

@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
-import { listNotebooks, createNotebook, updateNotebook, deleteNotebook } from '../api/notebooks'
+import { listNotebooks, createNotebook, updateNotebook, deleteNotebook, type NotebookDeleteMode } from '../api/notebooks'
 import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
+import { useNoteStore } from './useNoteStore'
 
 export interface NotebookNode extends note.Notebook {
 	children: NotebookNode[]
@@ -100,17 +101,23 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		}
 	}
 
-	async function removeNotebook(id: string) {
+	async function removeNotebook(id: string, mode: NotebookDeleteMode) {
 		error.value = null
 		try {
-			await deleteNotebook(id)
-			const idsToRemove = collectNotebookDescendantIds(id)
-			notebooks.value = notebooks.value.filter(n => !idsToRemove.has(n.id))
+			await deleteNotebook(id, mode)
+			const idsToRemove = mode === 'trashNotes'
+				? collectNotebookDescendantIds(id)
+				: new Set<string>([id])
+			notebooks.value = notebooks.value
+				.filter(n => !idsToRemove.has(n.id))
+				.map(n => n.parentId === id ? { ...n, parentId: undefined } : n)
 			if (activeNotebookId.value && idsToRemove.has(activeNotebookId.value)) {
 				activeNotebookId.value = null
 			}
+			await useNoteStore().fetchNotes()
 		} catch (e) {
 			error.value = e instanceof Error ? e.message : 'ノートブックの削除に失敗しました'
+			throw e
 		}
 	}
 
