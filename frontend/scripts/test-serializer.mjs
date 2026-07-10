@@ -33,10 +33,16 @@ const cases = [
     name: 'inline marks',
     input: doc(paragraph([
       text('bold', [{ type: 'bold' }]),
-      text(' and '),
+      text(' '),
+      text('italic', [{ type: 'italic' }]),
+      text(' '),
+      text('strike', [{ type: 'strike' }]),
+      text(' '),
+      text('code', [{ type: 'code' }]),
+      text(' '),
       text('link', [{ type: 'link', attrs: { href: 'https://example.com' } }]),
     ])),
-    expected: '**bold** and [link](https://example.com)',
+    expected: '**bold** *italic* ~~strike~~ `code` [link](https://example.com)',
   },
   {
     name: 'bullet and ordered lists',
@@ -63,6 +69,14 @@ const cases = [
     name: 'code block',
     input: doc(codeBlock('ts', 'const a = 1')),
     expected: '```ts\nconst a = 1\n```',
+  },
+  {
+    name: 'horizontal rule and hard break',
+    input: doc([
+      { type: 'horizontalRule' },
+      paragraph([text('first'), { type: 'hardBreak' }, text('second')]),
+    ]),
+    expected: '---\n\nfirst\nsecond',
   },
   {
     name: 'table',

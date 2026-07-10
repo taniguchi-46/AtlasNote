@@ -97,11 +97,9 @@ wails build
    - Markdown を保存責務の中心にする方針を設計ドキュメントへ反映する。
    - Rich は Markdown への変換可能範囲に限定する方針を明文化する。
    - raw HTML の扱いを仕様として明文化する。
-2. 実機確認が必要な UI の確認
-   - 設定モーダルの背景・余白・スクロール。
-   - 常に最前面ボタンの見た目と Wails 側の動作。
-3. serializer の継続確認
-   - 対応範囲を増やす場合は、先に `frontend/scripts/test-serializer.mjs` へテストを追加する。
+2. 保存失敗時の表示とデータ整合性の確認
+   - 保存失敗時に「保存済み」を表示しないようにする。
+   - SQLite と Markdown の更新失敗時の整合性を確認する。
 
 詳細: `docs/todo/todo-mvp.md`
 
@@ -222,6 +220,16 @@ wails doctor
 - テーブルコピーを Phase 2 へ移動。
 - テキスト整列を現行の table 仕様から削除。
 - 行・列操作は、現在実装済みの行追加、列追加、行削除、列削除、表削除へ統一。
+
+### 2026-07-10: serializer TODO の整理
+
+- heading、inline mark、list、task list、blockquote、code block、horizontal rule、hard break、table、image の基本変換テストを確認済み。
+- footnote、frontmatter、reference link、Markdown コメント、高度な HTML block 保持は MVP 外の未対応範囲として明文化。
+- 今後変換範囲を増やす場合は、serializer テストを先に追加する方針へ統一。
+
+### 2026-07-10: 常に最前面機能の実機確認
+
+- 上部バーの常に最前面ボタンから、Wails 実機で前面状態を切り替えられることを確認済み。
 
 ### 2026-07-10: SQLite / Markdown 整合性対策
 

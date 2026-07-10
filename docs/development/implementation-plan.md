@@ -194,6 +194,7 @@ npm --prefix frontend run build
 - blockquote
 - code block
 - horizontal rule
+- hard break
 - table
 - image
 
@@ -231,8 +232,6 @@ AI:
 
 ## 保留事項
 
-- 設定モーダルの実機表示確認。
-- 常に最前面ボタンの実機動作確認。
 - 添付ファイル保存設計。
 - デスクトップアプリの対応 OS と配布方式。
 - 高度な全文検索の方式。
@@ -258,5 +257,4 @@ wails build
 ## 次の実装タスク候補
 
 1. Markdown / Rich エディタ仕様を `docs/rules/architecture.md` に反映する。
-2. serializer の対応範囲と未対応範囲を確定する。
-3. 常に最前面機能を実機で再確認する。
+2. 保存失敗時の表示と SQLite / Markdown の整合性を改善する。
