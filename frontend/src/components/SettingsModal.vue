@@ -49,10 +49,6 @@
           <TabsContent value="general" as-child>
             <section>
             <h3>一般</h3>
-            <div class="setting-group">
-              <label>グローバルショートカット</label>
-              <p class="setting-desc">（現在開発中...）</p>
-            </div>
             <div class="settings-section">
               <h4>ノートブック</h4>
               <div class="setting-group">
@@ -145,20 +141,6 @@
             </section>
           </TabsContent>
 
-          <!-- バックアップ設定 -->
-          <TabsContent value="backup" as-child>
-            <section>
-            <h3>バックアップ</h3>
-            <div class="setting-group">
-              <label>自動バックアップ</label>
-              <input type="checkbox" checked disabled /> 有効（デフォルト）
-            </div>
-            <div class="setting-group">
-              <label>バックアップの復元</label>
-              <button class="primary-btn" disabled>復元する</button>
-            </div>
-            </section>
-          </TabsContent>
         </main>
       </TabsRoot>
       </DialogContent>
@@ -194,7 +176,6 @@ const tabs = [
   { id: 'theme', name: 'テーマ' },
   { id: 'general', name: '一般' },
   { id: 'editor', name: 'エディター' },
-  { id: 'backup', name: 'バックアップ' },
 ]
 const activeTab = ref('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
@@ -343,12 +324,6 @@ function handleOpenChange(open: boolean) {
   font-variant-numeric: tabular-nums;
 }
 
-.setting-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
 select {
   padding: 6px 12px;
   border: 1px solid var(--border);
@@ -362,23 +337,6 @@ select {
 input[type='range'] {
   width: 240px;
   accent-color: var(--brand-primary);
-}
-
-.primary-btn {
-  height: 36px;
-  padding: 0 16px;
-  background-color: var(--brand-primary);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.primary-btn:disabled {
-  background-color: var(--bg-hover);
-  color: var(--text-secondary);
-  cursor: not-allowed;
 }
 
 .close-btn {

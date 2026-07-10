@@ -24,7 +24,8 @@ Atlas Note を、ローカルでノートを保存・表示・編集できる MV
 - Rich 側で独自表現を増やす場合は、Markdown へ戻せることを先に確認する。
 - DB / API / ファイル構成変更は、必要性・影響範囲・ロールバック方法を確認してから行う。
 - UI は既存の3ペイン構成と UpNote 風 Rich 編集の方向性を尊重する。
-- 画像貼り付け・添付ファイル設計は現在のエディタ整理スコープから外す。
+- 画像貼り付け、ドラッグ＆ドロップ、添付ファイル、バックアップ、グローバルショートカットは MVP 外とする。
+- テーブルコピーは Phase 2 へ移し、文字寄せは現行の table 仕様に含めない。
 
 ## 確認済み
 
@@ -167,6 +168,7 @@ npm --prefix frontend run build
 - Markdown を保存データの正とし、Rich table は Markdown table へ戻せる範囲の編集 UI として扱う。
 - MVP では GitHub Flavored Markdown 互換の基本 table を対象にする。
 - 対応する操作は table 挿入、行追加、列追加、行削除、列削除、表削除までにする。
+- テーブルコピーは Phase 2 で扱う。
 - セル内の複数段落やリストは Markdown 保存時に `<br>` を含む単一セル表現へ正規化される。
 - セル結合、セル分割、複数ヘッダー行、セル単位の背景色、文字寄せ、列幅の Markdown 永続化、table 内 table は MVP では扱わない。
 - 旧 table 操作用 CSS は整理済み。新しい table 操作 UI は Rich モードの format bar に集約する。
@@ -256,5 +258,5 @@ wails build
 ## 次の実装タスク候補
 
 1. Markdown / Rich エディタ仕様を `docs/rules/architecture.md` に反映する。
-2. table 編集 UI の仕様を決める。
-3. 設定モーダルと常に最前面機能を実機で再確認する。
+2. serializer の対応範囲と未対応範囲を確定する。
+3. 常に最前面機能を実機で再確認する。
