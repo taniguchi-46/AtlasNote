@@ -111,6 +111,27 @@ func (r *Repository) GetNotebook(ctx context.Context, id string) (Notebook, erro
 	return nb, nil
 }
 
+func (r *Repository) IsNotebookDescendant(ctx context.Context, id, candidateID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `
+WITH RECURSIVE notebook_descendants(id) AS (
+	SELECT id FROM notebooks WHERE parent_id = ?
+	UNION
+	SELECT notebooks.id
+	FROM notebooks
+	INNER JOIN notebook_descendants ON notebooks.parent_id = notebook_descendants.id
+)
+SELECT EXISTS(
+	SELECT 1 FROM notebook_descendants WHERE id = ?
+)
+`, id, candidateID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check notebook descendant: %w", err)
+	}
+
+	return exists, nil
+}
+
 func (r *Repository) UpdateNotebook(ctx context.Context, nb Notebook) error {
 	query, args, err := psql.Update(notebooksTable).
 		Set("parent_id", nb.ParentID).

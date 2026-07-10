@@ -142,6 +142,96 @@ func TestServiceUpdateCanClearNotebook(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateNotebookRejectsCyclesAndAllowsMovingToAnotherTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+
+	service := note.NewService(note.NewRepository(db), store)
+
+	parent, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Parent"})
+	if err != nil {
+		t.Fatalf("create parent notebook: %v", err)
+	}
+	child, err := service.CreateNotebook(ctx, note.NotebookCreateInput{
+		Name:     "Child",
+		ParentID: ptr(parent.ID),
+	})
+	if err != nil {
+		t.Fatalf("create child notebook: %v", err)
+	}
+	grandchild, err := service.CreateNotebook(ctx, note.NotebookCreateInput{
+		Name:     "Grandchild",
+		ParentID: ptr(child.ID),
+	})
+	if err != nil {
+		t.Fatalf("create grandchild notebook: %v", err)
+	}
+	otherRoot, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Other root"})
+	if err != nil {
+		t.Fatalf("create other root notebook: %v", err)
+	}
+
+	for name, candidateParentID := range map[string]string{
+		"self":       parent.ID,
+		"child":      child.ID,
+		"grandchild": grandchild.ID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := service.UpdateNotebook(ctx, parent.ID, note.NotebookUpdateInput{
+				ParentID: ptr(candidateParentID),
+			})
+			if !errors.Is(err, note.ErrValidation) {
+				t.Fatalf("expected ErrValidation, got %v", err)
+			}
+
+			unchanged, getErr := service.ListNotebooks(ctx)
+			if getErr != nil {
+				t.Fatalf("list notebooks after rejected move: %v", getErr)
+			}
+			for _, notebook := range unchanged {
+				if notebook.ID == parent.ID && notebook.ParentID != nil {
+					t.Fatalf("parent changed after rejected move: %v", *notebook.ParentID)
+				}
+			}
+		})
+	}
+
+	moved, err := service.UpdateNotebook(ctx, parent.ID, note.NotebookUpdateInput{
+		ParentID: ptr(otherRoot.ID),
+	})
+	if err != nil {
+		t.Fatalf("move notebook to another tree: %v", err)
+	}
+	if moved.ParentID == nil || *moved.ParentID != otherRoot.ID {
+		t.Fatalf("moved parent id = %v", moved.ParentID)
+	}
+
+	moved, err = service.UpdateNotebook(ctx, parent.ID, note.NotebookUpdateInput{
+		ClearParent: ptr(true),
+	})
+	if err != nil {
+		t.Fatalf("move notebook to root: %v", err)
+	}
+	if moved.ParentID != nil {
+		t.Fatalf("expected moved notebook parent to be cleared, got %v", *moved.ParentID)
+	}
+}
+
 func TestServiceCreateAndUpdateNotebookIcon(t *testing.T) {
 	t.Parallel()
 
@@ -225,6 +315,13 @@ func TestServiceDeleteNotebookWithNotesTrashedDeletesChildNotebooks(t *testing.T
 	if err != nil {
 		t.Fatalf("create child notebook: %v", err)
 	}
+	grandchild, err := service.CreateNotebook(ctx, note.NotebookCreateInput{
+		Name:     "Grandchild",
+		ParentID: ptr(child.ID),
+	})
+	if err != nil {
+		t.Fatalf("create grandchild notebook: %v", err)
+	}
 
 	parentNote, err := service.Create(ctx, note.CreateInput{
 		NotebookID: ptr(parent.ID),
@@ -241,6 +338,14 @@ func TestServiceDeleteNotebookWithNotesTrashedDeletesChildNotebooks(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("create child note: %v", err)
+	}
+	grandchildNote, err := service.Create(ctx, note.CreateInput{
+		NotebookID: ptr(grandchild.ID),
+		Title:      "Grandchild note",
+		Content:    "Grandchild content",
+	})
+	if err != nil {
+		t.Fatalf("create grandchild note: %v", err)
 	}
 
 	err = service.DeleteNotebook(ctx, parent.ID, note.NotebookDeleteInput{
@@ -266,7 +371,7 @@ func TestServiceDeleteNotebookWithNotesTrashedDeletesChildNotebooks(t *testing.T
 	for _, summary := range summaries {
 		summaryByID[summary.ID] = summary
 	}
-	for _, id := range []string{parentNote.ID, childNote.ID} {
+	for _, id := range []string{parentNote.ID, childNote.ID, grandchildNote.ID} {
 		summary, ok := summaryByID[id]
 		if !ok {
 			t.Fatalf("expected note %s to remain in trash", id)

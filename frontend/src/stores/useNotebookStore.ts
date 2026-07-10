@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotebooks, createNotebook, updateNotebook, deleteNotebook, type NotebookDeleteMode } from '../api/notebooks'
 import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
+import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
 import { useNoteStore } from './useNoteStore'
 
 export interface NotebookNode extends note.Notebook {
@@ -87,6 +88,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
 	async function moveNotebook(id: string, parentId: string | null) {
 		error.value = null
+		if (wouldCreateNotebookCycle(notebooks.value, id, parentId)) {
+			error.value = 'ノートブックを自分自身または子孫の下へ移動することはできません'
+			return
+		}
 		try {
 			const updated = await updateNotebook(
 				id,

@@ -99,6 +99,13 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 		if *input.ParentID == id {
 			return Notebook{}, fmt.Errorf("%w: notebook cannot be its own parent", ErrValidation)
 		}
+		isDescendant, err := s.repository.IsNotebookDescendant(ctx, id, *input.ParentID)
+		if err != nil {
+			return Notebook{}, err
+		}
+		if isDescendant {
+			return Notebook{}, fmt.Errorf("%w: notebook cannot be moved under its descendant", ErrValidation)
+		}
 		nb.ParentID = input.ParentID
 	}
 
