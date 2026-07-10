@@ -25,11 +25,29 @@ var (
 
 type Service struct {
 	repository *Repository
-	store      *storage.MarkdownStore
+	store      markdownStore
 	mu         sync.Mutex
 }
 
-func NewService(repository *Repository, store *storage.MarkdownStore) *Service {
+type markdownStore interface {
+	CommitDelete(context.Context, string, string) error
+	CommitTemp(context.Context, string, string) error
+	ContentMatches(context.Context, string, string) (bool, error)
+	ContentPath(string) (string, error)
+	Delete(context.Context, string) error
+	DeleteStagedExists(context.Context, string, string) (bool, error)
+	Exists(context.Context, string) (bool, error)
+	QuarantineOrphans(context.Context, map[string]struct{}) error
+	Read(context.Context, string) (string, error)
+	RestoreDelete(context.Context, string, string) error
+	RollbackTemp(context.Context, string, string) error
+	StageDelete(context.Context, string, string) error
+	TempContentMatches(context.Context, string, string, string) (bool, error)
+	TempExists(context.Context, string, string) (bool, error)
+	WriteTemp(context.Context, string, string, string) error
+}
+
+func NewService(repository *Repository, store markdownStore) *Service {
 	return &Service{
 		repository: repository,
 		store:      store,
@@ -285,7 +303,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete note record: %w; restore markdown: %v", err, restoreErr)
 	}
 	if err := s.store.CommitDelete(ctx, record.ID, operationID); err != nil {
-		return nil
+		return fmt.Errorf("commit markdown delete: %w", err)
 	}
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 

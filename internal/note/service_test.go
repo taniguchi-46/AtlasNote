@@ -2,6 +2,7 @@ package note_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -504,6 +505,63 @@ func TestServiceRecoverPendingDelete(t *testing.T) {
 	}
 }
 
+func TestServiceDeleteReturnsCommitFailureAndRecoverRetries(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, _, _ := newRecoveryTestService(t)
+	commitErr := errors.New("remove denied")
+	failingStore := &commitDeleteFailingStore{
+		MarkdownStore: store,
+		err:           commitErr,
+	}
+	service := note.NewService(repository, failingStore)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Delete", Content: "delete content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	err = service.Delete(ctx, created.ID)
+	if err == nil || !errors.Is(err, commitErr) {
+		t.Fatalf("expected commit delete error, got %v", err)
+	}
+	if _, err := repository.Get(ctx, created.ID); !errors.Is(err, note.ErrNotFound) {
+		t.Fatalf("expected deleted record, got %v", err)
+	}
+	operations, err := repository.ListStorageOperations(ctx)
+	if err != nil {
+		t.Fatalf("list pending operations: %v", err)
+	}
+	if len(operations) != 1 || operations[0].Type != note.StorageOperationDelete {
+		t.Fatalf("pending operations = %#v", operations)
+	}
+	staged, err := store.DeleteStagedExists(ctx, created.ID, operations[0].ID)
+	if err != nil {
+		t.Fatalf("check staged delete: %v", err)
+	}
+	if !staged {
+		t.Fatal("expected staged markdown to remain after commit failure")
+	}
+
+	restartedService := note.NewService(repository, store)
+	if err := restartedService.Recover(ctx); err != nil {
+		t.Fatalf("recover pending delete: %v", err)
+	}
+	staged, err = store.DeleteStagedExists(ctx, created.ID, operations[0].ID)
+	if err != nil {
+		t.Fatalf("check recovered staged delete: %v", err)
+	}
+	if staged {
+		t.Fatal("staged markdown remains after recovery")
+	}
+	operations, err = repository.ListStorageOperations(ctx)
+	if err != nil {
+		t.Fatalf("list recovered operations: %v", err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("pending operation count after recovery = %d", len(operations))
+	}
+}
+
 func TestServiceRecoverRejectsMissingMarkdown(t *testing.T) {
 	t.Parallel()
 
@@ -627,4 +685,13 @@ func newRecoveryTestService(t *testing.T) (context.Context, *note.Repository, *s
 	service := note.NewService(repository, store)
 
 	return ctx, repository, store, service, notesDir
+}
+
+type commitDeleteFailingStore struct {
+	*storage.MarkdownStore
+	err error
+}
+
+func (s *commitDeleteFailingStore) CommitDelete(context.Context, string, string) error {
+	return s.err
 }

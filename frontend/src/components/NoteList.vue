@@ -26,6 +26,10 @@
       </button>
     </div>
 
+    <p v-if="noteStore.error" class="note-list-error" role="alert">
+      {{ noteStore.error }}
+    </p>
+
     <!-- Loading -->
     <div v-if="noteStore.isLoading && displayedNotes.length === 0" class="note-list-empty">
       <div class="spinner" aria-label="読み込み中..." />
@@ -407,6 +411,15 @@ function formatDate(iso: string): string {
 .empty-trash-btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.note-list-error {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+  border-radius: 6px;
+  color: var(--color-danger);
+  font-size: 12px;
 }
 
 :global(.context-menu-item) {

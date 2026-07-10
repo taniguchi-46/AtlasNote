@@ -4,6 +4,7 @@ import type { note } from '../../wailsjs/go/models'
 import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
+import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
@@ -326,6 +327,7 @@ export const useNoteStore = defineStore('notes', () => {
       if (activeNote.value?.id === id) activeNote.value = null
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの削除に失敗しました'
+      throw e
     }
   }
 
@@ -334,20 +336,20 @@ export const useNoteStore = defineStore('notes', () => {
 
     isSaving.value = true
     error.value = null
+    let deletedIds: string[] = []
     try {
-      for (const id of ids) {
-        await deleteNote(id)
-      }
-      const idSet = new Set(ids)
-      ids.forEach(discardDraft)
+      deletedIds = await deleteNotesSequentially(ids, deleteNote)
+    } catch (e) {
+      if (e instanceof NoteDeleteError) deletedIds = e.deletedIds
+      error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'
+      throw e
+    } finally {
+      const idSet = new Set(deletedIds)
+      deletedIds.forEach(discardDraft)
       summaries.value = summaries.value.filter((n: note.Summary) => !idSet.has(n.id))
       if (activeNote.value && idSet.has(activeNote.value.id)) {
         activeNote.value = null
       }
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'
-      throw e
-    } finally {
       isSaving.value = false
     }
   }
