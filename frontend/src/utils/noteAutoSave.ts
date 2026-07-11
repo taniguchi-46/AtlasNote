@@ -15,6 +15,7 @@ type NoteAutoSaveOptions<Result> = {
   applyResult: (snapshot: NoteSaveSnapshot, result: Result) => void
   onSaved?: (snapshot: NoteSaveSnapshot) => void
   onFailed?: (snapshot: NoteSaveSnapshot) => void
+  execute?: (noteId: string, operation: () => Promise<boolean>) => Promise<boolean>
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle
   clearTimer?: (timer: TimerHandle) => void
 }
@@ -100,7 +101,10 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
           return false
         }
       }
-      return saveSnapshot(snapshot)
+      const operation = () => saveSnapshot(snapshot)
+      return options.execute
+        ? options.execute(snapshot.noteId, operation)
+        : operation()
     })()
     lane.inFlightSave = save
     try {

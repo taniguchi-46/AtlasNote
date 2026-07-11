@@ -11,6 +11,7 @@ import {
 } from '../api/notes'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
+import { createNoteOperationQueue } from '../utils/noteOperationQueue'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
@@ -76,6 +77,7 @@ export const useNoteStore = defineStore('notes', () => {
   let nextRevision = 0
   let savingRequestCount = 0
   const noteSelectionRequests = createLatestRequestGuard()
+  const noteOperations = createNoteOperationQueue()
 
   function beginSaving() {
     savingRequestCount += 1
@@ -215,7 +217,7 @@ export const useNoteStore = defineStore('notes', () => {
     return revision
   }
 
-  async function persistNote(
+  async function persistNoteNow(
     id: string,
     input: note.UpdateInput,
     onFailure?: (failure: unknown) => void,
@@ -242,7 +244,7 @@ export const useNoteStore = defineStore('notes', () => {
       replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null, conflict: null })
     }
 
-    return persistNote(snapshot.noteId, {
+    return persistNoteNow(snapshot.noteId, {
       title: snapshot.title,
       content: snapshot.content,
     }, (failure) => {
@@ -269,6 +271,7 @@ export const useNoteStore = defineStore('notes', () => {
   const autoSave = createNoteAutoSave<note.Note>({
     delayMs: 1000,
     save: persistDraftSnapshot,
+    execute: noteOperations.enqueue,
     shouldApply: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
     isCurrent: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
     applyResult: (snapshot, updated) => {
@@ -426,6 +429,14 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
+  async function persistNote(id: string, input: note.UpdateInput) {
+    return noteOperations.enqueue(id, async () => {
+      const updated = await persistNoteNow(id, input)
+      if (updated) applyPersistedNote(updated)
+      return updated
+    })
+  }
+
   function discardAllDrafts() {
     autoSave.cancel()
     drafts.value = {}
@@ -434,8 +445,6 @@ export const useNoteStore = defineStore('notes', () => {
   async function saveNote(id: string, input: note.UpdateInput) {
     const updated = await persistNote(id, input)
     if (!updated) return false
-
-    applyPersistedNote(updated)
     return true
   }
 
@@ -454,17 +463,13 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     try {
       for (const id of ids) {
-        const updated = await updateNote(id, {
-          ...input,
-          expectedRevision: requirePersistedRevision(id),
+        await noteOperations.enqueue(id, async () => {
+          const updated = await updateNote(id, {
+            ...input,
+            expectedRevision: requirePersistedRevision(id),
+          })
+          applyPersistedNote(updated)
         })
-        if (activeNote.value?.id === id) {
-          activeNote.value = updated
-        }
-        const idx = summaries.value.findIndex((n: note.Summary) => n.id === id)
-        if (idx !== -1) {
-          summaries.value[idx] = toSummary(updated)
-        }
       }
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
@@ -492,7 +497,10 @@ export const useNoteStore = defineStore('notes', () => {
   async function permanentlyDeleteNote(id: string) {
     error.value = null
     try {
-      await deleteNote(id, requirePersistedRevision(id))
+      await noteOperations.enqueue(
+        id,
+        () => deleteNote(id, requirePersistedRevision(id)),
+      )
       discardDraft(id)
       summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
       if (activeNote.value?.id === id) activeNote.value = null
@@ -511,7 +519,10 @@ export const useNoteStore = defineStore('notes', () => {
     try {
       deletedIds = await deleteNotesSequentially(
         ids,
-        (id) => deleteNote(id, requirePersistedRevision(id)),
+        (id) => noteOperations.enqueue(
+          id,
+          () => deleteNote(id, requirePersistedRevision(id)),
+        ),
       )
     } catch (e) {
       if (e instanceof NoteDeleteError) deletedIds = e.deletedIds

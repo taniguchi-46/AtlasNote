@@ -30,7 +30,8 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - NoteEditorの保存競合・下書き保持表示
 - 競合draftを破棄してサーバー最新版を再読み込む解決操作
 - 競合draftを同じノートブックの新規ノートへコピー保存する解決操作
-- ノート単位の保存lane、失敗laneの停止・手動再開、対象別 `flush`
+- autosave・メタデータ更新・削除を直列化するノート単位の操作lane
+- autosave失敗laneの停止・手動再開、対象別 `flush`
 - 保存要求数による正確な `isSaving` 表示
 
 ## Phase 2の対象
