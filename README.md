@@ -49,9 +49,10 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 ---
 
-## 開発環境セットアップ
+## 開発環境セットアップとガイド
 
-開発環境のセットアップと起動方法は `docs/development/setup.md` を参照してください。
+- 初めて開発に参加する方向けの全体像・解説: [初心者向け開発ガイド](docs/development/beginner-guide.md)
+- 詳細な開発環境のセットアップと起動方法: [開発環境セットアップ](docs/development/setup.md)
 
 ---
 

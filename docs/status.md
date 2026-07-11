@@ -90,6 +90,7 @@ wails build
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/todo/todo-phese2.md` | Phase 2の作業チェックリスト |
+| `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
 | `docs/development/setup.md` | 開発環境セットアップ |
 | `docs/development/tech-stack.md` | 採用技術 |
 | `docs/rules/architecture.md` | アーキテクチャとデータ設計 |
