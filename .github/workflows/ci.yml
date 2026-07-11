@@ -44,13 +44,14 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
 
-      - name: Run Go tests
-        run: go test ./...
-
       # A clean checkout does not contain the ignored frontend/wailsjs bindings.
-      # Wails generates them before compiling the production application.
+      # It also does not contain frontend/dist, which main.go embeds during Go builds.
+      # Wails generates both before compiling the production application.
       - name: Build Wails application
         run: wails build -clean
+
+      - name: Run Go tests
+        run: go test ./...
 
       - name: Run frontend typecheck
         run: npm --prefix frontend run typecheck
