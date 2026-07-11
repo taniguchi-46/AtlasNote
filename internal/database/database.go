@@ -3,21 +3,31 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
 
+// ErrDatabaseVersionTooNew indicates that the database requires a newer Atlas Note version.
+var ErrDatabaseVersionTooNew = errors.New("database version is newer than supported")
+
 func Open(ctx context.Context, databasePath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(databasePath), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", databasePath)
+	db, err := sql.Open("sqlite", sqliteDSN(databasePath))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
+	}
+
+	if _, err := validateSchemaVersion(ctx, db, len(migrations)); err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	if err := configure(ctx, db); err != nil {
@@ -33,17 +43,25 @@ func Open(ctx context.Context, databasePath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func configure(ctx context.Context, db *sql.DB) error {
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA journal_mode = WAL",
+func sqliteDSN(databasePath string) string {
+	dsn := &url.URL{
+		Scheme: "file",
+		Opaque: filepath.ToSlash(databasePath),
 	}
+	query := dsn.Query()
+	query.Add("_pragma", "foreign_keys(ON)")
+	query.Add("_pragma", "busy_timeout(5000)")
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
+}
 
-	for _, pragma := range pragmas {
-		if _, err := db.ExecContext(ctx, pragma); err != nil {
-			return fmt.Errorf("configure sqlite: %w", err)
-		}
+func configure(ctx context.Context, db *sql.DB) error {
+	var journalMode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+		return fmt.Errorf("configure sqlite journal mode: %w", err)
+	}
+	if journalMode != "wal" {
+		return fmt.Errorf("configure sqlite journal mode: got %q, want %q", journalMode, "wal")
 	}
 
 	return nil
@@ -92,12 +110,16 @@ CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
-	var userVersion int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
+	return migrate(ctx, db, migrations)
+}
+
+func migrate(ctx context.Context, db *sql.DB, migrationSet []string) error {
+	userVersion, err := validateSchemaVersion(ctx, db, len(migrationSet))
+	if err != nil {
+		return err
 	}
 
-	if userVersion >= len(migrations) {
+	if userVersion == len(migrationSet) {
 		return ensureCompatibleSchema(ctx, db)
 	}
 
@@ -107,13 +129,13 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	for i := userVersion; i < len(migrations); i++ {
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
+	for i := userVersion; i < len(migrationSet); i++ {
+		if _, err := tx.ExecContext(ctx, migrationSet[i]); err != nil {
 			return fmt.Errorf("migrate version %d: %w", i+1, err)
 		}
 	}
 
-	newVersion := len(migrations)
+	newVersion := len(migrationSet)
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", newVersion)); err != nil {
 		return fmt.Errorf("update user_version: %w", err)
 	}
@@ -123,6 +145,19 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	}
 
 	return ensureCompatibleSchema(ctx, db)
+}
+
+func validateSchemaVersion(ctx context.Context, db *sql.DB, currentVersion int) (int, error) {
+	var userVersion int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
+		return 0, fmt.Errorf("read user_version: %w", err)
+	}
+
+	if userVersion > currentVersion {
+		return 0, fmt.Errorf("%w: database version %d, supported version %d", ErrDatabaseVersionTooNew, userVersion, currentVersion)
+	}
+
+	return userVersion, nil
 }
 
 func ensureCompatibleSchema(ctx context.Context, db *sql.DB) error {

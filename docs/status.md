@@ -270,3 +270,12 @@ wails doctor
 - フロントエンドのNotebook Storeでも同じ階層判定を行い、循環する移動はWails API呼び出し前に拒否するようにした。
 - 自己・子・孫への移動拒否、正常な別ツリーとルートへの移動、孫を含む再帰削除をテストした。
 - Go全体テスト、Notebook階層テスト、フロントエンド型検査、フロントエンド本番ビルドは成功。
+
+### 2026-07-11: migration境界とSQLite接続設定の保証
+
+- 現行コードより新しい `user_version` のDBを、WAL設定や互換化DDLを実行する前に明示的に拒否するようにした。
+- migration失敗時に、途中のDDLと `user_version` が同一トランザクションでrollbackされることをテストした。
+- `foreign_keys = ON` と `busy_timeout = 5000` をmodernc SQLiteのDSNへ設定し、接続プールが生成する全接続へ適用するようにした。
+- WALはDB初期化時に設定し、`journal_mode = wal` が返ることを検証するようにした。
+- 2つの並行接続とDB再接続後の接続で、PRAGMA値と外部キー違反の拒否をテストした。
+- databaseパッケージの対象テストとGo全体テストは成功。race detectorは実行環境が `CGO_ENABLED=0` のため未実行。

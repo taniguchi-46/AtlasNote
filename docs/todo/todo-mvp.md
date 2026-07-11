@@ -163,13 +163,13 @@ go test ./...
 
 ### Medium（次フェーズでDB変更を行う前に完了）
 
-- [ ] migrationのバージョン境界を安全にする。
-  - 現行コードより新しい`user_version`を明示的に拒否する。
-  - migration失敗時のrollbackと、将来版DBの拒否をテストする。
+- [x] migrationのバージョン境界を安全にする。
+  - [x] 現行コードより新しい`user_version`を明示的に拒否する。
+  - [x] migration失敗時のrollbackと、将来版DBの拒否をテストする。
 
-- [ ] SQLite接続設定を全接続で保証する。
-  - `foreign_keys`、`busy_timeout`、WALの適用方式を決める。
-  - 再接続・並行接続時にも外部キー制約が有効であることをテストする。
+- [x] SQLite接続設定を全接続で保証する。
+  - [x] `foreign_keys`、`busy_timeout`、WALの適用方式を決める。
+  - [x] 再接続・並行接続時にも外部キー制約が有効であることをテストする。
 
 - [ ] Critical/High項目をCIで自動検証する。
   - Goテスト、frontend typecheck、serializerテスト、競合テスト、Wailsビルドをクリーン環境で実行する。
