@@ -171,7 +171,7 @@ go test ./...
   - [x] `foreign_keys`、`busy_timeout`、WALの適用方式を決める。
   - [x] 再接続・並行接続時にも外部キー制約が有効であることをテストする。
 
-- [ ] Critical/High項目をCIで自動検証する。
+- [x] Critical/High項目をCIで自動検証する。
   - Goテスト、frontend typecheck、serializerテスト、競合テスト、Wailsビルドをクリーン環境で実行する。
 
 ## 次フェーズと並行して対応する項目

@@ -286,4 +286,5 @@ wails doctor
 - 同一ブランチの古いCI実行をキャンセルし、リポジトリ内容の読み取り権限だけで動作する構成にした。
 - `frontend`からリポジトリルートを参照していた未使用のローカル依存を削除し、`npm ci`直後のWails bindings生成が`node_modules`をGoパッケージとして走査する問題を解消した。
 - ローカルでは`npm ci`、Go全体テスト、Wailsクリーンビルド、フロントエンド型検査、全対象テストの成功を確認した。
-- GitHub Actionsの初回実行はworkflowのコミット・push後に確認する。初回成功までは`docs/todo/todo-mvp.md`の対象項目を未完了として維持する。
+- GitHub Actions初回実行では、Wailsビルド前のGoテストが未生成の`frontend/dist`をembedできず失敗した。Wailsビルドを先に実行する順序へ修正した。
+- 修正後のGitHub ActionsでWails本番ビルド、Go全体テスト、フロントエンド型検査、全対象テストの成功を確認し、`docs/todo/todo-mvp.md`の対象項目を完了へ更新した。
