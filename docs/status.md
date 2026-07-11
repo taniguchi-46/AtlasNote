@@ -27,6 +27,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
 - Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
 - Storeの `conflicted` draft状態、競合情報とローカル下書きの保持
+- NoteEditorの保存競合・下書き保持表示
 
 ## Phase 2の対象
 

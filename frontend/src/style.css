@@ -38,6 +38,7 @@
   --color-pin: #63b1ff;
   --color-danger: #f85149;
   --color-success: #3fb950;
+  --color-warning: #d29922;
 
   /* Scrollbar */
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);
@@ -67,6 +68,7 @@
   --color-pin: #2563eb;
   --color-danger: #dc2626;
   --color-success: #16a34a;
+  --color-warning: #b45309;
 
   --scrollbar-thumb: rgba(0, 0, 0, 0.12);
 }
@@ -604,6 +606,12 @@ body.is-pane-resizing * {
 .saved-indicator {
   font-size: 11px;
   color: var(--color-success);
+  padding: 0 8px;
+}
+
+.save-conflict-indicator {
+  font-size: 11px;
+  color: var(--color-warning);
   padding: 0 8px;
 }
 

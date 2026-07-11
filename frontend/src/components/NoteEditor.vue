@@ -49,6 +49,14 @@
         <div class="toolbar-actions">
           <span v-if="noteStore.isSaving" class="saving-indicator">保存中...</span>
           <div
+            v-else-if="saveConflicted"
+            class="save-conflict-indicator"
+            role="status"
+            :title="conflictDetail"
+          >
+            <span>保存競合・下書き保持中</span>
+          </div>
+          <div
             v-else-if="saveFailed"
             class="save-error-indicator"
             role="status"
@@ -370,6 +378,13 @@ const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
+const saveConflicted = computed(() => noteStore.activeDraft?.status === 'conflicted')
+const conflictDetail = computed(() => {
+  const conflict = noteStore.activeDraft?.conflict
+  if (!conflict) return '他の更新と競合したため、ローカルの下書きを保持しています'
+
+  return `保存元 revision ${conflict.expectedRevision} / 最新 revision ${conflict.actualRevision}`
+})
 const saveFailed = computed(() => noteStore.activeDraft?.status === 'failed')
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
