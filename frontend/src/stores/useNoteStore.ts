@@ -75,7 +75,7 @@ export const useNoteStore = defineStore('notes', () => {
   const drafts = ref<Record<string, NoteDraft>>({})
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
-  let nextRevision = 0
+  let nextDraftVersion = 0
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
   const savingRequests = createRequestCounter((count) => {
@@ -233,7 +233,7 @@ export const useNoteStore = defineStore('notes', () => {
 
   async function persistDraftSnapshot(snapshot: NoteSaveSnapshot) {
     const current = getDraft(snapshot.noteId)
-    if (current?.revision === snapshot.revision) {
+    if (current?.draftVersion === snapshot.draftVersion) {
       replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null, conflict: null })
     }
 
@@ -243,7 +243,7 @@ export const useNoteStore = defineStore('notes', () => {
     }, (failure) => {
       const failedDraft = getDraft(snapshot.noteId)
       if (
-        failedDraft?.revision !== snapshot.revision
+        failedDraft?.draftVersion !== snapshot.draftVersion
         || !(failure instanceof NoteRevisionConflictError)
       ) return
 
@@ -265,14 +265,14 @@ export const useNoteStore = defineStore('notes', () => {
     delayMs: 1000,
     save: persistDraftSnapshot,
     execute: noteOperations.enqueue,
-    shouldApply: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
-    isCurrent: (snapshot) => getDraft(snapshot.noteId)?.revision === snapshot.revision,
+    shouldApply: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
+    isCurrent: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
     applyResult: (snapshot, updated) => {
       const applyToActiveNote = activeNote.value?.id === snapshot.noteId
       applyPersistedNote(updated, applyToActiveNote)
     },
     onSaved: (snapshot) => {
-      if (getDraft(snapshot.noteId)?.revision !== snapshot.revision) return
+      if (getDraft(snapshot.noteId)?.draftVersion !== snapshot.draftVersion) return
 
       replaceDraft(snapshot.noteId, null)
       lastSavedNoteId.value = snapshot.noteId
@@ -280,7 +280,7 @@ export const useNoteStore = defineStore('notes', () => {
     },
     onFailed: (snapshot) => {
       const current = getDraft(snapshot.noteId)
-      if (current?.revision !== snapshot.revision) return
+      if (current?.draftVersion !== snapshot.draftVersion) return
       if (current.status === 'conflicted') return
 
       replaceDraft(snapshot.noteId, {
@@ -301,7 +301,7 @@ export const useNoteStore = defineStore('notes', () => {
       noteId,
       title,
       content,
-      revision: ++nextRevision,
+      draftVersion: ++nextDraftVersion,
     }
     const current = getDraft(noteId)
     if (current?.status === 'conflicted') {
@@ -349,7 +349,7 @@ export const useNoteStore = defineStore('notes', () => {
 
     for (const draft of Object.values(drafts.value)) {
       const current = getDraft(draft.noteId)
-      if (!current || current.revision !== draft.revision) continue
+      if (!current || current.draftVersion !== draft.draftVersion) continue
       if (current.status === 'conflicted') continue
 
       autoSave.retry(current)
@@ -367,13 +367,13 @@ export const useNoteStore = defineStore('notes', () => {
     const draft = getDraft(noteId)
     if (draft?.status !== 'conflicted') return null
 
-    const draftRevision = draft.revision
+    const capturedDraftVersion = draft.draftVersion
     isLoading.value = true
     error.value = null
     try {
       const latestNote = await getNote(noteId)
       const current = getDraft(noteId)
-      if (current?.status !== 'conflicted' || current.revision !== draftRevision) {
+      if (current?.status !== 'conflicted' || current.draftVersion !== capturedDraftVersion) {
         return null
       }
 
@@ -392,7 +392,7 @@ export const useNoteStore = defineStore('notes', () => {
     const draft = getDraft(noteId)
     if (draft?.status !== 'conflicted') return null
 
-    const draftRevision = draft.revision
+    const capturedDraftVersion = draft.draftVersion
     const sourceNote = activeNote.value?.id === noteId
       ? activeNote.value
       : summaries.value.find((summary) => summary.id === noteId)
@@ -410,7 +410,7 @@ export const useNoteStore = defineStore('notes', () => {
       activeNote.value = created
 
       const current = getDraft(noteId)
-      if (current?.status === 'conflicted' && current.revision === draftRevision) {
+      if (current?.status === 'conflicted' && current.draftVersion === capturedDraftVersion) {
         replaceDraft(noteId, null)
       }
       return created

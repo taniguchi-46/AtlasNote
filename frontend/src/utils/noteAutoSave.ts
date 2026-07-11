@@ -2,7 +2,7 @@ export type NoteSaveSnapshot = {
   noteId: string
   title: string
   content: string
-  revision: number
+  draftVersion: number
 }
 
 type TimerHandle = ReturnType<typeof setTimeout>

@@ -28,6 +28,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
 - Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
 - Storeの `conflicted` draft状態、競合情報とローカル下書きの保持
+- 永続revisionと区別したフロントdraft世代 `draftVersion`
 - NoteEditorの保存競合・下書き保持表示
 - 競合draftを破棄してサーバー最新版を再読み込む解決操作
 - 競合draftを同じノートブックの新規ノートへコピー保存する解決操作

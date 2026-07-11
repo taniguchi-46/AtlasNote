@@ -25,7 +25,7 @@ const { createNoteAutoSave } = await import(pathToFileUrl(outFile))
 
 try {
   await testSwitchKeepsSaveTargetFixed()
-  await testStaleRevisionIsNotApplied()
+  await testStaleDraftVersionIsNotApplied()
   await testFailedDraftSurvivesSwitchAndRetry()
   await testFlushWaitsForInFlightSave()
   await testCancelDropsPendingSave()
@@ -42,8 +42,8 @@ async function testSwitchKeepsSaveTargetFixed() {
   const appliedSummaries = []
   const feedback = []
   let activeNote = { id: 'note-a', content: 'A before edit' }
-  let activeRevision = 1
-  const latestRevision = new Map([['note-a', 2]])
+  let activeDraftVersion = 1
+  const latestDraftVersion = new Map([['note-a', 2]])
   const saveDeferred = deferred()
   const timers = fakeTimers()
 
@@ -53,12 +53,12 @@ async function testSwitchKeepsSaveTargetFixed() {
       saves.push(snapshot)
       return saveDeferred.promise
     },
-    shouldApply: (snapshot) => latestRevision.get(snapshot.noteId) === snapshot.revision,
+    shouldApply: (snapshot) => latestDraftVersion.get(snapshot.noteId) === snapshot.draftVersion,
     isCurrent: (snapshot) =>
-      activeNote.id === snapshot.noteId && activeRevision === snapshot.revision,
+      activeNote.id === snapshot.noteId && activeDraftVersion === snapshot.draftVersion,
     applyResult: (snapshot, result) => {
       appliedSummaries.push(result)
-      if (activeNote.id === snapshot.noteId && activeRevision === snapshot.revision) {
+      if (activeNote.id === snapshot.noteId && activeDraftVersion === snapshot.draftVersion) {
         activeNote = result
       }
     },
@@ -71,12 +71,12 @@ async function testSwitchKeepsSaveTargetFixed() {
     noteId: 'note-a',
     title: 'A title',
     content: 'A edited content',
-    revision: 2,
+    draftVersion: 2,
   })
 
   const flushPromise = autoSave.flush()
   activeNote = { id: 'note-b', content: 'B content' }
-  activeRevision = 3
+  activeDraftVersion = 3
   saveDeferred.resolve({ id: 'note-a', content: 'A edited content' })
   await flushPromise
 
@@ -84,7 +84,7 @@ async function testSwitchKeepsSaveTargetFixed() {
     noteId: 'note-a',
     title: 'A title',
     content: 'A edited content',
-    revision: 2,
+    draftVersion: 2,
   }])
   assert.equal(activeNote.id, 'note-b')
   assert.equal(activeNote.content, 'B content')
@@ -92,30 +92,30 @@ async function testSwitchKeepsSaveTargetFixed() {
   assert.deepEqual(feedback, [])
 }
 
-async function testStaleRevisionIsNotApplied() {
-  const deferredByRevision = new Map([[1, deferred()], [2, deferred()]])
+async function testStaleDraftVersionIsNotApplied() {
+  const deferredByDraftVersion = new Map([[1, deferred()], [2, deferred()]])
   const applied = []
-  const latestRevision = new Map([['note-a', 1]])
+  const latestDraftVersion = new Map([['note-a', 1]])
   const timers = fakeTimers()
 
   const autoSave = createNoteAutoSave({
     delayMs: 1000,
-    save: (snapshot) => deferredByRevision.get(snapshot.revision).promise,
-    shouldApply: (snapshot) => latestRevision.get(snapshot.noteId) === snapshot.revision,
-    isCurrent: (snapshot) => latestRevision.get(snapshot.noteId) === snapshot.revision,
+    save: (snapshot) => deferredByDraftVersion.get(snapshot.draftVersion).promise,
+    shouldApply: (snapshot) => latestDraftVersion.get(snapshot.noteId) === snapshot.draftVersion,
+    isCurrent: (snapshot) => latestDraftVersion.get(snapshot.noteId) === snapshot.draftVersion,
     applyResult: (_snapshot, result) => applied.push(result),
     setTimer: timers.setTimer,
     clearTimer: timers.clearTimer,
   })
 
-  autoSave.schedule({ noteId: 'note-a', title: 'old', content: 'old', revision: 1 })
+  autoSave.schedule({ noteId: 'note-a', title: 'old', content: 'old', draftVersion: 1 })
   const oldSave = autoSave.flush()
-  latestRevision.set('note-a', 2)
-  autoSave.schedule({ noteId: 'note-a', title: 'new', content: 'new', revision: 2 })
+  latestDraftVersion.set('note-a', 2)
+  autoSave.schedule({ noteId: 'note-a', title: 'new', content: 'new', draftVersion: 2 })
   const newSave = autoSave.flush()
 
-  deferredByRevision.get(2).resolve({ id: 'note-a', content: 'new' })
-  deferredByRevision.get(1).resolve({ id: 'note-a', content: 'old' })
+  deferredByDraftVersion.get(2).resolve({ id: 'note-a', content: 'new' })
+  deferredByDraftVersion.get(1).resolve({ id: 'note-a', content: 'old' })
   await Promise.all([newSave, oldSave])
 
   assert.deepEqual(applied, [{ id: 'note-a', content: 'new' }])
@@ -137,7 +137,7 @@ async function testCancelDropsPendingSave() {
     clearTimer: timers.clearTimer,
   })
 
-  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
   autoSave.cancel()
   timers.run()
   await Promise.resolve()
@@ -155,7 +155,7 @@ async function testFailedDraftSurvivesSwitchAndRetry() {
     noteId: 'note-a',
     title: 'A title',
     content: 'A edited content',
-    revision: 2,
+    draftVersion: 2,
   }
   drafts.set(snapshot.noteId, snapshot)
 
@@ -166,9 +166,9 @@ async function testFailedDraftSurvivesSwitchAndRetry() {
       return results.shift()
     },
     shouldApply: (pendingSnapshot) =>
-      drafts.get(pendingSnapshot.noteId)?.revision === pendingSnapshot.revision,
+      drafts.get(pendingSnapshot.noteId)?.draftVersion === pendingSnapshot.draftVersion,
     isCurrent: (pendingSnapshot) =>
-      drafts.get(pendingSnapshot.noteId)?.revision === pendingSnapshot.revision,
+      drafts.get(pendingSnapshot.noteId)?.draftVersion === pendingSnapshot.draftVersion,
     applyResult: () => {},
     onSaved: (pendingSnapshot) => drafts.delete(pendingSnapshot.noteId),
     setTimer: timers.setTimer,
@@ -190,11 +190,11 @@ async function testFailedDraftSurvivesSwitchAndRetry() {
 }
 
 async function testFlushWaitsForInFlightSave() {
-  const deferredByRevision = new Map([[1, deferred()], [2, deferred()]])
+  const deferredByDraftVersion = new Map([[1, deferred()], [2, deferred()]])
   const timers = fakeTimers()
   const autoSave = createNoteAutoSave({
     delayMs: 1000,
-    save: (snapshot) => deferredByRevision.get(snapshot.revision).promise,
+    save: (snapshot) => deferredByDraftVersion.get(snapshot.draftVersion).promise,
     shouldApply: () => true,
     isCurrent: () => true,
     applyResult: () => {},
@@ -202,9 +202,9 @@ async function testFlushWaitsForInFlightSave() {
     clearTimer: timers.clearTimer,
   })
 
-  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
   timers.run()
-  autoSave.schedule({ noteId: 'note-a', title: 'B', content: 'B', revision: 2 })
+  autoSave.schedule({ noteId: 'note-a', title: 'B', content: 'B', draftVersion: 2 })
   const flushPromise = autoSave.flush()
   let flushFinished = false
   void flushPromise.then(() => {
@@ -213,11 +213,11 @@ async function testFlushWaitsForInFlightSave() {
   await Promise.resolve()
   assert.equal(flushFinished, false)
 
-  deferredByRevision.get(2).resolve({ id: 'note-a' })
+  deferredByDraftVersion.get(2).resolve({ id: 'note-a' })
   await Promise.resolve()
   assert.equal(flushFinished, false)
 
-  deferredByRevision.get(1).resolve({ id: 'note-a' })
+  deferredByDraftVersion.get(1).resolve({ id: 'note-a' })
   assert.equal(await flushPromise, true)
 }
 
@@ -235,8 +235,8 @@ async function testDifferentNotesSaveConcurrently() {
     applyResult: () => {},
   })
 
-  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
-  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', revision: 1 })
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
+  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', draftVersion: 1 })
   const flushPromise = autoSave.flush()
   await Promise.resolve()
 
@@ -261,8 +261,8 @@ async function testFlushTargetsOneNoteLane() {
     applyResult: () => {},
   })
 
-  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
-  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', revision: 1 })
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
+  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', draftVersion: 1 })
   const noteAFlush = autoSave.flush('note-a')
   await Promise.resolve()
 
@@ -283,15 +283,15 @@ async function testFailedLaneWaitsForManualRetry() {
   const autoSave = createNoteAutoSave({
     delayMs: 1000,
     save: (snapshot) => {
-      attempts.push(snapshot.revision)
+      attempts.push(snapshot.draftVersion)
       return attempts.length === 1 ? firstAttempt.promise : retryAttempt.promise
     },
     shouldApply: () => true,
     isCurrent: () => true,
     applyResult: () => {},
   })
-  const first = { noteId: 'note-a', title: 'A1', content: 'A1', revision: 1 }
-  const latest = { noteId: 'note-a', title: 'A2', content: 'A2', revision: 2 }
+  const first = { noteId: 'note-a', title: 'A1', content: 'A1', draftVersion: 1 }
+  const latest = { noteId: 'note-a', title: 'A2', content: 'A2', draftVersion: 2 }
 
   autoSave.schedule(first)
   const failedFlush = autoSave.flush('note-a')
