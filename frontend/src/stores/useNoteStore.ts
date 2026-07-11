@@ -15,6 +15,8 @@ import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSe
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
+const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
+const MAX_NOTE_TITLE_LENGTH = 200
 
 export type NoteDraft = NoteSaveSnapshot & {
   status: 'dirty' | 'saving' | 'failed' | 'conflicted'
@@ -36,6 +38,14 @@ function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   }
 
   return markers[firstLineStyle]
+}
+
+function createConflictCopyTitle(title: string) {
+  const suffixLength = Array.from(CONFLICT_COPY_SUFFIX).length
+  const baseTitle = Array.from(title.trim() || DEFAULT_NOTE_TITLE)
+    .slice(0, MAX_NOTE_TITLE_LENGTH - suffixLength)
+    .join('')
+  return `${baseTitle}${CONFLICT_COPY_SUFFIX}`
 }
 
 function toSummary(updated: note.Note): note.Summary {
@@ -336,6 +346,65 @@ export const useNoteStore = defineStore('notes', () => {
     replaceDraft(noteId, null)
   }
 
+  async function reloadConflictedNote(noteId: string) {
+    const draft = getDraft(noteId)
+    if (draft?.status !== 'conflicted') return null
+
+    const draftRevision = draft.revision
+    isLoading.value = true
+    error.value = null
+    try {
+      const latestNote = await getNote(noteId)
+      const current = getDraft(noteId)
+      if (current?.status !== 'conflicted' || current.revision !== draftRevision) {
+        return null
+      }
+
+      applyPersistedNote(latestNote)
+      replaceDraft(noteId, null)
+      return latestNote
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'ノートの再読み込みに失敗しました'
+      return null
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function copyConflictedDraft(noteId: string) {
+    const draft = getDraft(noteId)
+    if (draft?.status !== 'conflicted') return null
+
+    const draftRevision = draft.revision
+    const sourceNote = activeNote.value?.id === noteId
+      ? activeNote.value
+      : summaries.value.find((summary) => summary.id === noteId)
+
+    isSaving.value = true
+    error.value = null
+    try {
+      const created = await createNote({
+        title: createConflictCopyTitle(draft.title),
+        content: draft.content,
+        ...(sourceNote?.notebookId ? { notebookId: sourceNote.notebookId } : {}),
+      })
+      summaries.value.unshift(toSummary(created))
+      autoTitleNoteId.value = null
+      activeNote.value = created
+
+      const current = getDraft(noteId)
+      if (current?.status === 'conflicted' && current.revision === draftRevision) {
+        replaceDraft(noteId, null)
+      }
+      return created
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '競合下書きのコピー保存に失敗しました'
+      return null
+    } finally {
+      isSaving.value = false
+    }
+  }
+
   function discardAllDrafts() {
     autoSave.cancel()
     drafts.value = {}
@@ -482,6 +551,8 @@ export const useNoteStore = defineStore('notes', () => {
     flushAllDirtyNotes,
     retryDraftSave,
     discardDraft,
+    reloadConflictedNote,
+    copyConflictedDraft,
     discardAllDrafts,
     saveNote,
     trashNote,

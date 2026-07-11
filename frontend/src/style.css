@@ -610,9 +610,23 @@ body.is-pane-resizing * {
 }
 
 .save-conflict-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   color: var(--color-warning);
   padding: 0 8px;
+}
+
+.save-conflict-indicator button {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.save-conflict-indicator button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .recovery-banner {

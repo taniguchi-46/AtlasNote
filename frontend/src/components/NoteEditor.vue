@@ -55,6 +55,14 @@
             :title="conflictDetail"
           >
             <span>保存競合・下書き保持中</span>
+            <button
+              type="button"
+              :disabled="noteStore.isLoading"
+              @click="handleReloadConflict"
+            >
+              {{ noteStore.isLoading ? '再読込中...' : '最新版を再読込' }}
+            </button>
+            <button type="button" @click="handleCopyConflict">コピー保存</button>
           </div>
           <div
             v-else-if="saveFailed"
@@ -555,6 +563,30 @@ async function handleRetrySave() {
   if (!noteId) return
 
   await noteStore.retryDraftSave(noteId)
+}
+
+async function handleReloadConflict() {
+  const note = noteStore.activeNote
+  if (!note) return
+  if (!window.confirm('ローカルの下書きを破棄して、最新の保存内容を再読み込みますか？')) return
+
+  const latestNote = await noteStore.reloadConflictedNote(note.id)
+  if (!latestNote) return
+
+  localTitle.value = latestNote.title
+  localMarkdown.value = latestNote.content
+  isRichDirty.value = false
+  if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(latestNote.content)) {
+    editMode.value = 'markdown'
+  }
+  resetSaveFeedback()
+}
+
+async function handleCopyConflict() {
+  const noteId = noteStore.activeNote?.id
+  if (!noteId) return
+
+  await noteStore.copyConflictedDraft(noteId)
 }
 
 function handleDiscardDraft() {
