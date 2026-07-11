@@ -21,6 +21,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - データディレクトリ単位の単一writer保証
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
+- Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
 
 ## Phase 2の対象
 
@@ -47,7 +48,6 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - Markdown / Rich変換の追加テスト
 - 構造化ログと大量ノート時の性能確認
 - 同期前の競合検出、revision / CAS、保存キュー設計
-- raw HTMLの安全な変換・サニタイズ方針
 
 ## 保留事項
 

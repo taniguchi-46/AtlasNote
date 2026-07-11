@@ -353,6 +353,7 @@ import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 
 const CustomTableCell = TableCell.extend({
@@ -387,10 +388,7 @@ const editor = new Editor({
       codeBlock: false,
       link: false,
     }),
-    Markdown.configure({
-      html: true,
-      linkify: true,
-    }),
+    Markdown.configure(RICH_MARKDOWN_OPTIONS),
     Placeholder.configure({
       emptyNodeClass: 'is-empty',
       showOnlyCurrent: true,
@@ -584,7 +582,7 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
 function setEditorFromMarkdown(markdown: string): boolean {
   isApplyingContent.value = true
   try {
-    const html = parseMarkdownToRichHtml(escapeRawHtmlForRichEditor(markdown))
+    const html = parseMarkdownToRichHtml(markdown)
     const content = parseRichHtmlToJson(html)
     ;(editor.commands as any).setContent(content, {
       emitUpdate: false,
@@ -597,28 +595,6 @@ function setEditorFromMarkdown(markdown: string): boolean {
   } finally {
     isApplyingContent.value = false
   }
-}
-
-function escapeRawHtmlForRichEditor(markdown: string) {
-  let inFence = false
-
-  return markdown
-    .split('\n')
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence
-        return line
-      }
-      if (inFence) return line
-
-      return line.replace(/<\/?[A-Za-z][^>\n]*>/g, (tag) =>
-        tag
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;'),
-      )
-    })
-    .join('\n')
 }
 
 function applyRichEditorToMarkdown() {

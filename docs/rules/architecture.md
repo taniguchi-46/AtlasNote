@@ -80,6 +80,14 @@ Go Backend
 | AI API | ユーザー自身の API Key を利用する。保存方式、対応プロバイダ、モデル選択は未確定 |
 | OS Keychain | API Key 保存先の候補。採用可否は未確定 |
 
+### 外部Markdownのraw HTML
+
+- Markdown本文は正本のまま保存し、raw HTMLを保存時に削除・書換しない。
+- MarkdownからRichエディタへ変換するときはMarkdownパーサーのHTML解釈を無効にし、raw HTMLを実行可能なDOM要素へ変換しない。
+- `<script>`などの要素、`onclick`などのイベント属性、raw HTML内の`javascript:` URLはすべてHTMLとして許可しない。
+- 通常のMarkdownリンクと画像URLにもパーサーのURL検証を適用し、危険なURLをリンクまたは画像として生成しない。
+- 将来raw HTMLの表示が必要になった場合は、許可する要素・属性・URL schemeを先に定義し、regexではなくDOMベースの専用サニタイザーを採用する。
+
 ## 未確定事項
 
 - 検索方式。SQLite FTS、外部インデックス、または別方式のどれを採用するか。

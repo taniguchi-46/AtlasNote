@@ -13,6 +13,7 @@
     "test:note-delete": "node scripts/test-note-delete.mjs",
     "test:notebook-hierarchy": "node scripts/test-notebook-hierarchy.mjs",
     "test:serializer": "node scripts/test-serializer.mjs",
+    "test:markdown-safety": "node scripts/test-markdown-safety.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
