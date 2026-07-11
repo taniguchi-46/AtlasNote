@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev-MVP
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+
+      - name: Run Go tests
+        run: go test ./...
+
+      # A clean checkout does not contain the ignored frontend/wailsjs bindings.
+      # Wails generates them before compiling the production application.
+      - name: Build Wails application
+        run: wails build -clean
+
+      - name: Run frontend typecheck
+        run: npm --prefix frontend run typecheck
+
+      - name: Run serializer tests
+        run: npm --prefix frontend run test:serializer
+
+      - name: Run autosave concurrency tests
+        run: npm --prefix frontend run test:auto-save
+
+      - name: Run note selection race tests
+        run: npm --prefix frontend run test:note-selection
+
+      - name: Run note delete recovery tests
+        run: npm --prefix frontend run test:note-delete
+
+      - name: Run notebook hierarchy tests
+        run: npm --prefix frontend run test:notebook-hierarchy

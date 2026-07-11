@@ -279,3 +279,11 @@ wails doctor
 - WALはDB初期化時に設定し、`journal_mode = wal` が返ることを検証するようにした。
 - 2つの並行接続とDB再接続後の接続で、PRAGMA値と外部キー違反の拒否をテストした。
 - databaseパッケージの対象テストとGo全体テストは成功。race detectorは実行環境が `CGO_ENABLED=0` のため未実行。
+
+### 2026-07-11: Critical/High項目のCI設定
+
+- GitHub ActionsのWindowsクリーン環境で、Go全体テスト、Wails本番ビルド、フロントエンド型検査、serializerテスト、自動保存・ノート選択・削除・Notebook階層の回帰テストを実行するworkflowを追加した。
+- 同一ブランチの古いCI実行をキャンセルし、リポジトリ内容の読み取り権限だけで動作する構成にした。
+- `frontend`からリポジトリルートを参照していた未使用のローカル依存を削除し、`npm ci`直後のWails bindings生成が`node_modules`をGoパッケージとして走査する問題を解消した。
+- ローカルでは`npm ci`、Go全体テスト、Wailsクリーンビルド、フロントエンド型検査、全対象テストの成功を確認した。
+- GitHub Actionsの初回実行はworkflowのコミット・push後に確認する。初回成功までは`docs/todo/todo-mvp.md`の対象項目を未完了として維持する。
