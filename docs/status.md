@@ -26,6 +26,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
 - Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
+- Storeの `conflicted` draft状態、競合情報とローカル下書きの保持
 
 ## Phase 2の対象
 
@@ -52,7 +53,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 並行保存中の状態表示
 - Markdown / Rich変換の追加テスト
 - 構造化ログと大量ノート時の性能確認
-- ノート単位保存キュー、競合時のdraft保持と解決UI
+- ノート単位保存キュー、競合解決UI
 
 ## 保留事項
 

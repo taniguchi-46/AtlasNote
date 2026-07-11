@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { note } from '../../wailsjs/go/models'
-import { listNotes, getNote, createNote, updateNote, deleteNote } from '../api/notes'
+import {
+  listNotes,
+  getNote,
+  createNote,
+  updateNote,
+  deleteNote,
+  NoteRevisionConflictError,
+} from '../api/notes'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
@@ -10,8 +17,14 @@ import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 const DEFAULT_NOTE_TITLE = '新しいノート'
 
 export type NoteDraft = NoteSaveSnapshot & {
-  status: 'dirty' | 'saving' | 'failed'
+  status: 'dirty' | 'saving' | 'failed' | 'conflicted'
   error: string | null
+  conflict: {
+    code: string
+    noteId: string
+    expectedRevision: number
+    actualRevision: number
+  } | null
 }
 
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
@@ -181,7 +194,11 @@ export const useNoteStore = defineStore('notes', () => {
     return revision
   }
 
-  async function persistNote(id: string, input: note.UpdateInput) {
+  async function persistNote(
+    id: string,
+    input: note.UpdateInput,
+    onFailure?: (failure: unknown) => void,
+  ) {
     isSaving.value = true
     error.value = null
     try {
@@ -190,6 +207,7 @@ export const useNoteStore = defineStore('notes', () => {
         expectedRevision: requirePersistedRevision(id),
       })
     } catch (e) {
+      onFailure?.(e)
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
       return null
     } finally {
@@ -200,12 +218,30 @@ export const useNoteStore = defineStore('notes', () => {
   async function persistDraftSnapshot(snapshot: NoteSaveSnapshot) {
     const current = getDraft(snapshot.noteId)
     if (current?.revision === snapshot.revision) {
-      replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null })
+      replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null, conflict: null })
     }
 
     return persistNote(snapshot.noteId, {
       title: snapshot.title,
       content: snapshot.content,
+    }, (failure) => {
+      const failedDraft = getDraft(snapshot.noteId)
+      if (
+        failedDraft?.revision !== snapshot.revision
+        || !(failure instanceof NoteRevisionConflictError)
+      ) return
+
+      replaceDraft(snapshot.noteId, {
+        ...failedDraft,
+        status: 'conflicted',
+        error: failure.message,
+        conflict: {
+          code: failure.code,
+          noteId: failure.noteId,
+          expectedRevision: failure.expectedRevision,
+          actualRevision: failure.actualRevision,
+        },
+      })
     })
   }
 
@@ -228,11 +264,13 @@ export const useNoteStore = defineStore('notes', () => {
     onFailed: (snapshot) => {
       const current = getDraft(snapshot.noteId)
       if (current?.revision !== snapshot.revision) return
+      if (current.status === 'conflicted') return
 
       replaceDraft(snapshot.noteId, {
         ...current,
         status: 'failed',
         error: error.value ?? 'ノートの保存に失敗しました',
+        conflict: null,
       })
     },
   })
@@ -248,7 +286,18 @@ export const useNoteStore = defineStore('notes', () => {
       content,
       revision: ++nextRevision,
     }
-    replaceDraft(noteId, { ...snapshot, status: 'dirty', error: null })
+    const current = getDraft(noteId)
+    if (current?.status === 'conflicted') {
+      replaceDraft(noteId, {
+        ...snapshot,
+        status: 'conflicted',
+        error: current.error,
+        conflict: current.conflict,
+      })
+      return snapshot
+    }
+
+    replaceDraft(noteId, { ...snapshot, status: 'dirty', error: null, conflict: null })
     autoSave.schedule(snapshot)
     return snapshot
   }
@@ -260,8 +309,9 @@ export const useNoteStore = defineStore('notes', () => {
   async function retryDraftSave(noteId: string) {
     const draft = getDraft(noteId)
     if (!draft) return true
+    if (draft.status === 'conflicted') return false
 
-    replaceDraft(noteId, { ...draft, status: 'dirty', error: null })
+    replaceDraft(noteId, { ...draft, status: 'dirty', error: null, conflict: null })
     autoSave.schedule(draft)
     await autoSave.flush()
     return getDraft(noteId) === null
@@ -273,6 +323,7 @@ export const useNoteStore = defineStore('notes', () => {
     for (const draft of Object.values(drafts.value)) {
       const current = getDraft(draft.noteId)
       if (!current || current.revision !== draft.revision) continue
+      if (current.status === 'conflicted') continue
 
       autoSave.schedule(current)
       await autoSave.flush()
