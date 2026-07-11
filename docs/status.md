@@ -51,7 +51,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 ## Phase 2着手前の設計事項
 
 - revision、競合検出、保存キューの仕様は `docs/development/note-concurrency.md` で確定済み
-- 全文検索の索引方式
+- 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
 - タグのデータモデルと制約
 - バックリンクの抽出規則と関連メモの判定基準
 - 検索、フィルター、並び替えを組み合わせるAPIと画面状態
@@ -100,6 +100,7 @@ wails build
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
+| `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/todo/todo-phese2.md` | Phase 2の作業チェックリスト |
 | `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
 | `docs/development/setup.md` | 開発環境セットアップ |

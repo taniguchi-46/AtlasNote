@@ -39,6 +39,54 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	}
 }
 
+func TestSQLiteSupportsFTS5TrigramSearch(t *testing.T) {
+	t.Parallel()
+
+	db, err := Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	if _, err := db.ExecContext(t.Context(), `
+CREATE VIRTUAL TABLE note_search_probe USING fts5(
+	note_id UNINDEXED,
+	title,
+	body,
+	tokenize = 'trigram'
+);
+INSERT INTO note_search_probe(note_id, title, body)
+VALUES ('note-1', '検索テスト', 'Markdown本文を全文検索する');
+`); err != nil {
+		t.Fatalf("create and populate FTS5 trigram table: %v", err)
+	}
+
+	var matched int
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT COUNT(*) FROM note_search_probe WHERE note_search_probe MATCH ?",
+		"全文検索",
+	).Scan(&matched); err != nil {
+		t.Fatalf("search Japanese trigram: %v", err)
+	}
+	if matched != 1 {
+		t.Fatalf("Japanese trigram matches = %d, want 1", matched)
+	}
+
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT COUNT(*) FROM note_search_probe WHERE body LIKE ?",
+		"%検索%",
+	).Scan(&matched); err != nil {
+		t.Fatalf("search two-character LIKE fallback: %v", err)
+	}
+	if matched != 1 {
+		t.Fatalf("two-character LIKE matches = %d, want 1", matched)
+	}
+}
+
 func TestOpenMigratesVersionOneDatabaseWithoutChangingExistingData(t *testing.T) {
 	t.Parallel()
 

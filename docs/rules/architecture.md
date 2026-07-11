@@ -74,6 +74,14 @@ Go Backend
 - revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/note-concurrency.md` を正とする。
 - ローカル保存キューと将来の同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 
+### Markdown全文検索
+
+- Markdown本文はファイルを正本とし、SQLite FTS5のcontentful索引は破棄・再構築可能な派生データとする。
+- 日本語の部分一致を優先し、FTS5の `trigram` tokenizerを使用する。
+- `notes` テーブルに本文カラムを追加しない。
+- 索引更新失敗でMarkdown正本の保存をrollbackせず、不整合は検出・再構築する。
+- 索引方式、更新タイミング、再構築の確定仕様は `docs/development/search-index.md` を正とする。
+
 ## 外部連携
 
 | 連携 | 方針 |
@@ -92,6 +100,5 @@ Go Backend
 
 ## 未確定事項
 
-- 検索方式。SQLite FTS、外部インデックス、または別方式のどれを採用するか。
 - タグ、バックリンク、関連メモに必要なデータ構造と更新境界。
 - AI 機能の呼び出し境界を Go 側に集約するか、フロントエンド側の設定 UI とどう分けるか。
