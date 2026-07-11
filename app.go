@@ -67,10 +67,12 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) beforeClose(ctx context.Context) bool {
 	a.closeMu.Lock()
+	// フロントエンドでの保存処理が完了し、終了が許可された場合は false を返して終了プロセスを続行する
 	if a.allowClose {
 		a.closeMu.Unlock()
 		return false
 	}
+	// すでに終了リクエストをフロントエンドに送信済みの場合は、重複してイベントを送らないようにする
 	if a.closeRequested {
 		a.closeMu.Unlock()
 		return true
@@ -78,6 +80,9 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	a.closeRequested = true
 	a.closeMu.Unlock()
 
+	// 即座にアプリを終了させず、フロントエンドに対して終了処理のフック（app:before-close）を通知する。
+	// これにより、フロントエンド側で未保存のノートの非同期保存（フラッシュ）を完了させる猶予を与える。
+	// true を返すとWails側でのウィンドウ終了処理が一旦キャンセルされる。
 	runtime.EventsEmit(ctx, "app:before-close")
 	return true
 }

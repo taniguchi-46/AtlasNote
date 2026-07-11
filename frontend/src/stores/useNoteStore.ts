@@ -82,6 +82,8 @@ export const useNoteStore = defineStore('notes', () => {
     } else {
       delete nextDrafts[noteId]
     }
+    // Vueのリアクティビティを確実にするため、オブジェクトのプロパティを直接変更するのではなく、
+    // 新しいオブジェクトを丸ごと代入して状態を更新する。
     drafts.value = nextDrafts
   }
 
@@ -100,6 +102,9 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function selectNote(id: string) {
+    // ノートを連続で高速に切り替えた際、過去のリクエストのレスポンスが遅延して到着し、
+    // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
+    // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
     const isLatestRequest = noteSelectionRequests.begin()
     await flushPendingDraft()
     if (!isLatestRequest()) return
@@ -216,6 +221,10 @@ export const useNoteStore = defineStore('notes', () => {
   })
 
   function scheduleDraft(noteId: string, title: string, content: string) {
+    // ユーザーの入力ごとに毎回バックエンドAPI（DBおよびファイルシステム）へ保存リクエストを送ると、
+    // 通信量やディスクI/Oが過剰になりパフォーマンスが低下する。
+    // そのため、入力を一旦ドラフト（dirty状態）としてメモリ上に保持し、
+    // autoSave によって一定時間（delayMs）経過後にまとめてバックエンドへ書き込む（デバウンス処理）。
     const snapshot: NoteSaveSnapshot = {
       noteId,
       title,

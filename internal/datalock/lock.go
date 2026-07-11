@@ -20,6 +20,10 @@ func Acquire(path string) (*Lock, error) {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 
+	// データディレクトリに対してOSレベルの排他ロック（ファイルロック）を取得する。
+	// これにより、ユーザーが誤ってアプリを複数起動した場合でも、
+	// 2つ目以降のインスタンスが同一のSQLite DBやMarkdownファイルに同時書き込みを行い、
+	// データが破壊される事故を未然に防ぐことができる。
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open data directory lock: %w", err)

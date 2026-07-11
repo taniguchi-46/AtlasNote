@@ -56,11 +56,15 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     const snapshot = pendingSnapshot
     pendingSnapshot = null
     if (!snapshot) {
+      // 処理すべきスナップショットがない場合、現在実行中の保存処理があればその完了を待つ。
+      // これにより、保存中に強制終了されたり、次の操作が走るのを防ぐ。
       return inFlightSave ? await inFlightSave : true
     }
 
     const previousSave = inFlightSave
     const save = (async () => {
+      // 前回の保存リクエスト（inFlightSave）がまだ完了していない場合、
+      // 順番が前後して古いデータが新しいデータを上書きしてしまうのを防ぐため、前回の完了を待機する。
       if (previousSave) {
         await previousSave
       }

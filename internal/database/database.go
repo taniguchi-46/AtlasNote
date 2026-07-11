@@ -57,6 +57,9 @@ func sqliteDSN(databasePath string) string {
 
 func configure(ctx context.Context, db *sql.DB) error {
 	var journalMode string
+	// デフォルトのDELETEモードではなくWAL（Write-Ahead Logging）モードを明示的に指定する。
+	// これにより、読み込みと書き込みが互いにブロックしにくくなり並行処理性能が向上するだけでなく、
+	// アプリケーションがクラッシュした際のデータベース破損リスクも低減される。
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
 		return fmt.Errorf("configure sqlite journal mode: %w", err)
 	}
@@ -153,6 +156,10 @@ func validateSchemaVersion(ctx context.Context, db *sql.DB, currentVersion int) 
 		return 0, fmt.Errorf("read user_version: %w", err)
 	}
 
+	// 現在のアプリが想定しているマイグレーションの数（currentVersion）よりも
+	// DBファイルのバージョン（userVersion）が新しい場合、起動をブロックする。
+	// これを許可してしまうと、古い仕様のアプリが新しいスキーマのデータを誤って読み書きし、
+	// データ構造を修復不能な状態に破壊してしまう恐れがあるため。
 	if userVersion > currentVersion {
 		return 0, fmt.Errorf("%w: database version %d, supported version %d", ErrDatabaseVersionTooNew, userVersion, currentVersion)
 	}

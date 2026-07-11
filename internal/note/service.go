@@ -56,9 +56,12 @@ func NewService(repository *Repository, store markdownStore) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
+	// 複数リクエストやバックグラウンドのリカバリ処理が同時にデータを書き換えるのを防ぐため、排他ロックを取得する
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// 過去にアプリがクラッシュして一時ファイルやDBの不整合状態が残っている場合、
+	// 後続の処理がデータを破壊しないように、操作前に必ずリカバリを完了させる
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return Note{}, err
 	}
@@ -99,15 +102,21 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		CreatedAt:   now,
 	}
 
+	// 保存処理の途中でアプリが強制終了されてもデータが破損しないよう、
+	// ファイルとDBの2フェーズコミットに近い手順で書き込みを行う。
+	// 
+	// 1. .tmp 拡張子で一時ファイルを書き込む（クラッシュしても元のファイルは無事）
 	if err := s.store.WriteTemp(ctx, id, operationID, content); err != nil {
 		return Note{}, err
 	}
 
+	// 2. DBにノート本体のレコードと「保存中(upsert)」を示す StorageOperation レコードを同一トランザクションで書き込む
 	if err := s.repository.CreateWithStorageOperation(ctx, record, operation); err != nil {
 		_ = s.store.RollbackTemp(context.Background(), id, operationID)
 		return Note{}, fmt.Errorf("create note record: %w", err)
 	}
 
+	// 3. 一時ファイルを正規のファイル名（.md）にリネームして確定する
 	if err := s.store.CommitTemp(ctx, id, operationID); err != nil {
 		rollbackErr := s.repository.RollbackCreatedNote(context.Background(), id, operationID)
 		if rollbackErr == nil {
@@ -116,6 +125,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		}
 		return Note{}, fmt.Errorf("commit markdown: %w; rollback note record: %v", err, rollbackErr)
 	}
+	// 4. 保存完了の印として StorageOperation レコードを削除する
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
 	return Note{
@@ -230,6 +240,8 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			CreatedAt:   time.Now().UTC(),
 		}
 
+		// Update処理でもCreate時と同様に、一時ファイル作成 -> DB更新 -> ファイル名確定 の順序を踏む。
+		// この順序により、ファイル書き込み中のクラッシュによって既存データが消失する事故を防ぐ。
 		if err := s.store.WriteTemp(ctx, record.ID, operationID, content); err != nil {
 			return Note{}, err
 		}
@@ -288,6 +300,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		Type:      StorageOperationDelete,
 		CreatedAt: time.Now().UTC(),
 	}
+	// Delete処理の際は、先にファイルを削除してしまうとDB更新前にクラッシュした場合にファイルだけ消えてしまう。
+	// そのため、1) DBに「削除処理中」を記録、2) ファイルを一時削除状態(.delete)にリネーム、
+	// 3) DBからレコード削除、4) 一時削除状態のファイルを完全に削除、という順序で安全に消す。
 	if err := s.repository.BeginStorageOperation(ctx, operation); err != nil {
 		return fmt.Errorf("begin markdown delete: %w", err)
 	}
@@ -371,6 +386,9 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 	if record.ContentPath != contentPath {
 		return fmt.Errorf("note %s has invalid content path", record.ID)
 	}
+	// 実際のファイルが存在するか確認。
+	// 万が一ファイルが復旧された（ユーザーが手動で戻した等）場合は削除を許可しない。
+	// そうしないと、有効なデータを誤って削除してしまう。
 	exists, err := s.store.Exists(ctx, record.ID)
 	if err != nil {
 		return err
@@ -383,6 +401,8 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 }
 
 func (s *Service) recoverPendingLocked(ctx context.Context) error {
+	// アプリが強制終了された際に、処理途中だった操作（StorageOperationレコード）の一覧を取得する。
+	// これを再開またはロールバックすることで、次に行われるノートの保存や読み込みが破損した状態で行われるのを防ぐ。
 	operations, err := s.repository.ListStorageOperations(ctx)
 	if err != nil {
 		return err

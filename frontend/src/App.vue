@@ -215,6 +215,9 @@ async function handleBeforeClose() {
   isHandlingBeforeClose = true
 
   try {
+    // ユーザーがウィンドウを閉じようとした際、Wails側のデフォルト終了処理をフックしてこの関数が呼ばれる。
+    // 即座にアプリを終了させず、未保存のノート（dirty notes）をバックエンドに書き込む時間を確保する。
+    // フラッシュに成功した場合は CompleteClose を呼んで実際にアプリを終了させる。
     if (await noteStore.flushAllDirtyNotes()) {
       await CompleteClose()
       return
@@ -254,6 +257,8 @@ async function handleBeforeClose() {
 function handleBeforeUnload(event: BeforeUnloadEvent) {
   if (!noteStore.hasDirtyNotes) return
 
+  // ブラウザの再読み込みや強制終了時に、未保存のデータがある場合は警告ダイアログを表示する。
+  // （Wailsのネイティブウィンドウだけでなく、ブラウザ開発時のタブ閉じに対応するための防波堤）
   event.preventDefault()
   event.returnValue = ''
 }

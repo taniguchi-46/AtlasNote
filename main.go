@@ -25,8 +25,11 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 248, G: 250, B: 252, A: 1},
 		OnStartup:        app.startup,
+		// OnBeforeCloseをフックすることで、ユーザーが「×」ボタンでウィンドウを閉じようとした際に、
+		// 未保存の入力データをDBやファイルに保存し終わるまでアプリの終了を待機させる。
 		OnBeforeClose:    app.beforeClose,
 		OnShutdown:       app.shutdown,
+		// フロントエンド（JS/TS）からGoのメソッドを呼び出せるようにバインディングを登録する。
 		Bind: []interface{}{
 			app,
 		},

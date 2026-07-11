@@ -59,6 +59,9 @@ func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, operationID st
 		return err
 	}
 
+	// 既存ファイルを直接上書きすると、OSのクラッシュやプロセス強制終了が発生した際に
+	// ファイルサイズが0になったり、内容が中途半端に上書きされてデータが破損するリスクがある。
+	// そのため、一時ファイル（.tmp）に書き込んでから確実にクローズし、その後リネーム（OSレベルのアトミック操作）で上書きする。
 	tempPath, err := s.tempPath(id, operationID)
 	if err != nil {
 		return err
@@ -291,6 +294,10 @@ func (s *MarkdownStore) QuarantineOrphans(ctx context.Context, expected map[stri
 		return err
 	}
 
+	// DBに記録されていないMarkdownファイル（孤児ファイル）が見つかった場合、
+	// アプリ側のバグや予期せぬ不整合の可能性がある。
+	// ここで即座に削除（Delete）してしまうと、ユーザーの大切なメモが完全に失われる危険があるため、
+	// 念のための安全策として 'recovery' ディレクトリに退避（Quarantine）させるに留める。
 	entries, err := os.ReadDir(s.rootDir)
 	if err != nil {
 		return fmt.Errorf("list markdown directory: %w", err)
