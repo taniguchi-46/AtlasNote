@@ -9,6 +9,6 @@
 | Reka UI | Vue 向けのアクセシブルな UI プリミティブ |
 | UnoCSS | ユーティリティファースト CSS エンジン |
 | Tiptap | ProseMirror ベースのリッチテキストエディタ |
-| CodeMirror | コードや Markdown 編集に使うエディタコンポーネント |
+| Markdown textarea | Markdown原文を直接編集する入力欄 |
 | Squirrel | Go 向け SQL クエリビルダー |
 | WebDAV | ファイル同期先として想定しているリモートストレージ連携方式 |

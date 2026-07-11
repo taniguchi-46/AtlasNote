@@ -23,10 +23,11 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 - `docs/rules/`: Agent 共通で参照するプロジェクト知識、設計、規約。
 - `docs/status.md`: 現在の作業状況。
+- `docs/development/scopes/scope.md`: Phase 2 を含む開発ロードマップと機能要件。
 - `.agents/`: Agent 固有の行動指針とスキル (`.agents/AGENTS.md` など)。
 - `.codex/`: テンプレート類。
 
-作業前に `docs/status.md` と `docs/rules/ai.md` を確認してください。
+作業前に `docs/status.md`、`docs/development/scopes/scope.md`、`docs/rules/ai.md` を確認してください。
 
 ---
 
@@ -42,7 +43,7 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 | UI | Reka UI |
 | State | Composables + Pinia |
 | Database | SQLite |
-| Editor | Tiptap + CodeMirror |
+| Editor | Markdown textarea + Tiptap |
 | Storage | Markdown |
 | Data Access | Repository + Squirrel |
 
