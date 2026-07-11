@@ -110,6 +110,10 @@ CREATE TABLE IF NOT EXISTS note_storage_operations (
 CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
 	ON note_storage_operations(note_id);
 `,
+	`
+ALTER TABLE notes
+	ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1);
+`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -202,6 +206,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
 		"is_favorite": "BOOLEAN NOT NULL DEFAULT 0",
 		"is_pinned":   "BOOLEAN NOT NULL DEFAULT 0",
 		"is_trashed":  "BOOLEAN NOT NULL DEFAULT 0",
+		"revision":    "INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1)",
 	}
 	for name, definition := range requiredColumns {
 		if columns[name] {

@@ -47,6 +47,72 @@ func TestGetStartupStatusError(t *testing.T) {
 	}
 }
 
+func TestAppReturnsStructuredRevisionConflict(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(context.Background())
+	t.Cleanup(func() {
+		app.shutdown(t.Context())
+	})
+	created, err := app.CreateNote(note.CreateInput{Title: "Original", Content: "original content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	updatedTitle := "Updated"
+	expectedRevision := created.Revision
+	updatedResult, err := app.UpdateNote(created.ID, note.UpdateInput{
+		Title:            &updatedTitle,
+		ExpectedRevision: &expectedRevision,
+	})
+	if err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+	if updatedResult.Note == nil || updatedResult.Conflict != nil {
+		t.Fatalf("update result = %#v", updatedResult)
+	}
+	if updatedResult.Note.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updatedResult.Note.Revision)
+	}
+
+	staleTitle := "Stale overwrite"
+	conflictResult, err := app.UpdateNote(created.ID, note.UpdateInput{
+		Title:            &staleTitle,
+		ExpectedRevision: &expectedRevision,
+	})
+	if err != nil {
+		t.Fatalf("stale update returned system error: %v", err)
+	}
+	if conflictResult.Note != nil || conflictResult.Conflict == nil {
+		t.Fatalf("conflict result = %#v", conflictResult)
+	}
+	conflict := conflictResult.Conflict
+	if conflict.Code != note.ErrorCodeRevisionConflict ||
+		conflict.NoteID != created.ID ||
+		conflict.ExpectedRevision != 1 ||
+		conflict.ActualRevision != 2 {
+		t.Fatalf("update conflict = %#v", conflict)
+	}
+
+	deleteConflict, err := app.DeleteNote(created.ID, note.DeleteInput{ExpectedRevision: 1})
+	if err != nil {
+		t.Fatalf("stale delete returned system error: %v", err)
+	}
+	if deleteConflict.Deleted || deleteConflict.Conflict == nil {
+		t.Fatalf("delete conflict result = %#v", deleteConflict)
+	}
+
+	deletedResult, err := app.DeleteNote(created.ID, note.DeleteInput{ExpectedRevision: 2})
+	if err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+	if !deletedResult.Deleted || deletedResult.Conflict != nil {
+		t.Fatalf("delete result = %#v", deletedResult)
+	}
+}
+
 func TestNewAppReportsInitializationError(t *testing.T) {
 	tempDir := t.TempDir()
 	blockedDataDir := filepath.Join(tempDir, "blocked")

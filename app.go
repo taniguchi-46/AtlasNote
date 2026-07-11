@@ -125,18 +125,35 @@ func (a *App) GetNote(id string) (note.Note, error) {
 	return a.notes.Get(a.ctx, id)
 }
 
-func (a *App) UpdateNote(id string, input note.UpdateInput) (note.Note, error) {
+func (a *App) UpdateNote(id string, input note.UpdateInput) (note.UpdateNoteResult, error) {
 	if a.notes == nil {
-		return note.Note{}, errors.New("note service is not initialized")
+		return note.UpdateNoteResult{}, errors.New("note service is not initialized")
 	}
-	return a.notes.Update(a.ctx, id, input)
+	updated, err := a.notes.Update(a.ctx, id, input)
+	if err != nil {
+		var conflict *note.RevisionConflict
+		if errors.As(err, &conflict) {
+			return note.UpdateNoteResult{Conflict: conflict}, nil
+		}
+		return note.UpdateNoteResult{}, err
+	}
+
+	return note.UpdateNoteResult{Note: &updated}, nil
 }
 
-func (a *App) DeleteNote(id string) error {
+func (a *App) DeleteNote(id string, input note.DeleteInput) (note.DeleteNoteResult, error) {
 	if a.notes == nil {
-		return errors.New("note service is not initialized")
+		return note.DeleteNoteResult{}, errors.New("note service is not initialized")
 	}
-	return a.notes.Delete(a.ctx, id)
+	if err := a.notes.Delete(a.ctx, id, input); err != nil {
+		var conflict *note.RevisionConflict
+		if errors.As(err, &conflict) {
+			return note.DeleteNoteResult{Conflict: conflict}, nil
+		}
+		return note.DeleteNoteResult{}, err
+	}
+
+	return note.DeleteNoteResult{Deleted: true}, nil
 }
 
 func (a *App) DeleteMissingNote(id string) (StartupStatus, error) {

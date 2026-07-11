@@ -50,6 +50,9 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	if created.ID == "" {
 		t.Fatal("created note id is empty")
 	}
+	if created.Revision != 1 {
+		t.Fatalf("created revision = %d, want 1", created.Revision)
+	}
 
 	got, err := service.Get(ctx, created.ID)
 	if err != nil {
@@ -61,6 +64,9 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	if got.Content != "# Hello\n\nContent" {
 		t.Fatalf("got content %q", got.Content)
 	}
+	if got.Revision != 1 {
+		t.Fatalf("got revision = %d, want 1", got.Revision)
+	}
 
 	summaries, err := service.List(ctx)
 	if err != nil {
@@ -69,10 +75,14 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	if len(summaries) != 1 {
 		t.Fatalf("summary count = %d", len(summaries))
 	}
+	if summaries[0].Revision != 1 {
+		t.Fatalf("summary revision = %d, want 1", summaries[0].Revision)
+	}
 
 	updated, err := service.Update(ctx, created.ID, note.UpdateInput{
-		Title:   ptr("Updated note"),
-		Content: ptr("Updated content"),
+		Title:            ptr("Updated note"),
+		Content:          ptr("Updated content"),
+		ExpectedRevision: ptr(created.Revision),
 	})
 	if err != nil {
 		t.Fatalf("update note: %v", err)
@@ -83,13 +93,75 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	if updated.Content != "Updated content" {
 		t.Fatalf("updated content %q", updated.Content)
 	}
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
+	}
 
-	if err := service.Delete(ctx, created.ID); err != nil {
+	if err := service.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: updated.Revision}); err != nil {
 		t.Fatalf("delete note: %v", err)
 	}
 
 	if _, err := service.Get(ctx, created.ID); err != note.ErrNotFound {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestServiceRejectsMissingAndStaleRevisionBeforeStorageMutation(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Original", Content: "original content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	if _, err := service.Update(ctx, created.ID, note.UpdateInput{Content: ptr("missing revision")}); !errors.Is(err, note.ErrValidation) {
+		t.Fatalf("missing revision error = %v, want ErrValidation", err)
+	}
+
+	staleRevision := created.Revision + 1
+	_, err = service.Update(ctx, created.ID, note.UpdateInput{
+		Content:          ptr("stale content"),
+		ExpectedRevision: ptr(staleRevision),
+	})
+	if !errors.Is(err, note.ErrRevisionConflict) {
+		t.Fatalf("stale update error = %v, want ErrRevisionConflict", err)
+	}
+	content, err := store.Read(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("read content after stale update: %v", err)
+	}
+	if content != "original content" {
+		t.Fatalf("content after stale update = %q", content)
+	}
+	operations, err := repository.ListStorageOperations(ctx)
+	if err != nil {
+		t.Fatalf("list storage operations after stale update: %v", err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("storage operations after stale update = %#v", operations)
+	}
+
+	err = service.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: staleRevision})
+	if !errors.Is(err, note.ErrRevisionConflict) {
+		t.Fatalf("stale delete error = %v, want ErrRevisionConflict", err)
+	}
+	exists, err := store.Exists(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("check content after stale delete: %v", err)
+	}
+	if !exists {
+		t.Fatal("stale delete removed markdown")
+	}
+	if _, err := repository.Get(ctx, created.ID); err != nil {
+		t.Fatalf("stale delete removed note record: %v", err)
+	}
+	operations, err = repository.ListStorageOperations(ctx)
+	if err != nil {
+		t.Fatalf("list storage operations after stale delete: %v", err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("storage operations after stale delete = %#v", operations)
 	}
 }
 
@@ -132,13 +204,17 @@ func TestServiceUpdateCanClearNotebook(t *testing.T) {
 	}
 
 	updated, err := service.Update(ctx, created.ID, note.UpdateInput{
-		ClearNotebook: ptr(true),
+		ClearNotebook:    ptr(true),
+		ExpectedRevision: ptr(created.Revision),
 	})
 	if err != nil {
 		t.Fatalf("clear notebook: %v", err)
 	}
 	if updated.NotebookID != nil {
 		t.Fatalf("expected notebook id to be cleared, got %v", *updated.NotebookID)
+	}
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
 	}
 }
 
@@ -610,6 +686,61 @@ func TestServiceRecoverPendingDelete(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateCASRestoresPreviousRevisionWhenMarkdownCommitFails(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, service, notesDir := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Original", Content: "original content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	commitErr := errors.New("rename denied")
+	failingService := note.NewService(repository, &commitTempFailingStore{
+		MarkdownStore: store,
+		err:           commitErr,
+	})
+
+	_, err = failingService.Update(ctx, created.ID, note.UpdateInput{
+		Title:            ptr("Must roll back"),
+		Content:          ptr("must roll back"),
+		ExpectedRevision: ptr(created.Revision),
+	})
+	if err == nil || !errors.Is(err, commitErr) {
+		t.Fatalf("update error = %v, want commit error", err)
+	}
+
+	record, err := repository.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get rolled back note record: %v", err)
+	}
+	if record.Title != "Original" || record.Revision != created.Revision {
+		t.Fatalf("rolled back record = %#v", record)
+	}
+	content, err := store.Read(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("read rolled back markdown: %v", err)
+	}
+	if content != "original content" {
+		t.Fatalf("rolled back markdown = %q", content)
+	}
+	operations, err := repository.ListStorageOperations(ctx)
+	if err != nil {
+		t.Fatalf("list operations after rollback: %v", err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("operations after rollback = %#v", operations)
+	}
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		t.Fatalf("read notes directory after rollback: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatalf("temporary markdown remains after rollback: %s", entry.Name())
+		}
+	}
+}
+
 func TestServiceDeleteReturnsCommitFailureAndRecoverRetries(t *testing.T) {
 	t.Parallel()
 
@@ -625,7 +756,7 @@ func TestServiceDeleteReturnsCommitFailureAndRecoverRetries(t *testing.T) {
 		t.Fatalf("create note: %v", err)
 	}
 
-	err = service.Delete(ctx, created.ID)
+	err = service.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: created.Revision})
 	if err == nil || !errors.Is(err, commitErr) {
 		t.Fatalf("expected commit delete error, got %v", err)
 	}
@@ -795,7 +926,7 @@ func TestServiceRecoverQuarantinesOrphanMarkdown(t *testing.T) {
 	}
 }
 
-func TestServiceSerializesConcurrentContentUpdates(t *testing.T) {
+func TestServiceConcurrentContentUpdatesAllowOneRevisionWriter(t *testing.T) {
 	t.Parallel()
 
 	ctx, repository, _, service, _ := newRecoveryTestService(t)
@@ -817,22 +948,34 @@ func TestServiceSerializesConcurrentContentUpdates(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			updated, err := service.Update(ctx, created.ID, note.UpdateInput{
-				Title:   ptr(values[0]),
-				Content: ptr(values[1]),
+				Title:            ptr(values[0]),
+				Content:          ptr(values[1]),
+				ExpectedRevision: ptr(created.Revision),
 			})
 			results <- updateResult{title: updated.Title, content: updated.Content, err: err}
 		}()
 	}
 	wait.Wait()
 	close(results)
+	successes := 0
+	conflicts := 0
 	for result := range results {
-		if result.err != nil {
-			t.Fatalf("concurrent update: %v", result.err)
+		if result.err == nil {
+			successes++
+			if (result.title == "First" && result.content != "first content") ||
+				(result.title == "Second" && result.content != "second content") {
+				t.Fatalf("mismatched update result: title %q, content %q", result.title, result.content)
+			}
+			continue
 		}
-		if (result.title == "First" && result.content != "first content") ||
-			(result.title == "Second" && result.content != "second content") {
-			t.Fatalf("mismatched update result: title %q, content %q", result.title, result.content)
+		if errors.Is(result.err, note.ErrRevisionConflict) {
+			conflicts++
+			continue
 		}
+		t.Fatalf("concurrent update: %v", result.err)
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent results: successes=%d conflicts=%d", successes, conflicts)
 	}
 
 	got, err := service.Get(ctx, created.ID)
@@ -842,6 +985,9 @@ func TestServiceSerializesConcurrentContentUpdates(t *testing.T) {
 	if (got.Title == "First" && got.Content != "first content") ||
 		(got.Title == "Second" && got.Content != "second content") {
 		t.Fatalf("mismatched persisted note: title %q, content %q", got.Title, got.Content)
+	}
+	if got.Revision != 2 {
+		t.Fatalf("persisted revision = %d, want 2", got.Revision)
 	}
 	operations, err := repository.ListStorageOperations(ctx)
 	if err != nil {
@@ -879,6 +1025,15 @@ func newRecoveryTestService(t *testing.T) (context.Context, *note.Repository, *s
 type commitDeleteFailingStore struct {
 	*storage.MarkdownStore
 	err error
+}
+
+type commitTempFailingStore struct {
+	*storage.MarkdownStore
+	err error
+}
+
+func (s *commitTempFailingStore) CommitTemp(context.Context, string, string) error {
+	return s.err
 }
 
 func (s *commitDeleteFailingStore) CommitDelete(context.Context, string, string) error {

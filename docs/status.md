@@ -22,6 +22,10 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
+- schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
+- `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
+- Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
+- Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
 
 ## Phase 2の対象
 
@@ -34,6 +38,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 ## Phase 2着手前の設計事項
 
+- revision、競合検出、保存キューの仕様は `docs/development/note-concurrency.md` で確定済み
 - 全文検索の索引方式
 - タグのデータモデルと制約
 - バックリンクの抽出規則と関連メモの判定基準
@@ -47,7 +52,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 並行保存中の状態表示
 - Markdown / Rich変換の追加テスト
 - 構造化ログと大量ノート時の性能確認
-- 同期前の競合検出、revision / CAS、保存キュー設計
+- ノート単位保存キュー、競合時のdraft保持と解決UI
 
 ## 保留事項
 
@@ -82,6 +87,7 @@ wails build
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
+| `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/todo/todo-phese2.md` | Phase 2の作業チェックリスト |
 | `docs/development/setup.md` | 開発環境セットアップ |
 | `docs/development/tech-stack.md` | 採用技術 |

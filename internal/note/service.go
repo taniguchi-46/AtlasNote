@@ -22,6 +22,7 @@ var (
 	ErrNotFound         = errors.New("note not found")
 	ErrValidation       = errors.New("note validation failed")
 	ErrContentAvailable = errors.New("markdown content is available")
+	ErrRevisionConflict = errors.New("note revision conflict")
 )
 
 type Service struct {
@@ -91,6 +92,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		NotebookID:  input.NotebookID,
 		Title:       title,
 		ContentPath: contentPath,
+		Revision:    1,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -104,7 +106,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 
 	// 保存処理の途中でアプリが強制終了されてもデータが破損しないよう、
 	// ファイルとDBの2フェーズコミットに近い手順で書き込みを行う。
-	// 
+	//
 	// 1. .tmp 拡張子で一時ファイルを書き込む（クラッシュしても元のファイルは無事）
 	if err := s.store.WriteTemp(ctx, id, operationID, content); err != nil {
 		return Note{}, err
@@ -136,6 +138,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		IsFavorite: record.IsFavorite,
 		IsPinned:   record.IsPinned,
 		IsTrashed:  record.IsTrashed,
+		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
 	}, nil
@@ -175,6 +178,7 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 		IsFavorite: record.IsFavorite,
 		IsPinned:   record.IsPinned,
 		IsTrashed:  record.IsTrashed,
+		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
 	}, nil
@@ -187,10 +191,17 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return Note{}, err
 	}
+	expectedRevision, err := validateExpectedRevision(input.ExpectedRevision)
+	if err != nil {
+		return Note{}, err
+	}
 
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return Note{}, err
+	}
+	if record.Revision != expectedRevision {
+		return Note{}, revisionConflict(record.ID, expectedRevision, record.Revision)
 	}
 	previous := record
 
@@ -245,10 +256,12 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		if err := s.store.WriteTemp(ctx, record.ID, operationID, content); err != nil {
 			return Note{}, err
 		}
-		if err := s.repository.UpdateWithStorageOperation(ctx, record, operation); err != nil {
+		nextRevision, err := s.repository.UpdateWithStorageOperationCAS(ctx, record, operation, expectedRevision)
+		if err != nil {
 			_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
+		record.Revision = nextRevision
 		if err := s.store.CommitTemp(ctx, record.ID, operationID); err != nil {
 			rollbackErr := s.repository.RollbackUpdatedNote(context.Background(), previous, operationID)
 			if rollbackErr == nil {
@@ -259,9 +272,11 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		}
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 	} else {
-		if err := s.repository.Update(ctx, record); err != nil {
+		nextRevision, err := s.repository.UpdateCAS(ctx, record, expectedRevision)
+		if err != nil {
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
+		record.Revision = nextRevision
 	}
 
 	return Note{
@@ -272,22 +287,29 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		IsFavorite: record.IsFavorite,
 		IsPinned:   record.IsPinned,
 		IsTrashed:  record.IsTrashed,
+		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
 	}, nil
 }
 
-func (s *Service) Delete(ctx context.Context, id string) error {
+func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return err
 	}
+	if input.ExpectedRevision < 1 {
+		return fmt.Errorf("%w: expected revision is required", ErrValidation)
+	}
 
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if record.Revision != input.ExpectedRevision {
+		return revisionConflict(record.ID, input.ExpectedRevision, record.Revision)
 	}
 
 	operationID, err := newID()
@@ -310,7 +332,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 		return err
 	}
-	if err := s.repository.Delete(ctx, id); err != nil {
+	if err := s.repository.DeleteCAS(ctx, id, input.ExpectedRevision); err != nil {
 		restoreErr := s.store.RestoreDelete(context.Background(), record.ID, operationID)
 		if restoreErr == nil {
 			_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
@@ -324,6 +346,23 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
 	return nil
+}
+
+func validateExpectedRevision(expectedRevision *int64) (int64, error) {
+	if expectedRevision == nil || *expectedRevision < 1 {
+		return 0, fmt.Errorf("%w: expected revision is required", ErrValidation)
+	}
+
+	return *expectedRevision, nil
+}
+
+func revisionConflict(noteID string, expectedRevision int64, actualRevision int64) error {
+	return &RevisionConflict{
+		Code:             ErrorCodeRevisionConflict,
+		NoteID:           noteID,
+		ExpectedRevision: expectedRevision,
+		ActualRevision:   actualRevision,
+	}
 }
 
 func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {

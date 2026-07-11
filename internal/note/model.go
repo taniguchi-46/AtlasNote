@@ -9,6 +9,7 @@ type Summary struct {
 	IsFavorite bool      `json:"isFavorite"`
 	IsPinned   bool      `json:"isPinned"`
 	IsTrashed  bool      `json:"isTrashed"`
+	Revision   int64     `json:"revision"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
@@ -21,6 +22,7 @@ type Note struct {
 	IsFavorite bool      `json:"isFavorite"`
 	IsPinned   bool      `json:"isPinned"`
 	IsTrashed  bool      `json:"isTrashed"`
+	Revision   int64     `json:"revision"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
@@ -32,13 +34,45 @@ type CreateInput struct {
 }
 
 type UpdateInput struct {
-	NotebookID    *string `json:"notebookId"`
-	ClearNotebook *bool   `json:"clearNotebook"`
-	Title         *string `json:"title"`
-	Content       *string `json:"content"`
-	IsFavorite    *bool   `json:"isFavorite"`
-	IsPinned      *bool   `json:"isPinned"`
-	IsTrashed     *bool   `json:"isTrashed"`
+	NotebookID       *string `json:"notebookId"`
+	ClearNotebook    *bool   `json:"clearNotebook"`
+	Title            *string `json:"title"`
+	Content          *string `json:"content"`
+	IsFavorite       *bool   `json:"isFavorite"`
+	IsPinned         *bool   `json:"isPinned"`
+	IsTrashed        *bool   `json:"isTrashed"`
+	ExpectedRevision *int64  `json:"expectedRevision,omitempty"`
+}
+
+type DeleteInput struct {
+	ExpectedRevision int64 `json:"expectedRevision"`
+}
+
+const ErrorCodeRevisionConflict = "NOTE_REVISION_CONFLICT"
+
+type RevisionConflict struct {
+	Code             string `json:"code"`
+	NoteID           string `json:"noteId"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+	ActualRevision   int64  `json:"actualRevision"`
+}
+
+func (c *RevisionConflict) Error() string {
+	return ErrorCodeRevisionConflict
+}
+
+func (c *RevisionConflict) Is(target error) bool {
+	return target == ErrRevisionConflict
+}
+
+type UpdateNoteResult struct {
+	Note     *Note             `json:"note,omitempty"`
+	Conflict *RevisionConflict `json:"conflict,omitempty"`
+}
+
+type DeleteNoteResult struct {
+	Deleted  bool              `json:"deleted"`
+	Conflict *RevisionConflict `json:"conflict,omitempty"`
 }
 
 type Record struct {
@@ -49,6 +83,7 @@ type Record struct {
 	IsFavorite  bool
 	IsPinned    bool
 	IsTrashed   bool
+	Revision    int64
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

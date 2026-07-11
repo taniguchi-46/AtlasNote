@@ -70,7 +70,9 @@ Go Backend
 - 同一プロセス内のノート・ノートブック操作は Service で直列化し、重複する自動保存による世代ずれを防ぐ。
 - アプリ起動時はSQLiteやMarkdownへアクセスする前に、データディレクトリ直下の `atlasnote.lock` をOSレベルで排他取得する。同じデータディレクトリを使用する2つ目のプロセスはwriterとして初期化しない。
 - ロックはアプリ終了時にSQLite接続を閉じてから解放する。ロックファイルの存在自体ではなくOSロックの取得結果で判定し、異常終了後にファイルが残っても次回起動を妨げない。
-- クラウド同期・履歴機能を開始する前に、単一writer保証とは別に `revision` または `expectedUpdatedAt` によるCASを追加する。
+- クラウド同期・履歴・AIストリーミングを開始する前に、単一writer保証とは別に整数 `revision` と `expectedRevision` によるCASを追加する。
+- revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/note-concurrency.md` を正とする。
+- ローカル保存キューと将来の同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 
 ## 外部連携
 

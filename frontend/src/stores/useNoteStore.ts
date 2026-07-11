@@ -33,6 +33,7 @@ function toSummary(updated: note.Note): note.Summary {
     isFavorite: updated.isFavorite,
     isPinned: updated.isPinned,
     isTrashed: updated.isTrashed,
+    revision: updated.revision,
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,
   } as note.Summary
@@ -167,11 +168,27 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
+  function getPersistedRevision(noteId: string) {
+    if (activeNote.value?.id === noteId) return activeNote.value.revision
+    return summaries.value.find((note) => note.id === noteId)?.revision ?? null
+  }
+
+  function requirePersistedRevision(noteId: string) {
+    const revision = getPersistedRevision(noteId)
+    if (typeof revision !== 'number' || revision < 1) {
+      throw new Error('ノートのrevisionを取得できません。再読み込みしてください')
+    }
+    return revision
+  }
+
   async function persistNote(id: string, input: note.UpdateInput) {
     isSaving.value = true
     error.value = null
     try {
-      return await updateNote(id, input)
+      return await updateNote(id, {
+        ...input,
+        expectedRevision: requirePersistedRevision(id),
+      })
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
       return null
@@ -296,7 +313,10 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     try {
       for (const id of ids) {
-        const updated = await updateNote(id, input)
+        const updated = await updateNote(id, {
+          ...input,
+          expectedRevision: requirePersistedRevision(id),
+        })
         if (activeNote.value?.id === id) {
           activeNote.value = updated
         }
@@ -331,7 +351,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function permanentlyDeleteNote(id: string) {
     error.value = null
     try {
-      await deleteNote(id)
+      await deleteNote(id, requirePersistedRevision(id))
       discardDraft(id)
       summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
       if (activeNote.value?.id === id) activeNote.value = null
@@ -348,7 +368,10 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     let deletedIds: string[] = []
     try {
-      deletedIds = await deleteNotesSequentially(ids, deleteNote)
+      deletedIds = await deleteNotesSequentially(
+        ids,
+        (id) => deleteNote(id, requirePersistedRevision(id)),
+      )
     } catch (e) {
       if (e instanceof NoteDeleteError) deletedIds = e.deletedIds
       error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'

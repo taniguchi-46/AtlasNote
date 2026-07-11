@@ -88,6 +88,72 @@ VALUES ('existing', 'Existing', 'default:note', '2026-07-10T00:00:00Z', '2026-07
 	}
 }
 
+func TestOpenMigratesVersionTwoDatabaseAndBackfillsNoteRevision(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:2] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 2"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version two: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO notes (
+	id, title, content_path, is_favorite, is_pinned, is_trashed, created_at, updated_at
+)
+VALUES (
+	'existing-note', 'Existing note', 'existing-note.md', 1, 0, 0,
+	'2026-07-10T00:00:00Z', '2026-07-10T01:00:00Z'
+)
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy note: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	var title string
+	var contentPath string
+	var revision int64
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT title, content_path, revision FROM notes WHERE id = 'existing-note'",
+	).Scan(&title, &contentPath, &revision); err != nil {
+		t.Fatalf("read migrated note: %v", err)
+	}
+	if title != "Existing note" {
+		t.Fatalf("migrated title = %q, want %q", title, "Existing note")
+	}
+	if contentPath != "existing-note.md" {
+		t.Fatalf("migrated content path = %q, want %q", contentPath, "existing-note.md")
+	}
+	if revision != 1 {
+		t.Fatalf("migrated revision = %d, want 1", revision)
+	}
+
+	if _, err := db.ExecContext(t.Context(), "UPDATE notes SET revision = 0 WHERE id = 'existing-note'"); err == nil {
+		t.Fatal("revision constraint accepted zero")
+	}
+}
+
 func TestOpenRejectsDatabaseFromNewerVersionWithoutModification(t *testing.T) {
 	t.Parallel()
 

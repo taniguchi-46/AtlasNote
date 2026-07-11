@@ -19,6 +19,11 @@ type sqlExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+type sqlQueryExecutor interface {
+	sqlExecutor
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 type Repository struct {
 	db *sql.DB
 }
@@ -33,8 +38,8 @@ func (r *Repository) Create(ctx context.Context, record Record) error {
 
 func insertRecord(ctx context.Context, executor sqlExecutor, record Record) error {
 	query, args, err := psql.Insert(notesTable).
-		Columns("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
-		Values(record.ID, record.NotebookID, record.Title, record.ContentPath, record.IsFavorite, record.IsPinned, record.IsTrashed, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
+		Columns("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
+		Values(record.ID, record.NotebookID, record.Title, record.ContentPath, record.IsFavorite, record.IsPinned, record.IsTrashed, record.Revision, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build note insert: %w", err)
@@ -48,7 +53,7 @@ func insertRecord(ctx context.Context, executor sqlExecutor, record Record) erro
 }
 
 func (r *Repository) List(ctx context.Context) ([]Summary, error) {
-	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
 		From(notesTable).
 		OrderBy("updated_at DESC").
 		ToSql()
@@ -67,7 +72,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 		var note Summary
 		var createdAt string
 		var updatedAt string
-		if err := rows.Scan(&note.ID, &note.NotebookID, &note.Title, &note.IsFavorite, &note.IsPinned, &note.IsTrashed, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&note.ID, &note.NotebookID, &note.Title, &note.IsFavorite, &note.IsPinned, &note.IsTrashed, &note.Revision, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan note summary: %w", err)
 		}
 
@@ -91,7 +96,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 }
 
 func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
-	query, args, err := psql.Select("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "created_at", "updated_at").
+	query, args, err := psql.Select("id", "notebook_id", "title", "content_path", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
 		From(notesTable).
 		Where(sq.Eq{"id": id}).
 		Limit(1).
@@ -111,6 +116,7 @@ func (r *Repository) Get(ctx context.Context, id string) (Record, error) {
 		&record.IsFavorite,
 		&record.IsPinned,
 		&record.IsTrashed,
+		&record.Revision,
 		&createdAt,
 		&updatedAt,
 	)
@@ -137,6 +143,24 @@ func (r *Repository) Update(ctx context.Context, record Record) error {
 	return updateRecord(ctx, r.db, record)
 }
 
+func (r *Repository) UpdateCAS(ctx context.Context, record Record, expectedRevision int64) (int64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin note CAS update tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	nextRevision, err := updateRecordCAS(ctx, tx, record, expectedRevision)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit note CAS update tx: %w", err)
+	}
+
+	return nextRevision, nil
+}
+
 func updateRecord(ctx context.Context, executor sqlExecutor, record Record) error {
 	query, args, err := psql.Update(notesTable).
 		Set("notebook_id", record.NotebookID).
@@ -144,6 +168,7 @@ func updateRecord(ctx context.Context, executor sqlExecutor, record Record) erro
 		Set("is_favorite", record.IsFavorite).
 		Set("is_pinned", record.IsPinned).
 		Set("is_trashed", record.IsTrashed).
+		Set("revision", record.Revision).
 		Set("updated_at", formatTime(record.UpdatedAt)).
 		Where(sq.Eq{"id": record.ID}).
 		ToSql()
@@ -167,8 +192,55 @@ func updateRecord(ctx context.Context, executor sqlExecutor, record Record) erro
 	return nil
 }
 
+func updateRecordCAS(ctx context.Context, executor sqlQueryExecutor, record Record, expectedRevision int64) (int64, error) {
+	query, args, err := psql.Update(notesTable).
+		Set("notebook_id", record.NotebookID).
+		Set("title", record.Title).
+		Set("is_favorite", record.IsFavorite).
+		Set("is_pinned", record.IsPinned).
+		Set("is_trashed", record.IsTrashed).
+		Set("revision", sq.Expr("revision + 1")).
+		Set("updated_at", formatTime(record.UpdatedAt)).
+		Where(sq.Eq{"id": record.ID, "revision": expectedRevision}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build note CAS update: %w", err)
+	}
+
+	result, err := executor.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("update note with CAS: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read note CAS update result: %w", err)
+	}
+	if updated == 0 {
+		return 0, revisionMismatchError(ctx, executor, record.ID, expectedRevision)
+	}
+
+	return expectedRevision + 1, nil
+}
+
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	return deleteRecord(ctx, r.db, id)
+}
+
+func (r *Repository) DeleteCAS(ctx context.Context, id string, expectedRevision int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note CAS delete tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := deleteRecordCAS(ctx, tx, id, expectedRevision); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note CAS delete tx: %w", err)
+	}
+
+	return nil
 }
 
 func deleteRecord(ctx context.Context, executor sqlExecutor, id string) error {
@@ -188,6 +260,29 @@ func deleteRecord(ctx context.Context, executor sqlExecutor, id string) error {
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+
+	return nil
+}
+
+func deleteRecordCAS(ctx context.Context, executor sqlQueryExecutor, id string, expectedRevision int64) error {
+	query, args, err := psql.Delete(notesTable).
+		Where(sq.Eq{"id": id, "revision": expectedRevision}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build note CAS delete: %w", err)
+	}
+
+	result, err := executor.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete note with CAS: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read note CAS delete result: %w", err)
+	}
+	if deleted == 0 {
+		return revisionMismatchError(ctx, executor, id, expectedRevision)
 	}
 
 	return nil
@@ -233,6 +328,33 @@ func (r *Repository) UpdateWithStorageOperation(ctx context.Context, record Reco
 	}
 
 	return nil
+}
+
+func (r *Repository) UpdateWithStorageOperationCAS(
+	ctx context.Context,
+	record Record,
+	operation StorageOperation,
+	expectedRevision int64,
+) (int64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin note CAS update tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	nextRevision, err := updateRecordCAS(ctx, tx, record, expectedRevision)
+	if err != nil {
+		return 0, err
+	}
+	if err := insertStorageOperation(ctx, tx, operation); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit note CAS update tx: %w", err)
+	}
+
+	return nextRevision, nil
 }
 
 func (r *Repository) BeginStorageOperation(ctx context.Context, operation StorageOperation) error {
@@ -318,7 +440,7 @@ ORDER BY created_at, operation_id
 
 func (r *Repository) ListRecords(ctx context.Context) ([]Record, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, notebook_id, title, content_path, is_favorite, is_pinned, is_trashed, created_at, updated_at
+SELECT id, notebook_id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
 FROM notes
 `)
 	if err != nil {
@@ -339,6 +461,7 @@ FROM notes
 			&record.IsFavorite,
 			&record.IsPinned,
 			&record.IsTrashed,
+			&record.Revision,
 			&createdAt,
 			&updatedAt,
 		); err != nil {
@@ -361,6 +484,38 @@ FROM notes
 	}
 
 	return records, nil
+}
+
+func revisionMismatchError(
+	ctx context.Context,
+	executor sqlQueryExecutor,
+	noteID string,
+	expectedRevision int64,
+) error {
+	query, args, err := psql.Select("revision").
+		From(notesTable).
+		Where(sq.Eq{"id": noteID}).
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build note revision lookup: %w", err)
+	}
+
+	var actualRevision int64
+	err = executor.QueryRowContext(ctx, query, args...).Scan(&actualRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read note revision: %w", err)
+	}
+
+	return &RevisionConflict{
+		Code:             ErrorCodeRevisionConflict,
+		NoteID:           noteID,
+		ExpectedRevision: expectedRevision,
+		ActualRevision:   actualRevision,
+	}
 }
 
 func insertStorageOperation(ctx context.Context, executor sqlExecutor, operation StorageOperation) error {
