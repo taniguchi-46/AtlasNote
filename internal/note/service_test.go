@@ -455,6 +455,9 @@ func TestServiceDeleteNotebookWithNotesTrashedDeletesChildNotebooks(t *testing.T
 		if !summary.IsTrashed {
 			t.Fatalf("expected note %s to be trashed", id)
 		}
+		if summary.Revision != 2 {
+			t.Fatalf("trashed note %s revision = %d, want 2", id, summary.Revision)
+		}
 		if summary.NotebookID != nil {
 			t.Fatalf("expected trashed note %s notebook id to be cleared, got %v", id, *summary.NotebookID)
 		}
@@ -548,6 +551,9 @@ func TestServiceDeleteNotebookKeepingNotesKeepsChildNotebooks(t *testing.T) {
 	if parentSummary.NotebookID != nil {
 		t.Fatalf("expected parent note notebook id to be cleared, got %v", *parentSummary.NotebookID)
 	}
+	if parentSummary.Revision != 2 {
+		t.Fatalf("detached parent note revision = %d, want 2", parentSummary.Revision)
+	}
 
 	childSummary := summaryByID[childNote.ID]
 	if childSummary.IsTrashed {
@@ -555,6 +561,9 @@ func TestServiceDeleteNotebookKeepingNotesKeepsChildNotebooks(t *testing.T) {
 	}
 	if childSummary.NotebookID == nil || *childSummary.NotebookID != child.ID {
 		t.Fatalf("expected child note to keep child notebook id, got %v", childSummary.NotebookID)
+	}
+	if childSummary.Revision != 1 {
+		t.Fatalf("unchanged child note revision = %d, want 1", childSummary.Revision)
 	}
 }
 

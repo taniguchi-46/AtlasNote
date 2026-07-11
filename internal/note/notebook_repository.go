@@ -240,6 +240,7 @@ WITH RECURSIVE notebook_tree(id) AS (
 )
 UPDATE notes
 SET is_trashed = 1,
+	revision = revision + 1,
 	updated_at = ?
 WHERE notebook_id IN (SELECT id FROM notebook_tree)
 `, id, formatTime(now))
@@ -273,6 +274,7 @@ func detachChildNotebooks(ctx context.Context, tx *sql.Tx, id string, now time.T
 func detachNotesFromNotebook(ctx context.Context, tx *sql.Tx, id string, now time.Time) error {
 	query, args, err := psql.Update(notesTable).
 		Set("notebook_id", nil).
+		Set("revision", sq.Expr("revision + 1")).
 		Set("updated_at", formatTime(now)).
 		Where(sq.Eq{"notebook_id": id}).
 		ToSql()

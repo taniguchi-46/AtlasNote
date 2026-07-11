@@ -25,6 +25,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
+- ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
 - Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
 - Storeの `conflicted` draft状態、競合情報とローカル下書きの保持
 - NoteEditorの保存競合・下書き保持表示
