@@ -29,6 +29,9 @@ try {
   await testFailedDraftSurvivesSwitchAndRetry()
   await testFlushWaitsForInFlightSave()
   await testCancelDropsPendingSave()
+  await testDifferentNotesSaveConcurrently()
+  await testFlushTargetsOneNoteLane()
+  await testFailedLaneWaitsForManualRetry()
   console.log('note auto-save tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
@@ -180,7 +183,7 @@ async function testFailedDraftSurvivesSwitchAndRetry() {
   assert.deepEqual(drafts.get('note-a'), snapshot)
 
   activeNoteId = 'note-a'
-  autoSave.schedule(drafts.get(activeNoteId))
+  autoSave.retry(drafts.get(activeNoteId))
   assert.equal(await autoSave.flush(), true)
   assert.equal(drafts.has('note-a'), false)
   assert.equal(attempts.length, 2)
@@ -216,6 +219,93 @@ async function testFlushWaitsForInFlightSave() {
 
   deferredByRevision.get(1).resolve({ id: 'note-a' })
   assert.equal(await flushPromise, true)
+}
+
+async function testDifferentNotesSaveConcurrently() {
+  const saves = []
+  const deferredByNoteId = new Map([['note-a', deferred()], ['note-b', deferred()]])
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: (snapshot) => {
+      saves.push(snapshot.noteId)
+      return deferredByNoteId.get(snapshot.noteId).promise
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+  })
+
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
+  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', revision: 1 })
+  const flushPromise = autoSave.flush()
+  await Promise.resolve()
+
+  assert.deepEqual(new Set(saves), new Set(['note-a', 'note-b']))
+  deferredByNoteId.get('note-a').resolve({ id: 'note-a' })
+  deferredByNoteId.get('note-b').resolve({ id: 'note-b' })
+  assert.equal(await flushPromise, true)
+}
+
+async function testFlushTargetsOneNoteLane() {
+  const saves = []
+  const noteA = deferred()
+  const noteB = deferred()
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: (snapshot) => {
+      saves.push(snapshot.noteId)
+      return snapshot.noteId === 'note-a' ? noteA.promise : noteB.promise
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+  })
+
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', revision: 1 })
+  autoSave.schedule({ noteId: 'note-b', title: 'B', content: 'B', revision: 1 })
+  const noteAFlush = autoSave.flush('note-a')
+  await Promise.resolve()
+
+  assert.deepEqual(saves, ['note-a'])
+  noteA.resolve({ id: 'note-a' })
+  assert.equal(await noteAFlush, true)
+  assert.deepEqual(saves, ['note-a'])
+
+  const noteBFlush = autoSave.flush('note-b')
+  noteB.resolve({ id: 'note-b' })
+  assert.equal(await noteBFlush, true)
+}
+
+async function testFailedLaneWaitsForManualRetry() {
+  const attempts = []
+  const firstAttempt = deferred()
+  const retryAttempt = deferred()
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: (snapshot) => {
+      attempts.push(snapshot.revision)
+      return attempts.length === 1 ? firstAttempt.promise : retryAttempt.promise
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+  })
+  const first = { noteId: 'note-a', title: 'A1', content: 'A1', revision: 1 }
+  const latest = { noteId: 'note-a', title: 'A2', content: 'A2', revision: 2 }
+
+  autoSave.schedule(first)
+  const failedFlush = autoSave.flush('note-a')
+  autoSave.schedule(latest)
+  firstAttempt.resolve(null)
+  assert.equal(await failedFlush, false)
+  assert.deepEqual(attempts, [1])
+  assert.equal(await autoSave.flush('note-a'), false)
+
+  autoSave.retry(latest)
+  const retryFlush = autoSave.flush('note-a')
+  retryAttempt.resolve({ id: 'note-a' })
+  assert.equal(await retryFlush, true)
+  assert.deepEqual(attempts, [1, 2])
 }
 
 function fakeTimers() {

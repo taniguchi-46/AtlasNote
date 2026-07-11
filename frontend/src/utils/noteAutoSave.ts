@@ -19,18 +19,43 @@ type NoteAutoSaveOptions<Result> = {
   clearTimer?: (timer: TimerHandle) => void
 }
 
+type SaveLane = {
+  timer: TimerHandle | null
+  pendingSnapshot: NoteSaveSnapshot | null
+  inFlightSave: Promise<boolean> | null
+  blocked: boolean
+}
+
 export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>) {
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs))
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer))
-  let timer: TimerHandle | null = null
-  let pendingSnapshot: NoteSaveSnapshot | null = null
-  let inFlightSave: Promise<boolean> | null = null
+  const lanes = new Map<string, SaveLane>()
 
-  function cancelTimer() {
-    if (timer === null) return
+  function getOrCreateLane(noteId: string) {
+    const existing = lanes.get(noteId)
+    if (existing) return existing
 
-    clearTimer(timer)
-    timer = null
+    const lane: SaveLane = {
+      timer: null,
+      pendingSnapshot: null,
+      inFlightSave: null,
+      blocked: false,
+    }
+    lanes.set(noteId, lane)
+    return lane
+  }
+
+  function cancelTimer(lane: SaveLane) {
+    if (lane.timer === null) return
+
+    clearTimer(lane.timer)
+    lane.timer = null
+  }
+
+  function deleteIdleLane(noteId: string, lane: SaveLane) {
+    if (!lane.blocked && !lane.pendingSnapshot && !lane.inFlightSave && lane.timer === null) {
+      lanes.delete(noteId)
+    }
   }
 
   async function saveSnapshot(snapshot: NoteSaveSnapshot) {
@@ -51,63 +76,118 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     return true
   }
 
-  async function runPending() {
-    cancelTimer()
-    const snapshot = pendingSnapshot
-    pendingSnapshot = null
+  async function runPending(noteId: string) {
+    const lane = lanes.get(noteId)
+    if (!lane) return true
+
+    cancelTimer(lane)
+    if (lane.blocked) return false
+
+    const snapshot = lane.pendingSnapshot
+    lane.pendingSnapshot = null
     if (!snapshot) {
-      // 処理すべきスナップショットがない場合、現在実行中の保存処理があればその完了を待つ。
-      // これにより、保存中に強制終了されたり、次の操作が走るのを防ぐ。
-      return inFlightSave ? await inFlightSave : true
+      return lane.inFlightSave ? await lane.inFlightSave : true
     }
 
-    const previousSave = inFlightSave
+    const previousSave = lane.inFlightSave
     const save = (async () => {
-      // 前回の保存リクエスト（inFlightSave）がまだ完了していない場合、
-      // 順番が前後して古いデータが新しいデータを上書きしてしまうのを防ぐため、前回の完了を待機する。
       if (previousSave) {
-        await previousSave
+        const previousSucceeded = await previousSave
+        if (!previousSucceeded) {
+          if (options.isCurrent(snapshot)) {
+            options.onFailed?.(snapshot)
+          }
+          return false
+        }
       }
       return saveSnapshot(snapshot)
     })()
-    inFlightSave = save
+    lane.inFlightSave = save
     try {
-      return await save
-    } finally {
-      if (inFlightSave === save) {
-        inFlightSave = null
+      const succeeded = await save
+      if (!succeeded) {
+        lane.blocked = true
+        cancelTimer(lane)
       }
+      return succeeded
+    } finally {
+      if (lane.inFlightSave === save) {
+        lane.inFlightSave = null
+      }
+      deleteIdleLane(noteId, lane)
     }
   }
 
-  function schedule(snapshot: NoteSaveSnapshot) {
-    cancelTimer()
-    pendingSnapshot = snapshot
-    timer = setTimer(() => {
-      void runPending()
+  function scheduleSnapshot(snapshot: NoteSaveSnapshot, resume: boolean) {
+    const lane = getOrCreateLane(snapshot.noteId)
+    cancelTimer(lane)
+    lane.pendingSnapshot = snapshot
+    if (resume) lane.blocked = false
+    if (lane.blocked) return
+
+    lane.timer = setTimer(() => {
+      void runPending(snapshot.noteId)
     }, options.delayMs)
   }
 
-  async function flush() {
-    let succeeded = true
-
-    while (pendingSnapshot || inFlightSave) {
-      const result = pendingSnapshot
-        ? await runPending()
-        : await inFlightSave!
-      succeeded = result && succeeded
-    }
-
-    return succeeded
+  function schedule(snapshot: NoteSaveSnapshot) {
+    scheduleSnapshot(snapshot, false)
   }
 
-  function cancel() {
-    cancelTimer()
-    pendingSnapshot = null
+  function retry(snapshot: NoteSaveSnapshot) {
+    scheduleSnapshot(snapshot, true)
+  }
+
+  async function flushLane(noteId: string) {
+    let succeeded = true
+    while (true) {
+      const lane = lanes.get(noteId)
+      if (!lane) return succeeded
+      if (lane.blocked) return false
+      if (!lane.pendingSnapshot && !lane.inFlightSave) {
+        deleteIdleLane(noteId, lane)
+        return succeeded
+      }
+
+      const result = lane.pendingSnapshot
+        ? await runPending(noteId)
+        : await lane.inFlightSave!
+      succeeded = result && succeeded
+    }
+  }
+
+  async function flush(noteId?: string) {
+    if (noteId) return flushLane(noteId)
+
+    let succeeded = true
+    while (lanes.size > 0) {
+      const activeNoteIds = [...lanes.entries()]
+        .filter(([, lane]) => !lane.blocked && (lane.pendingSnapshot || lane.inFlightSave))
+        .map(([activeNoteId]) => activeNoteId)
+      if (activeNoteIds.length === 0) break
+
+      const results = await Promise.all(activeNoteIds.map(flushLane))
+      succeeded = results.every(Boolean) && succeeded
+    }
+    return succeeded && [...lanes.values()].every((lane) => !lane.blocked)
+  }
+
+  function cancel(noteId?: string) {
+    const targetLanes = noteId
+      ? [...lanes.entries()].filter(([laneNoteId]) => laneNoteId === noteId)
+      : [...lanes.entries()]
+
+    for (const [laneNoteId, lane] of targetLanes) {
+      cancelTimer(lane)
+      lane.pendingSnapshot = null
+      lane.blocked = false
+      deleteIdleLane(laneNoteId, lane)
+    }
   }
 
   return {
     schedule,
+    retry,
     flush,
     cancel,
   }

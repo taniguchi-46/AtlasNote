@@ -74,7 +74,18 @@ export const useNoteStore = defineStore('notes', () => {
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
   let nextRevision = 0
+  let savingRequestCount = 0
   const noteSelectionRequests = createLatestRequestGuard()
+
+  function beginSaving() {
+    savingRequestCount += 1
+    isSaving.value = true
+  }
+
+  function endSaving() {
+    savingRequestCount = Math.max(0, savingRequestCount - 1)
+    isSaving.value = savingRequestCount > 0
+  }
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -154,7 +165,7 @@ export const useNoteStore = defineStore('notes', () => {
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
     await flushPendingDraft()
-    isSaving.value = true
+    beginSaving()
     error.value = null
     try {
       const settingsStore = useSettingsStore()
@@ -177,7 +188,7 @@ export const useNoteStore = defineStore('notes', () => {
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'ノートの作成に失敗しました'
     } finally {
-      isSaving.value = false
+      endSaving()
     }
   }
 
@@ -209,7 +220,7 @@ export const useNoteStore = defineStore('notes', () => {
     input: note.UpdateInput,
     onFailure?: (failure: unknown) => void,
   ) {
-    isSaving.value = true
+    beginSaving()
     error.value = null
     try {
       return await updateNote(id, {
@@ -221,7 +232,7 @@ export const useNoteStore = defineStore('notes', () => {
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
       return null
     } finally {
-      isSaving.value = false
+      endSaving()
     }
   }
 
@@ -306,6 +317,15 @@ export const useNoteStore = defineStore('notes', () => {
       })
       return snapshot
     }
+    if (current?.status === 'failed') {
+      replaceDraft(noteId, {
+        ...snapshot,
+        status: 'failed',
+        error: current.error,
+        conflict: null,
+      })
+      return snapshot
+    }
 
     replaceDraft(noteId, { ...snapshot, status: 'dirty', error: null, conflict: null })
     autoSave.schedule(snapshot)
@@ -313,7 +333,8 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function flushPendingDraft() {
-    return autoSave.flush()
+    const noteId = activeNote.value?.id
+    return noteId ? autoSave.flush(noteId) : true
   }
 
   async function retryDraftSave(noteId: string) {
@@ -322,8 +343,8 @@ export const useNoteStore = defineStore('notes', () => {
     if (draft.status === 'conflicted') return false
 
     replaceDraft(noteId, { ...draft, status: 'dirty', error: null, conflict: null })
-    autoSave.schedule(draft)
-    await autoSave.flush()
+    autoSave.retry(draft)
+    await autoSave.flush(noteId)
     return getDraft(noteId) === null
   }
 
@@ -335,8 +356,8 @@ export const useNoteStore = defineStore('notes', () => {
       if (!current || current.revision !== draft.revision) continue
       if (current.status === 'conflicted') continue
 
-      autoSave.schedule(current)
-      await autoSave.flush()
+      autoSave.retry(current)
+      await autoSave.flush(current.noteId)
     }
 
     return Object.keys(drafts.value).length === 0
@@ -380,7 +401,7 @@ export const useNoteStore = defineStore('notes', () => {
       ? activeNote.value
       : summaries.value.find((summary) => summary.id === noteId)
 
-    isSaving.value = true
+    beginSaving()
     error.value = null
     try {
       const created = await createNote({
@@ -401,7 +422,7 @@ export const useNoteStore = defineStore('notes', () => {
       error.value = e instanceof Error ? e.message : '競合下書きのコピー保存に失敗しました'
       return null
     } finally {
-      isSaving.value = false
+      endSaving()
     }
   }
 
@@ -429,7 +450,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function updateNotes(ids: string[], input: note.UpdateInput) {
     if (ids.length === 0) return
 
-    isSaving.value = true
+    beginSaving()
     error.value = null
     try {
       for (const id of ids) {
@@ -449,7 +470,7 @@ export const useNoteStore = defineStore('notes', () => {
       error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
       throw e
     } finally {
-      isSaving.value = false
+      endSaving()
     }
   }
 
@@ -484,7 +505,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function permanentlyDeleteNotes(ids: string[]) {
     if (ids.length === 0) return
 
-    isSaving.value = true
+    beginSaving()
     error.value = null
     let deletedIds: string[] = []
     try {
@@ -503,7 +524,7 @@ export const useNoteStore = defineStore('notes', () => {
       if (activeNote.value && idSet.has(activeNote.value.id)) {
         activeNote.value = null
       }
-      isSaving.value = false
+      endSaving()
     }
   }
 
