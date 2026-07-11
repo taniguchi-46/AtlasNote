@@ -33,6 +33,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - autosave・メタデータ更新・削除を直列化するノート単位の操作lane
 - autosave失敗laneの停止・手動再開、対象別 `flush`
 - 保存要求数による正確な `isSaving` 表示
+- ノート操作laneと保存要求カウンターの専用回帰テスト
 
 ## Phase 2の対象
 
@@ -59,7 +60,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 並行保存中の状態表示
 - Markdown / Rich変換の追加テスト
 - 構造化ログと大量ノート時の性能確認
-- 競合解決UIの追加テスト
+- 競合解決UIのコンポーネントテスト
 
 ## 保留事項
 

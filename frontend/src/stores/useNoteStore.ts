@@ -12,6 +12,7 @@ import {
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
 import { createNoteOperationQueue } from '../utils/noteOperationQueue'
+import { createRequestCounter } from '../utils/requestCounter'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 
@@ -75,19 +76,11 @@ export const useNoteStore = defineStore('notes', () => {
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
   let nextRevision = 0
-  let savingRequestCount = 0
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
-
-  function beginSaving() {
-    savingRequestCount += 1
-    isSaving.value = true
-  }
-
-  function endSaving() {
-    savingRequestCount = Math.max(0, savingRequestCount - 1)
-    isSaving.value = savingRequestCount > 0
-  }
+  const savingRequests = createRequestCounter((count) => {
+    isSaving.value = count > 0
+  })
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -167,7 +160,7 @@ export const useNoteStore = defineStore('notes', () => {
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
     await flushPendingDraft()
-    beginSaving()
+    const endSaving = savingRequests.begin()
     error.value = null
     try {
       const settingsStore = useSettingsStore()
@@ -222,7 +215,7 @@ export const useNoteStore = defineStore('notes', () => {
     input: note.UpdateInput,
     onFailure?: (failure: unknown) => void,
   ) {
-    beginSaving()
+    const endSaving = savingRequests.begin()
     error.value = null
     try {
       return await updateNote(id, {
@@ -404,7 +397,7 @@ export const useNoteStore = defineStore('notes', () => {
       ? activeNote.value
       : summaries.value.find((summary) => summary.id === noteId)
 
-    beginSaving()
+    const endSaving = savingRequests.begin()
     error.value = null
     try {
       const created = await createNote({
@@ -459,7 +452,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function updateNotes(ids: string[], input: note.UpdateInput) {
     if (ids.length === 0) return
 
-    beginSaving()
+    const endSaving = savingRequests.begin()
     error.value = null
     try {
       for (const id of ids) {
@@ -513,7 +506,7 @@ export const useNoteStore = defineStore('notes', () => {
   async function permanentlyDeleteNotes(ids: string[]) {
     if (ids.length === 0) return
 
-    beginSaving()
+    const endSaving = savingRequests.begin()
     error.value = null
     let deletedIds: string[] = []
     try {
