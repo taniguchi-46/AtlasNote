@@ -69,6 +69,44 @@ func (r *Repository) DeleteSearchIndex(ctx context.Context, noteID string) error
 	return nil
 }
 
+// RefreshSearchIndexState advances the reconciliation state when note
+// metadata changes without changing the indexed title or Markdown body.
+func (r *Repository) RefreshSearchIndexState(ctx context.Context, noteID string, revision int64, contentHash string) error {
+	if noteID == "" {
+		return fmt.Errorf("refresh search index state: note ID is required")
+	}
+	if revision < 1 {
+		return fmt.Errorf("refresh search index state: revision must be at least 1")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin search index state refresh tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+UPDATE note_search_state
+SET indexed_revision = ?, content_hash = ?, indexed_at = ?
+WHERE note_id = ?
+`, revision, contentHash, formatTime(time.Now().UTC()), noteID)
+	if err != nil {
+		return fmt.Errorf("refresh search index state: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read search index state refresh result: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("refresh search index state: note ID is not indexed")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit search index state refresh tx: %w", err)
+	}
+	return nil
+}
+
 // ReplaceSearchIndex rebuilds the complete derived index in one transaction.
 // The caller is responsible for obtaining canonical note/Markdown snapshots.
 func (r *Repository) ReplaceSearchIndex(ctx context.Context, documents []SearchDocument) error {

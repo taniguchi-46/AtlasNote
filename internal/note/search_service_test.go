@@ -74,3 +74,128 @@ func TestServiceSearchReturnsStructuredValidationError(t *testing.T) {
 		t.Fatalf("search error = %#v", result.Error)
 	}
 }
+
+func TestServiceWriteOperationsMaintainSearchIndex(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "First title", Content: "first body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	createdResult, err := service.Search(ctx, note.SearchInput{Query: "first"})
+	if err != nil {
+		t.Fatalf("search created note: %v", err)
+	}
+	if createdResult.Error != nil || createdResult.Total != 1 {
+		t.Fatalf("created note search result = %#v", createdResult)
+	}
+
+	updatedTitle := "Second title"
+	updatedContent := "second body"
+	updated, err := service.Update(ctx, created.ID, note.UpdateInput{
+		Title:            &updatedTitle,
+		Content:          &updatedContent,
+		ExpectedRevision: &created.Revision,
+	})
+	if err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+
+	oldResult, err := service.Search(ctx, note.SearchInput{Query: "first"})
+	if err != nil {
+		t.Fatalf("search old content: %v", err)
+	}
+	newResult, err := service.Search(ctx, note.SearchInput{Query: "second"})
+	if err != nil {
+		t.Fatalf("search new content: %v", err)
+	}
+	if oldResult.Total != 0 || newResult.Total != 1 || newResult.Items[0].Note.ID != created.ID {
+		t.Fatalf("updated search results: old=%#v new=%#v", oldResult, newResult)
+	}
+
+	if err := service.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: updated.Revision}); err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+	deletedResult, err := service.Search(ctx, note.SearchInput{Query: "second"})
+	if err != nil {
+		t.Fatalf("search deleted note: %v", err)
+	}
+	if deletedResult.Total != 0 {
+		t.Fatalf("deleted note search result = %#v", deletedResult)
+	}
+}
+
+func TestServiceRecoverRebuildsSearchIndex(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, _, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Rebuild title", Content: "rebuild body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := repository.DeleteSearchIndex(ctx, created.ID); err != nil {
+		t.Fatalf("remove search index fixture: %v", err)
+	}
+
+	missingResult, err := service.Search(ctx, note.SearchInput{Query: "rebuild"})
+	if err != nil {
+		t.Fatalf("search before rebuild: %v", err)
+	}
+	if missingResult.Total != 0 {
+		t.Fatalf("search before rebuild = %#v", missingResult)
+	}
+
+	if _, err := service.Recover(ctx); err != nil {
+		t.Fatalf("recover search index: %v", err)
+	}
+	rebuiltResult, err := service.Search(ctx, note.SearchInput{Query: "rebuild"})
+	if err != nil {
+		t.Fatalf("search after rebuild: %v", err)
+	}
+	if rebuiltResult.Error != nil || rebuiltResult.Total != 1 || rebuiltResult.Items[0].Note.ID != created.ID {
+		t.Fatalf("search after rebuild = %#v", rebuiltResult)
+	}
+}
+
+func TestServiceSearchIndexFailureDoesNotRollbackNote(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	db, err := database.Open(t.Context(), filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+	repository := note.NewRepository(db)
+	if _, err := db.ExecContext(t.Context(), "DROP TABLE note_search"); err != nil {
+		t.Fatalf("drop search index fixture: %v", err)
+	}
+	service := note.NewService(repository, store)
+
+	created, err := service.Create(t.Context(), note.CreateInput{Title: "Persisted title", Content: "persisted body"})
+	if err != nil {
+		t.Fatalf("create note with failed search index: %v", err)
+	}
+	if _, err := repository.Get(t.Context(), created.ID); err != nil {
+		t.Fatalf("note was rolled back after search index failure: %v", err)
+	}
+	content, err := store.Read(t.Context(), created.ID)
+	if err != nil || content != "persisted body" {
+		t.Fatalf("markdown after search index failure = %q, %v", content, err)
+	}
+
+	result, err := service.Search(t.Context(), note.SearchInput{Query: "Persisted", Scope: note.SearchScopeTitle})
+	if err != nil {
+		t.Fatalf("search after index failure returned Go error: %v", err)
+	}
+	if result.Error == nil || result.Error.Code != note.SearchErrorIndexFailed {
+		t.Fatalf("search error after index failure = %#v", result.Error)
+	}
+}

@@ -26,9 +26,10 @@ var (
 )
 
 type Service struct {
-	repository *Repository
-	store      markdownStore
-	mu         sync.Mutex
+	repository        *Repository
+	store             markdownStore
+	mu                sync.Mutex
+	searchIndexFailed bool
 }
 
 type markdownStore interface {
@@ -53,6 +54,35 @@ func NewService(repository *Repository, store markdownStore) *Service {
 	return &Service{
 		repository: repository,
 		store:      store,
+	}
+}
+
+func (s *Service) updateSearchIndexLocked(ctx context.Context, record Record, content string) {
+	if err := s.repository.UpsertSearchIndex(ctx, SearchDocument{
+		NoteID:      record.ID,
+		Title:       record.Title,
+		Body:        content,
+		Revision:    record.Revision,
+		ContentHash: storage.HashContent(content),
+	}); err != nil {
+		s.searchIndexFailed = true
+	}
+}
+
+func (s *Service) deleteSearchIndexLocked(ctx context.Context, noteID string) {
+	if err := s.repository.DeleteSearchIndex(ctx, noteID); err != nil {
+		s.searchIndexFailed = true
+	}
+}
+
+func (s *Service) refreshSearchIndexStateLocked(ctx context.Context, record Record, content string) {
+	if err := s.repository.RefreshSearchIndexState(
+		ctx,
+		record.ID,
+		record.Revision,
+		storage.HashContent(content),
+	); err != nil {
+		s.searchIndexFailed = true
 	}
 }
 
@@ -127,6 +157,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		}
 		return Note{}, fmt.Errorf("commit markdown: %w; rollback note record: %v", err, rollbackErr)
 	}
+	// Search索引は派生データのため、更新に失敗してもMarkdownとNote recordはrollbackしない。
+	s.updateSearchIndexLocked(ctx, record, content)
 	// 4. 保存完了の印として StorageOperation レコードを削除する
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
@@ -160,7 +192,20 @@ func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, 
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return SearchResult{Items: make([]SearchItem, 0)}, err
 	}
-	return s.repository.Search(ctx, input)
+	result, err := s.repository.Search(ctx, input)
+	if err != nil || result.Error != nil || strings.TrimSpace(input.Query) == "" || !s.searchIndexFailed {
+		return result, err
+	}
+
+	result.Items = make([]SearchItem, 0)
+	result.Total = 0
+	result.HasNext = false
+	result.Error = &SearchError{
+		Code:      SearchErrorIndexFailed,
+		Message:   "検索索引の更新に失敗しました。",
+		Retryable: true,
+	}
+	return result, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Note, error) {
@@ -280,6 +325,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			}
 			return Note{}, fmt.Errorf("commit markdown update: %w; rollback note record: %v", err, rollbackErr)
 		}
+		s.updateSearchIndexLocked(ctx, record, content)
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 	} else {
 		nextRevision, err := s.repository.UpdateCAS(ctx, record, expectedRevision)
@@ -287,6 +333,11 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
 		record.Revision = nextRevision
+		if previous.Title != record.Title {
+			s.updateSearchIndexLocked(ctx, record, content)
+		} else {
+			s.refreshSearchIndexStateLocked(ctx, record, content)
+		}
 	}
 
 	return Note{
@@ -353,6 +404,7 @@ func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) erro
 	if err := s.store.CommitDelete(ctx, record.ID, operationID); err != nil {
 		return fmt.Errorf("commit markdown delete: %w", err)
 	}
+	s.deleteSearchIndexLocked(ctx, record.ID)
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
 	return nil
@@ -389,6 +441,8 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 	}
 	report := RecoveryReport{MissingNotes: make([]MissingContent, 0)}
 	expected := make(map[string]struct{}, len(records))
+	documents := make([]SearchDocument, 0, len(records))
+	indexBuildFailed := false
 	for _, record := range records {
 		contentPath, err := s.store.ContentPath(record.ID)
 		if err != nil {
@@ -407,6 +461,19 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 				Title:       record.Title,
 				ContentPath: contentPath,
 			})
+		} else {
+			content, readErr := s.store.Read(ctx, record.ID)
+			if readErr != nil {
+				indexBuildFailed = true
+			} else {
+				documents = append(documents, SearchDocument{
+					NoteID:      record.ID,
+					Title:       record.Title,
+					Body:        content,
+					Revision:    record.Revision,
+					ContentHash: storage.HashContent(content),
+				})
+			}
 		}
 		expected[contentPath] = struct{}{}
 	}
@@ -414,6 +481,10 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 	if err := s.store.QuarantineOrphans(ctx, expected); err != nil {
 		return RecoveryReport{}, err
 	}
+	if err := s.repository.ReplaceSearchIndex(ctx, documents); err != nil {
+		indexBuildFailed = true
+	}
+	s.searchIndexFailed = indexBuildFailed
 	return report, nil
 }
 
@@ -446,7 +517,11 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 		return fmt.Errorf("%w for note %s", ErrContentAvailable, record.ID)
 	}
 
-	return s.repository.Delete(ctx, record.ID)
+	if err := s.repository.Delete(ctx, record.ID); err != nil {
+		return err
+	}
+	s.deleteSearchIndexLocked(ctx, record.ID)
+	return nil
 }
 
 func (s *Service) recoverPendingLocked(ctx context.Context) error {
@@ -476,7 +551,8 @@ func (s *Service) recoverPendingLocked(ctx context.Context) error {
 }
 
 func (s *Service) recoverUpsertLocked(ctx context.Context, operation StorageOperation) error {
-	if _, err := s.repository.Get(ctx, operation.NoteID); err != nil {
+	record, err := s.repository.Get(ctx, operation.NoteID)
+	if err != nil {
 		return fmt.Errorf("recover markdown for note %s: %w", operation.NoteID, err)
 	}
 
@@ -503,6 +579,13 @@ func (s *Service) recoverUpsertLocked(ctx context.Context, operation StorageOper
 		if !matches {
 			return fmt.Errorf("markdown recovery hash mismatch for note %s", operation.NoteID)
 		}
+	}
+
+	content, readErr := s.store.Read(ctx, operation.NoteID)
+	if readErr != nil {
+		s.searchIndexFailed = true
+	} else {
+		s.updateSearchIndexLocked(ctx, record, content)
 	}
 
 	return s.repository.CompleteStorageOperation(ctx, operation.ID)
@@ -546,6 +629,7 @@ func (s *Service) recoverDeleteLocked(ctx context.Context, operation StorageOper
 		}
 	}
 
+	s.deleteSearchIndexLocked(ctx, operation.NoteID)
 	return s.repository.CompleteStorageOperation(ctx, operation.ID)
 }
 
