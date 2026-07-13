@@ -48,6 +48,59 @@ type DeleteInput struct {
 	ExpectedRevision int64 `json:"expectedRevision"`
 }
 
+const (
+	SearchScopeAll   = "all"
+	SearchScopeTitle = "title"
+
+	DefaultSearchPage     = 1
+	DefaultSearchPageSize = 30
+	MaxSearchPage         = 10000
+	MaxSearchPageSize     = 100
+	MaxSearchQueryLength  = 200
+)
+
+type SearchInput struct {
+	Query          string  `json:"query"`
+	Scope          string  `json:"scope"`
+	NotebookID     *string `json:"notebookId,omitempty"`
+	IncludeTrashed bool    `json:"includeTrashed"`
+	Page           int     `json:"page"`
+	PageSize       int     `json:"pageSize"`
+}
+
+type SearchItem struct {
+	Note       Summary `json:"note"`
+	Snippet    string  `json:"snippet"`
+	MatchScope string  `json:"matchScope"`
+}
+
+type SearchError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Field     string `json:"field,omitempty"`
+	Retryable bool   `json:"retryable"`
+}
+
+type SearchResult struct {
+	Items    []SearchItem `json:"items"`
+	Page     int          `json:"page"`
+	PageSize int          `json:"pageSize"`
+	Total    int          `json:"total"`
+	HasNext  bool         `json:"hasNext"`
+	Error    *SearchError `json:"error,omitempty"`
+}
+
+const (
+	SearchErrorQueryTooLong      = "SEARCH_QUERY_TOO_LONG"
+	SearchErrorQueryInvalid      = "SEARCH_QUERY_INVALID"
+	SearchErrorScopeInvalid      = "SEARCH_SCOPE_INVALID"
+	SearchErrorPageInvalid       = "SEARCH_PAGE_INVALID"
+	SearchErrorPageSizeInvalid   = "SEARCH_PAGE_SIZE_INVALID"
+	SearchErrorIndexNotReady     = "SEARCH_INDEX_NOT_READY"
+	SearchErrorIndexInconsistent = "SEARCH_INDEX_INCONSISTENT"
+	SearchErrorIndexFailed       = "SEARCH_INDEX_FAILED"
+)
+
 const ErrorCodeRevisionConflict = "NOTE_REVISION_CONFLICT"
 
 type RevisionConflict struct {
