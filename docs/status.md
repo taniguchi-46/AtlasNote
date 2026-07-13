@@ -45,6 +45,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - Markdown欠落のMissingNotes報告とrename後の孤児ファイル隔離
 - ノート一覧の固定上限付きページング、Store・一覧UIの追加読込
 - 起動復旧のMarkdown存在確認をノートごとの`Stat`から管理ファイル一覧の一括取得へ変更
+- 起動復旧・検索・一覧の大量データベンチマークと計測手順（`docs/development/performance.md`）
 - Markdown/Rich変換の空段落、code fence、URL、多重markの境界テスト
 - batch操作の完了ID・失敗IDを保持する部分成功処理と、UIイベントのPromise rejection処理
 - `noteAutoSave.ts`によるautosave coordinator分離とunexpected rejectionの失敗lane処理
@@ -71,7 +72,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 ## 継続課題
 
-- 大量ノート時の性能確認（一覧APIのページング、Store・一覧UIの追加読込、起動復旧の存在確認の一括化を実装済み。全件読み込みの計測と差分検知は未完了）
+- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の存在確認の一括化を実装済み。実運用件数での継続比較と差分検知は未完了）
 - 競合解決UIのコンポーネントテスト
 
 ## 保留事項
