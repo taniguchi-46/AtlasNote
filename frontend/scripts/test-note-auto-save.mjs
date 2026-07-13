@@ -32,6 +32,7 @@ try {
   await testDifferentNotesSaveConcurrently()
   await testFlushTargetsOneNoteLane()
   await testFailedLaneWaitsForManualRetry()
+  await testThrownSaveIsHandled()
   console.log('note auto-save tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
@@ -306,6 +307,27 @@ async function testFailedLaneWaitsForManualRetry() {
   retryAttempt.resolve({ id: 'note-a' })
   assert.equal(await retryFlush, true)
   assert.deepEqual(attempts, [1, 2])
+}
+
+async function testThrownSaveIsHandled() {
+  let failedCount = 0
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: async () => {
+      throw new Error('unexpected save failure')
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+    onFailed: () => {
+      failedCount += 1
+    },
+  })
+
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
+  assert.equal(await autoSave.flush('note-a'), false)
+  assert.equal(failedCount, 1)
+  assert.equal(await autoSave.flush('note-a'), false)
 }
 
 function fakeTimers() {

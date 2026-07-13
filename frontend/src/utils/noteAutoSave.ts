@@ -59,12 +59,19 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     }
   }
 
+  function notifyFailed(snapshot: NoteSaveSnapshot) {
+    if (!options.isCurrent(snapshot)) return
+    try {
+      options.onFailed?.(snapshot)
+    } catch {
+      // A failure callback must not create a second unhandled rejection.
+    }
+  }
+
   async function saveSnapshot(snapshot: NoteSaveSnapshot) {
     const result = await options.save(snapshot)
     if (result === null) {
-      if (options.isCurrent(snapshot)) {
-        options.onFailed?.(snapshot)
-      }
+      notifyFailed(snapshot)
       return false
     }
 
@@ -95,9 +102,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
       if (previousSave) {
         const previousSucceeded = await previousSave
         if (!previousSucceeded) {
-          if (options.isCurrent(snapshot)) {
-            options.onFailed?.(snapshot)
-          }
+          notifyFailed(snapshot)
           return false
         }
       }
@@ -107,8 +112,17 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
         : operation()
     })()
     lane.inFlightSave = save
+    let succeeded = false
     try {
-      const succeeded = await save
+      succeeded = await save
+    } catch {
+      // A coordinator callback must not leak a rejection into a timer or
+      // window-close fire-and-forget path. Treat unexpected failures like a
+      // normal failed save so the lane can be retried explicitly.
+      notifyFailed(snapshot)
+      succeeded = false
+    }
+    try {
       if (!succeeded) {
         lane.blocked = true
         cancelTimer(lane)

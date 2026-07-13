@@ -1,10 +1,12 @@
-export class NoteDeleteError extends Error {
-  constructor(
-    message: string,
-    public readonly deletedIds: string[],
-  ) {
-    super(message)
+import { NoteBatchError, runSequentially } from './noteBatch'
+
+export class NoteDeleteError extends NoteBatchError {
+  public readonly deletedIds: string[]
+
+  constructor(message: string, deletedIds: string[], failedId: string) {
+    super(message, deletedIds, failedId)
     this.name = 'NoteDeleteError'
+    this.deletedIds = deletedIds
   }
 }
 
@@ -12,17 +14,12 @@ export async function deleteNotesSequentially(
   ids: string[],
   deleteOne: (id: string) => Promise<void>,
 ): Promise<string[]> {
-  const deletedIds: string[] = []
-
-  for (const id of ids) {
-    try {
-      await deleteOne(id)
-      deletedIds.push(id)
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : 'ノートの削除に失敗しました'
-      throw new NoteDeleteError(message, deletedIds)
+  try {
+    return await runSequentially(ids, deleteOne)
+  } catch (cause) {
+    if (cause instanceof NoteBatchError) {
+      throw new NoteDeleteError(cause.message, cause.completedIds, cause.failedId)
     }
+    throw cause
   }
-
-  return deletedIds
 }

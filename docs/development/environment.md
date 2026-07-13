@@ -44,7 +44,7 @@ Atlas Note の開発環境方針をまとめる。
 - SQLite 関連ライブラリ
 - Lint / Format / Typecheck / Test のコマンド
 
-2026-07-03 時点の確認結果:
+2026-07-13 時点の確認結果:
 
 | 項目 | 状態 |
 | --- | --- |
@@ -52,7 +52,7 @@ Atlas Note の開発環境方針をまとめる。
 | npm | `10.8.2` |
 | Go | `go1.26.4 windows/amd64` |
 | Wails CLI | `v2.10.1` |
-| Frontend build | `npm run build` 成功 |
+| Frontend build | `npm run frontend:build` 成功 |
 | npm audit | 脆弱性 0 件 |
 | Go test | `go test ./...` 成功 |
 | Wails doctor | 成功 |
@@ -73,11 +73,21 @@ wails version
 ```bash
 wails dev
 wails build
-npm run build
-npm run typecheck
-npm run lint
+npm run frontend:build
+npm run frontend:typecheck
+npm run frontend:lint
 go test ./...
+npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-batch
+npm --prefix frontend run test:note-selection
+npm --prefix frontend run test:note-delete
+npm --prefix frontend run test:notebook-hierarchy
+npm --prefix frontend run test:serializer
+npm --prefix frontend run test:notifications
+npm --prefix frontend run test:operation-logger
 ```
+
+Frontendの`lint`は`vue-tsc --noEmit`を実行する。専用formatter scriptは追加せず、Go変更時は`gofmt`、Markdown変更時は`git diff --check`を確認する。
 
 ## Docker の扱い
 

@@ -14,6 +14,7 @@ import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave
 import { createNoteOperationQueue } from '../utils/noteOperationQueue'
 import { createRequestCounter } from '../utils/requestCounter'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
+import { updateNotesSequentially } from '../utils/updateNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 
@@ -510,7 +511,7 @@ export const useNoteStore = defineStore('notes', () => {
     const endSaving = savingRequests.begin()
     error.value = null
     try {
-      for (const id of ids) {
+      return await updateNotesSequentially(ids, async (id) => {
         await noteOperations.enqueue(id, async () => {
           const updated = await updateNote(id, {
             ...input,
@@ -518,7 +519,7 @@ export const useNoteStore = defineStore('notes', () => {
           })
           applyPersistedNote(updated)
         })
-      }
+      })
     } catch (e) {
       setErrorContext({ code: 'NOTES_BATCH_UPDATE_FAILED' })
       error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'

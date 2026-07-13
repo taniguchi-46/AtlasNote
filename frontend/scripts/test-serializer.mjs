@@ -45,6 +45,15 @@ const cases = [
     expected: '**bold** *italic* ~~strike~~ `code` [link](https://example.com)',
   },
   {
+    name: 'multiple marks',
+    input: doc(paragraph([
+      text('emphasis', [{ type: 'bold' }, { type: 'italic' }]),
+      text(' '),
+      text('linked', [{ type: 'bold' }, { type: 'link', attrs: { href: 'https://example.com/?q=a&b=c#top' } }]),
+    ])),
+    expected: '***emphasis*** [**linked**](https://example.com/?q=a&b=c#top)',
+  },
+  {
     name: 'bullet and ordered lists',
     input: doc([
       bulletList([listItem(paragraph([text('one')]))]),
@@ -69,6 +78,22 @@ const cases = [
     name: 'code block',
     input: doc(codeBlock('ts', 'const a = 1')),
     expected: '```ts\nconst a = 1\n```',
+  },
+  {
+    name: 'empty paragraph and multiline code fence',
+    input: doc([
+      paragraph([]),
+      codeBlock('', 'line one\nline two'),
+      paragraph([]),
+    ]),
+    expected: '```\nline one\nline two\n```',
+  },
+  {
+    name: 'url with query and fragment',
+    input: doc(paragraph([
+      text('URL', [{ type: 'link', attrs: { href: 'https://example.com/path?q=a&b=c#section' } }]),
+    ])),
+    expected: '[URL](https://example.com/path?q=a&b=c#section)',
   },
   {
     name: 'horizontal rule and hard break',

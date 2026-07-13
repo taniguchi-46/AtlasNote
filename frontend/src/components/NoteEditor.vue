@@ -370,6 +370,7 @@ import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
+import { logOperationFailure } from '../utils/operationLogger'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 
 const CustomTableCell = TableCell.extend({
@@ -636,8 +637,12 @@ function setEditorFromMarkdown(markdown: string): boolean {
     })
     isRichDirty.value = false
     return true
-  } catch (error) {
-    console.error('Failed to load Markdown into rich editor', error)
+  } catch {
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.markdown-to-rich',
+      errorCategory: 'parse-failed',
+    })
     return false
   } finally {
     isApplyingContent.value = false

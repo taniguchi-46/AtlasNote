@@ -6,6 +6,7 @@ import ts from 'typescript'
 
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'deleteNotesSequentially.ts')
+const dependencyPath = path.join(rootDir, 'src', 'utils', 'noteBatch.ts')
 const notificationPath = path.join(rootDir, 'src', 'components', 'NotificationCenter.vue')
 const outDir = path.join(rootDir, '.tmp', 'note-delete-test')
 const outFile = path.join(outDir, 'deleteNotesSequentially.mjs')
@@ -13,6 +14,14 @@ const outFile = path.join(outDir, 'deleteNotesSequentially.mjs')
 await mkdir(outDir, { recursive: true })
 
 const source = await readFile(sourcePath, 'utf8')
+const dependencySource = await readFile(dependencyPath, 'utf8')
+const dependencyCompiled = ts.transpileModule(dependencySource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+  },
+})
+await writeFile(path.join(outDir, 'noteBatch.mjs'), dependencyCompiled.outputText, 'utf8')
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
@@ -20,7 +29,7 @@ const compiled = ts.transpileModule(source, {
   },
 })
 
-await writeFile(outFile, compiled.outputText, 'utf8')
+await writeFile(outFile, compiled.outputText.replace("from './noteBatch'", "from './noteBatch.mjs'"), 'utf8')
 
 const { deleteNotesSequentially, NoteDeleteError } = await import(pathToFileURL(outFile).href)
 
@@ -62,6 +71,7 @@ async function testFailureReportsOnlyCompletedDeletes() {
     (error) => {
       assert.ok(error instanceof NoteDeleteError)
       assert.equal(error.message, 'commit markdown delete failed')
+      assert.equal(error.failedId, 'b')
       assert.deepEqual(error.deletedIds, ['a'])
       return true
     },

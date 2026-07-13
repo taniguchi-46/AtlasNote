@@ -180,8 +180,13 @@ async function emptyTrashFromContextMenu() {
     return
   }
 
-  await noteStore.emptyTrash()
-  closeTrashContextMenu()
+  try {
+    await noteStore.emptyTrash()
+  } catch {
+    // The store has already published the operation error and partial success.
+  } finally {
+    closeTrashContextMenu()
+  }
 }
 
 function openRootCreateModal() {

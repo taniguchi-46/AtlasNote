@@ -182,6 +182,8 @@ import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useSearchStore } from '../stores/useSearchStore'
+import { NoteDeleteError } from '../utils/deleteNotesSequentially'
+import { NoteUpdateError } from '../utils/updateNotesSequentially'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
@@ -251,37 +253,53 @@ async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'resto
   const id = contextMenu.value.noteId
   if (!id) return
   const targetIds = contextMenu.value.targetIds.length > 0 ? contextMenu.value.targetIds : [id]
-  
-  switch (action) {
-    case 'favorite':
-      await noteStore.toggleFavorite(id)
-      break
-    case 'pin':
-      await noteStore.togglePinned(id)
-      break
-    case 'trash':
-      await noteStore.trashNotes(targetIds)
-      clearSelectedNotes(targetIds)
-      break
-    case 'restore':
-      await noteStore.restoreNotes(targetIds)
-      clearSelectedNotes(targetIds)
-      break
-    case 'delete':
-      await noteStore.permanentlyDeleteNotes(targetIds)
-      clearSelectedNotes(targetIds)
-      break
+
+  try {
+    switch (action) {
+      case 'favorite':
+        await noteStore.toggleFavorite(id)
+        break
+      case 'pin':
+        await noteStore.togglePinned(id)
+        break
+      case 'trash':
+        await noteStore.trashNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+      case 'restore':
+        await noteStore.restoreNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+      case 'delete':
+        await noteStore.permanentlyDeleteNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+    }
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
   }
-  if (searchStore.isActive) await searchStore.refresh()
 }
 
 async function handleMoveToNotebook(notebookId: string | null) {
   const targetIds = contextMenu.value.targetIds
   if (targetIds.length === 0) return
 
-  await noteStore.moveNotesToNotebook(targetIds, notebookId)
-  if (searchStore.isActive) await searchStore.refresh()
-  clearSelectedNotes(targetIds)
+  try {
+    await noteStore.moveNotesToNotebook(targetIds, notebookId)
+    if (searchStore.isActive) await searchStore.refresh()
+    clearSelectedNotes(targetIds)
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
+function completedBatchIds(error: unknown) {
+  if (error instanceof NoteUpdateError) return error.updatedIds
+  if (error instanceof NoteDeleteError) return error.deletedIds
+  return []
 }
 
 function clearSelectedNotes(ids: string[]) {
@@ -301,10 +319,14 @@ async function emptyTrash() {
   )
   if (!confirmed) return
 
-  await noteStore.emptyTrash()
-  if (searchStore.isActive) await searchStore.refresh()
-  selectedNoteIds.value = new Set()
-  lastSelectedNoteId.value = null
+  try {
+    await noteStore.emptyTrash()
+    if (searchStore.isActive) await searchStore.refresh()
+    selectedNoteIds.value = new Set()
+    lastSelectedNoteId.value = null
+  } catch {
+    if (searchStore.isActive) await searchStore.refresh()
+  }
 }
 
 function createNewNote() {

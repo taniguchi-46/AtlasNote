@@ -43,6 +43,10 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - ノート・ノートブック・検索Store/APIの操作別エラーコード、共通通知、再試行アクション
 - SHA-256 hashによる外部Markdown編集検知、revision更新、検索索引再構築
 - Markdown欠落のMissingNotes報告とrename後の孤児ファイル隔離
+- Markdown/Rich変換の空段落、code fence、URL、多重markの境界テスト
+- batch操作の完了ID・失敗IDを保持する部分成功処理と、UIイベントのPromise rejection処理
+- `noteAutoSave.ts`によるautosave coordinator分離とunexpected rejectionの失敗lane処理
+- 本文を含めないoperationログ（note ID、処理段階、エラー分類のみ）
 
 ## Phase 2の対象
 
@@ -65,9 +69,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 ## 継続課題
 
-- batch操作の部分成功と未処理Promiseの整理
-- Markdown / Rich変換の追加テスト
-- 構造化ログと大量ノート時の性能確認
+- 大量ノート時の性能確認
 - 競合解決UIのコンポーネントテスト
 
 ## 保留事項
@@ -81,14 +83,16 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 ## 主要コマンド
 
 ```bash
-npm run build
+npm run frontend:build
 npm run frontend:typecheck
 npm run frontend:lint
 npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:serializer
+npm --prefix frontend run test:operation-logger
 go test ./...
 wails build
 ```

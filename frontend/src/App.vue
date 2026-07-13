@@ -122,6 +122,7 @@ import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
 import { useNotebookStore } from './stores/useNotebookStore'
 import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
+import { logOperationFailure } from './utils/operationLogger'
 import {
   EDITOR_WIDTH_MIN,
   NOTE_LIST_WIDTH_MAX,
@@ -162,7 +163,6 @@ const searchFilters = computed<SearchFilters>(() => ({
 
 // TopBar actions
 function handleSync() {
-  console.log('Sync clicked')
 }
 
 function handleSearch(query: string) {
@@ -179,8 +179,8 @@ async function handleToggleAlwaysOnTop() {
   localStorage.setItem('atlas-always-on-top', String(isAlwaysOnTop.value))
   try {
     await ToggleAlwaysOnTop(isAlwaysOnTop.value)
-  } catch (e) {
-    console.error('Wails ToggleAlwaysOnTop failed:', e)
+  } catch {
+    logOperationFailure({ stage: 'wails.toggle-always-on-top', errorCategory: 'runtime' })
   }
 }
 
@@ -274,8 +274,8 @@ async function handleBeforeClose() {
     }
 
     await CancelClose()
-  } catch (error) {
-    console.error('Failed to complete app close', error)
+  } catch {
+    logOperationFailure({ stage: 'app-close', errorCategory: 'flush-or-close' })
     await CancelClose().catch(() => {})
   } finally {
     isHandlingBeforeClose = false
@@ -406,8 +406,8 @@ onMounted(async () => {
   // Apply initial always-on-top status
   try {
     await ToggleAlwaysOnTop(isAlwaysOnTop.value)
-  } catch (e) {
-    console.error('Wails ToggleAlwaysOnTop failed:', e)
+  } catch {
+    logOperationFailure({ stage: 'wails.toggle-always-on-top', errorCategory: 'runtime' })
   }
 })
 
