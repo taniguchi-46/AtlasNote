@@ -50,18 +50,8 @@
       {{ searchStore.isSearching ? '読み込み中...' : '次の検索結果を読み込む' }}
     </button>
 
-    <button
-      v-if="!searchStore.isActive && noteStore.hasMoreNotes"
-      class="note-list-load-more"
-      type="button"
-      :disabled="noteStore.isLoadingMore"
-      @click="noteStore.fetchNextPage()"
-    >
-      {{ noteStore.isLoadingMore ? '隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ...' : '谺｡縺ｮ繝弱・繝医ｒ隱ｭ縺ｿ霎ｼ縺ｿ' }}
-    </button>
-
     <!-- Note items -->
-    <ul v-if="displayedNotes.length > 0" class="note-list" role="list">
+    <ul v-if="displayedNotes.length > 0" ref="noteListRef" class="note-list" role="list">
       <ContextMenuRoot
         v-for="note in displayedNotes"
         :key="note.id"
@@ -159,12 +149,18 @@
           </ContextMenuContent>
         </ContextMenuPortal>
       </ContextMenuRoot>
+      <li
+        v-if="shouldAutoLoadMore"
+        ref="loadMoreSentinel"
+        class="note-list-load-more-sentinel"
+        aria-hidden="true"
+      />
     </ul>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   ChevronRightIcon,
   FileTextIcon,
@@ -203,6 +199,9 @@ const searchStore = useSearchStore()
 const tagStore = useTagStore()
 const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
+const noteListRef = ref<HTMLUListElement | null>(null)
+const loadMoreSentinel = ref<HTMLLIElement | null>(null)
+let loadMoreObserver: IntersectionObserver | null = null
 
 const contextMenu = ref({
   noteId: '',
@@ -405,7 +404,44 @@ const displayedCount = computed(() => {
   }
   return searchStore.total
 })
+const shouldAutoLoadMore = computed(() => !searchStore.isActive && noteStore.hasMoreNotes)
 const searchItemsById = computed(() => new Map(searchStore.items.map(item => [item.note.id, item])))
+
+function stopAutoLoadObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+}
+
+function observeLoadMore() {
+  stopAutoLoadObserver()
+  if (
+    !shouldAutoLoadMore.value
+    || noteStore.isLoadingMore
+    || !noteListRef.value
+    || !loadMoreSentinel.value
+  ) return
+
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting) && shouldAutoLoadMore.value) {
+      void noteStore.fetchNextPage()
+    }
+  }, {
+    root: noteListRef.value,
+    rootMargin: '0px 0px 160px 0px',
+  })
+  loadMoreObserver.observe(loadMoreSentinel.value)
+}
+
+watch(
+  () => [shouldAutoLoadMore.value, noteStore.isLoadingMore, displayedNotes.value.length],
+  async () => {
+    await nextTick()
+    observeLoadMore()
+  },
+  { flush: 'post', immediate: true },
+)
+
+onBeforeUnmount(stopAutoLoadObserver)
 
 function searchSnippet(noteId: string) {
   return (searchItemsById.value.get(noteId)?.snippet ?? '').replace(/<\/?mark>/g, '')
@@ -525,26 +561,10 @@ function formatDate(iso: string): string {
   opacity: 0.55;
 }
 
-.note-list-load-more {
-  align-self: center;
-  margin: 8px 12px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-input);
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.note-list-load-more:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.note-list-load-more:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.note-list-load-more-sentinel {
+  height: 1px;
+  margin: 0;
+  list-style: none;
 }
 
 .note-item-snippet {

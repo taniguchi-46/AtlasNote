@@ -250,8 +250,7 @@ export const useNoteStore = defineStore('notes', () => {
         summaries.value = []
       }
       summaries.value.unshift(toSummary(created))
-      currentListPage = 0
-      hasMoreNotes.value = true
+      // 新規追加だけで次ページの有無は変わらないため、現在のページング状態を維持する。
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
     } catch (e) {
@@ -502,7 +501,7 @@ export const useNoteStore = defineStore('notes', () => {
         code: 'NOTE_LIST_MORE_FAILED',
         action: { label: '再試行', run: () => fetchNextPage() },
       })
-      error.value = e instanceof Error ? e.message : '繝弱・繝医・霤ｼ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆'
+      error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {
       isLoadingMore.value = false
     }
