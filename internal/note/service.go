@@ -40,7 +40,8 @@ type markdownStore interface {
 	Delete(context.Context, string) error
 	DeleteStagedExists(context.Context, string, string) (bool, error)
 	Exists(context.Context, string) (bool, error)
-	ListManagedFiles(context.Context) (map[string]struct{}, error)
+	ListManagedFiles(context.Context) (map[string]storage.ManagedFile, error)
+	ModTime(context.Context, string) (time.Time, error)
 	QuarantineOrphans(context.Context, map[string]struct{}) error
 	Read(context.Context, string) (string, error)
 	RestoreDelete(context.Context, string, string) error
@@ -59,12 +60,14 @@ func NewService(repository *Repository, store markdownStore) *Service {
 }
 
 func (s *Service) updateSearchIndexLocked(ctx context.Context, record Record, content string) {
+	contentMTime, _ := s.store.ModTime(ctx, record.ID)
 	if err := s.repository.UpsertSearchIndex(ctx, SearchDocument{
-		NoteID:      record.ID,
-		Title:       record.Title,
-		Body:        content,
-		Revision:    record.Revision,
-		ContentHash: storage.HashContent(content),
+		NoteID:       record.ID,
+		Title:        record.Title,
+		Body:         content,
+		Revision:     record.Revision,
+		ContentHash:  storage.HashContent(content),
+		ContentMTime: contentMTime,
 	}); err != nil {
 		s.searchIndexFailed = true
 	}
@@ -455,6 +458,54 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		return RecoveryReport{}, err
 	}
 	expected := make(map[string]struct{}, len(records))
+	states := make(map[string]SearchIndexState, len(records))
+	stateFound := make(map[string]bool, len(records))
+	missingIDs := make([]string, 0)
+	canReuseIndex := true
+	for _, record := range records {
+		contentPath, err := s.store.ContentPath(record.ID)
+		if err != nil {
+			return RecoveryReport{}, err
+		}
+		if record.ContentPath != contentPath {
+			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
+		}
+		expected[contentPath] = struct{}{}
+		managedFile, exists := managedFiles[contentPath]
+		if !exists {
+			report.MissingNotes = append(report.MissingNotes, MissingContent{
+				ID:          record.ID,
+				Title:       record.Title,
+				ContentPath: contentPath,
+			})
+			missingIDs = append(missingIDs, record.ID)
+			continue
+		}
+		state, found, stateErr := s.repository.GetSearchIndexState(ctx, record.ID)
+		if stateErr != nil {
+			return RecoveryReport{}, stateErr
+		}
+		states[record.ID] = state
+		stateFound[record.ID] = found
+		if !found || state.IndexedRevision != record.Revision || state.ContentMTimeUnix != managedFile.ModTime.UnixNano() {
+			canReuseIndex = false
+		}
+	}
+
+	if err := s.store.QuarantineOrphans(ctx, expected); err != nil {
+		return RecoveryReport{}, err
+	}
+	if canReuseIndex {
+		indexBuildFailed := false
+		for _, id := range missingIDs {
+			if err := s.repository.DeleteSearchIndex(ctx, id); err != nil {
+				indexBuildFailed = true
+			}
+		}
+		s.searchIndexFailed = indexBuildFailed
+		return report, nil
+	}
+
 	documents := make([]SearchDocument, 0, len(records))
 	indexBuildFailed := false
 	for _, record := range records {
@@ -465,51 +516,42 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		if record.ContentPath != contentPath {
 			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
 		}
-		_, exists := managedFiles[contentPath]
+		managedFile, exists := managedFiles[contentPath]
 		if !exists {
-			report.MissingNotes = append(report.MissingNotes, MissingContent{
-				ID:          record.ID,
-				Title:       record.Title,
-				ContentPath: contentPath,
-			})
-		} else {
-			content, readErr := s.store.Read(ctx, record.ID)
-			if readErr != nil {
-				indexBuildFailed = true
-			} else {
-				contentHash := storage.HashContent(content)
-				state, stateFound, stateErr := s.repository.GetSearchIndexState(ctx, record.ID)
-				if stateErr != nil {
-					return RecoveryReport{}, stateErr
-				}
-				// An equal indexed revision with a different hash means the
-				// Markdown file changed outside this process. Accept that file as
-				// canonical and advance revision before rebuilding the derived index.
-				// If the indexed revision is older, only the derived index is stale;
-				// advancing revision in that case would create a false conflict.
-				if stateFound && state.IndexedRevision == record.Revision && state.ContentHash != contentHash {
-					record.UpdatedAt = time.Now().UTC()
-					nextRevision, updateErr := s.repository.UpdateCAS(ctx, record, record.Revision)
-					if updateErr != nil {
-						return RecoveryReport{}, fmt.Errorf("reconcile external markdown for %s: %w", record.ID, updateErr)
-					}
-					record.Revision = nextRevision
-				}
-				documents = append(documents, SearchDocument{
-					NoteID:      record.ID,
-					Title:       record.Title,
-					Body:        content,
-					Revision:    record.Revision,
-					ContentHash: contentHash,
-				})
-			}
+			continue
 		}
+		content, readErr := s.store.Read(ctx, record.ID)
+		if readErr != nil {
+			indexBuildFailed = true
+			continue
+		}
+		contentHash := storage.HashContent(content)
+		state := states[record.ID]
+		found := stateFound[record.ID]
+		// An equal indexed revision with a different hash means the
+		// Markdown file changed outside this process. Accept that file as
+		// canonical and advance revision before rebuilding the derived index.
+		// If the indexed revision is older, only the derived index is stale;
+		// advancing revision in that case would create a false conflict.
+		if found && state.IndexedRevision == record.Revision && state.ContentHash != contentHash {
+			record.UpdatedAt = time.Now().UTC()
+			nextRevision, updateErr := s.repository.UpdateCAS(ctx, record, record.Revision)
+			if updateErr != nil {
+				return RecoveryReport{}, fmt.Errorf("reconcile external markdown for %s: %w", record.ID, updateErr)
+			}
+			record.Revision = nextRevision
+		}
+		documents = append(documents, SearchDocument{
+			NoteID:       record.ID,
+			Title:        record.Title,
+			Body:         content,
+			Revision:     record.Revision,
+			ContentHash:  contentHash,
+			ContentMTime: managedFile.ModTime,
+		})
 		expected[contentPath] = struct{}{}
 	}
 
-	if err := s.store.QuarantineOrphans(ctx, expected); err != nil {
-		return RecoveryReport{}, err
-	}
 	if err := s.repository.ReplaceSearchIndex(ctx, documents); err != nil {
 		indexBuildFailed = true
 	}

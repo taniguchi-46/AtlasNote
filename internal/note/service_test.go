@@ -106,6 +106,47 @@ func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestServiceRecoverReusesStableIndexAndReadsChangedMarkdown(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+	countingStore := &countingRecoveryStore{MarkdownStore: store}
+	service := note.NewService(note.NewRepository(db), countingStore)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Stable", Content: "before"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	countingStore.reads = 0
+	if _, err := service.Recover(ctx); err != nil {
+		t.Fatalf("recover stable note: %v", err)
+	}
+	if countingStore.reads != 0 {
+		t.Fatalf("stable recovery reads = %d, want 0", countingStore.reads)
+	}
+
+	if err := store.Write(ctx, created.ID, "after external edit"); err != nil {
+		t.Fatalf("write external markdown: %v", err)
+	}
+	if _, err := service.Recover(ctx); err != nil {
+		t.Fatalf("recover changed note: %v", err)
+	}
+	if countingStore.reads == 0 {
+		t.Fatal("changed recovery did not read markdown")
+	}
+}
+
 func TestServiceRejectsMissingAndStaleRevisionBeforeStorageMutation(t *testing.T) {
 	t.Parallel()
 
@@ -1039,6 +1080,16 @@ type commitDeleteFailingStore struct {
 type commitTempFailingStore struct {
 	*storage.MarkdownStore
 	err error
+}
+
+type countingRecoveryStore struct {
+	*storage.MarkdownStore
+	reads int
+}
+
+func (s *countingRecoveryStore) Read(ctx context.Context, id string) (string, error) {
+	s.reads++
+	return s.MarkdownStore.Read(ctx, id)
 }
 
 func (s *commitTempFailingStore) CommitTemp(context.Context, string, string) error {

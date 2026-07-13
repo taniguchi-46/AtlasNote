@@ -16,20 +16,22 @@ const searchSnippetLimit = 240
 // Revision and ContentHash let reconciliation determine whether the snapshot
 // still represents the canonical note and Markdown file.
 type SearchDocument struct {
-	NoteID      string
-	Title       string
-	Body        string
-	Revision    int64
-	ContentHash string
-	IndexedAt   time.Time
+	NoteID       string
+	Title        string
+	Body         string
+	Revision     int64
+	ContentHash  string
+	ContentMTime time.Time
+	IndexedAt    time.Time
 }
 
 // SearchIndexState describes the last canonical Markdown snapshot indexed for a note.
 type SearchIndexState struct {
-	NoteID          string
-	IndexedRevision int64
-	ContentHash     string
-	IndexedAt       time.Time
+	NoteID           string
+	IndexedRevision  int64
+	ContentHash      string
+	ContentMTimeUnix int64
+	IndexedAt        time.Time
 }
 
 // GetSearchIndexState returns the derived-index snapshot state for one note.
@@ -40,18 +42,20 @@ func (r *Repository) GetSearchIndexState(ctx context.Context, noteID string) (Se
 	}
 
 	var state SearchIndexState
+	var contentMTimeUnix int64
 	var indexedAt string
 	err := r.db.QueryRowContext(ctx, `
-SELECT note_id, indexed_revision, content_hash, indexed_at
+SELECT note_id, indexed_revision, content_hash, content_mtime_ns, indexed_at
 FROM note_search_state
 WHERE note_id = ?
-`, noteID).Scan(&state.NoteID, &state.IndexedRevision, &state.ContentHash, &indexedAt)
+	`, noteID).Scan(&state.NoteID, &state.IndexedRevision, &state.ContentHash, &contentMTimeUnix, &indexedAt)
 	if err == sql.ErrNoRows {
 		return SearchIndexState{}, false, nil
 	}
 	if err != nil {
 		return SearchIndexState{}, false, fmt.Errorf("get search index state: %w", err)
 	}
+	state.ContentMTimeUnix = contentMTimeUnix
 	var parseErr error
 	state.IndexedAt, parseErr = parseTime(indexedAt)
 	if parseErr != nil {
@@ -183,6 +187,10 @@ func upsertSearchDocument(ctx context.Context, executor sqlExecutor, document Se
 	if document.IndexedAt.IsZero() {
 		document.IndexedAt = time.Now().UTC()
 	}
+	contentMTimeUnix := int64(0)
+	if !document.ContentMTime.IsZero() {
+		contentMTimeUnix = document.ContentMTime.UnixNano()
+	}
 
 	if _, err := executor.ExecContext(ctx, "DELETE FROM note_search WHERE note_id = ?", document.NoteID); err != nil {
 		return fmt.Errorf("replace search index document: %w", err)
@@ -197,13 +205,14 @@ func upsertSearchDocument(ctx context.Context, executor sqlExecutor, document Se
 		return fmt.Errorf("insert search index document: %w", err)
 	}
 	if _, err := executor.ExecContext(ctx, `
-INSERT INTO note_search_state(note_id, indexed_revision, content_hash, indexed_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO note_search_state(note_id, indexed_revision, content_hash, content_mtime_ns, indexed_at)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(note_id) DO UPDATE SET
     indexed_revision = excluded.indexed_revision,
     content_hash = excluded.content_hash,
+    content_mtime_ns = excluded.content_mtime_ns,
     indexed_at = excluded.indexed_at
-`, document.NoteID, document.Revision, document.ContentHash, formatTime(document.IndexedAt)); err != nil {
+`, document.NoteID, document.Revision, document.ContentHash, contentMTimeUnix, formatTime(document.IndexedAt)); err != nil {
 		return fmt.Errorf("upsert search index state: %w", err)
 	}
 

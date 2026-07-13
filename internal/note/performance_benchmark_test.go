@@ -140,13 +140,18 @@ func newLargeNoteBenchmarkFixture(b *testing.B) largeNoteBenchmarkFixture {
 		if err := store.Write(ctx, id, content); err != nil {
 			b.Fatalf("write benchmark markdown %q: %v", id, err)
 		}
+		contentMTime, err := store.ModTime(ctx, id)
+		if err != nil {
+			b.Fatalf("stat benchmark markdown %q: %v", id, err)
+		}
 		documents = append(documents, note.SearchDocument{
-			NoteID:      id,
-			Title:       title,
-			Body:        content,
-			Revision:    1,
-			ContentHash: storage.HashContent(content),
-			IndexedAt:   now,
+			NoteID:       id,
+			Title:        title,
+			Body:         content,
+			Revision:     1,
+			ContentHash:  storage.HashContent(content),
+			ContentMTime: contentMTime,
+			IndexedAt:    now,
 		})
 	}
 	if err := repository.ReplaceSearchIndex(ctx, documents); err != nil {

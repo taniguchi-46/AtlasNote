@@ -133,6 +133,10 @@ CREATE TABLE IF NOT EXISTS note_search_state (
 CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
 	ON note_search_state(indexed_revision);
 	`,
+	`
+ALTER TABLE note_search_state
+	ADD COLUMN content_mtime_ns INTEGER NOT NULL DEFAULT 0;
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -262,6 +266,7 @@ CREATE TABLE IF NOT EXISTS note_search_state (
 	note_id TEXT PRIMARY KEY,
 	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
 	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
 	indexed_at TEXT NOT NULL,
 	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
 );

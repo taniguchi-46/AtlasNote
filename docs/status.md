@@ -25,6 +25,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
 - schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
+- schema version 5の検索状態`content_mtime_ns` migrationと既存行の初回hash再照合
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
 - ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
@@ -46,6 +47,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - ノート一覧の固定上限付きページング、Store・一覧UIの追加読込
 - 起動復旧のMarkdown存在確認をノートごとの`Stat`から管理ファイル一覧の一括取得へ変更
 - 起動復旧・検索・一覧の大量データベンチマークと計測手順（`docs/development/performance.md`）
+- 検索状態へのMarkdown mtime保存migration、mtime一致時の索引再利用、変更時hash照合フォールバック
 - Markdown/Rich変換の空段落、code fence、URL、多重markの境界テスト
 - batch操作の完了ID・失敗IDを保持する部分成功処理と、UIイベントのPromise rejection処理
 - `noteAutoSave.ts`によるautosave coordinator分離とunexpected rejectionの失敗lane処理
@@ -72,7 +74,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 ## 継続課題
 
-- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の存在確認の一括化を実装済み。実運用件数での継続比較と差分検知は未完了）
+- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知を実装済み。5,000件以上での継続比較は未完了）
 - 競合解決UIのコンポーネントテスト
 
 ## 保留事項

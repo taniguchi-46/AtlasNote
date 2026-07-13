@@ -19,6 +19,10 @@ type MarkdownStore struct {
 	rootDir string
 }
 
+type ManagedFile struct {
+	ModTime time.Time
+}
+
 func NewMarkdownStore(rootDir string) (*MarkdownStore, error) {
 	rootDir = filepath.Clean(rootDir)
 	if err := os.MkdirAll(rootDir, 0o700); err != nil {
@@ -164,25 +168,46 @@ func (s *MarkdownStore) Exists(ctx context.Context, id string) (bool, error) {
 	return false, fmt.Errorf("stat markdown content: %w", err)
 }
 
+func (s *MarkdownStore) ModTime(ctx context.Context, id string) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stat markdown content: %w", err)
+	}
+	return info.ModTime(), nil
+}
+
 // ListManagedFiles returns a snapshot of managed Markdown and journal file
 // names. Recovery uses this directory snapshot instead of issuing one Stat
 // call per note.
-func (s *MarkdownStore) ListManagedFiles(ctx context.Context) (map[string]struct{}, error) {
+func (s *MarkdownStore) ListManagedFiles(ctx context.Context) (map[string]ManagedFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	entries, err := os.ReadDir(s.rootDir)
+	directory, err := os.Open(s.rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("list managed markdown files: %w", err)
 	}
+	defer directory.Close()
+	entries, err := directory.Readdir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("read managed markdown files: %w", err)
+	}
 
-	files := make(map[string]struct{}, len(entries))
+	files := make(map[string]ManagedFile, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !isManagedFile(entry.Name()) {
 			continue
 		}
-		files[entry.Name()] = struct{}{}
+		files[entry.Name()] = ManagedFile{ModTime: entry.ModTime()}
 	}
 
 	return files, nil

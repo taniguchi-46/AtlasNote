@@ -87,7 +87,7 @@ FTS索引はMarkdown正本とSQLiteメタデータが確定した後に更新す
 - ノート保存の成功を、派生索引の更新失敗でrollbackしない。
 - 索引更新失敗は本文を含めず、operation ID、note ID、処理段階、エラー分類だけを記録する。
 - 検索は索引の不整合を検知した場合、不完全な結果を正常結果として扱わず、共通エラーと再構築導線へ接続する。
-- FTS索引の整合性判定用に、note ID、indexed revision、content hashを持つ状態テーブルを検索migrationで追加済みである。外部Markdown reconciliationでhashを正本との比較に使用する。
+- FTS索引の整合性判定用に、note ID、indexed revision、content hash、Markdownのmtimeを持つ状態テーブルを検索migrationで追加済みである。mtime一致時は本文読み込みと再構築を省略し、mtime差分時にhashを正本との比較へ使用する。
 
 ## 再構築
 
@@ -101,6 +101,7 @@ FTS5の特別コマンドは[FTS5 Special INSERT Commands](https://www.sqlite.or
 ## migrationとrollback
 
 - 新しいschema versionでFTS5仮想テーブルと索引状態テーブルを追加する。
+- 既存の検索状態には`content_mtime_ns = 0`を設定し、初回復旧でhash照合とmtime保存を行う。
 - migrationで既存のMarkdown、`notes`行、revision、日時を変更しない。
 - migration失敗時はトランザクションをrollbackし、`PRAGMA user_version` を進めない。
 - 現在はdown migration基盤がないため、旧アプリへ戻す場合はmigration前DBバックアップの復元をrollback手順とする。

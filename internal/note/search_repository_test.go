@@ -72,6 +72,32 @@ func TestRepositorySearchIndexesMarkdownAndPaginates(t *testing.T) {
 	}
 }
 
+func TestRepositorySearchIndexStateStoresContentMTime(t *testing.T) {
+	t.Parallel()
+
+	repository := newRepositoryTest(t)
+	createSearchTestNote(t, repository, "search-mtime", "mtime", time.Now().UTC(), false)
+	contentMTime := time.Now().UTC().Truncate(time.Nanosecond)
+	if err := repository.UpsertSearchIndex(t.Context(), note.SearchDocument{
+		NoteID:       "search-mtime",
+		Title:        "mtime",
+		Body:         "benchmark",
+		Revision:     1,
+		ContentHash:  "hash",
+		ContentMTime: contentMTime,
+	}); err != nil {
+		t.Fatalf("upsert search index: %v", err)
+	}
+
+	state, found, err := repository.GetSearchIndexState(t.Context(), "search-mtime")
+	if err != nil {
+		t.Fatalf("get search index state: %v", err)
+	}
+	if !found || state.ContentMTimeUnix != contentMTime.UnixNano() {
+		t.Fatalf("search state mtime = %#v, found=%t", state, found)
+	}
+}
+
 func TestRepositorySearchValidationAndShortQueryFallback(t *testing.T) {
 	t.Parallel()
 
