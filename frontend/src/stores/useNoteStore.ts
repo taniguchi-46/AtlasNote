@@ -78,6 +78,7 @@ export const useNoteStore = defineStore('notes', () => {
   const hasMoreNotes = ref(false)
   const isLoadingMore = ref(false)
   const activeNote = ref<note.Note | null>(null)
+  const activeTagId = ref<string | null>(null)
   const isLoading = ref(false)
   const isSaving = ref(false)
   const error = ref<string | null>(null)
@@ -95,6 +96,7 @@ export const useNoteStore = defineStore('notes', () => {
   const savingRequests = createRequestCounter((count) => {
     isSaving.value = count > 0
   })
+  const noteListRequests = createLatestRequestGuard()
 
   watch(error, (message) => {
     if (!message) {
@@ -153,26 +155,48 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   // Actions
-  async function fetchNotes(excludedIds: string[] = []) {
+  function createNoteListInput(page: number, tagId: string | null) {
+    return {
+      page,
+      pageSize: NOTE_LIST_PAGE_SIZE,
+      ...(tagId ? { tagId } : {}),
+    } as note.NoteListInput
+  }
+
+  async function fetchNotes(excludedIds: string[] = [], tagId: string | null = null) {
+    const isLatestRequest = noteListRequests.begin()
+    activeTagId.value = tagId
     isLoading.value = true
+    isLoadingMore.value = false
     error.value = null
     currentListPage = 0
     hasMoreNotes.value = false
     excludedNoteIds = new Set(excludedIds)
     try {
-      const result = await listNotesPage({ page: 1, pageSize: NOTE_LIST_PAGE_SIZE })
+      const result = await listNotesPage(createNoteListInput(1, tagId))
+      if (!isLatestRequest()) return
+
       currentListPage = result.page
       hasMoreNotes.value = result.hasNext
       summaries.value = (result.items ?? []).filter((note) => !excludedNoteIds.has(note.id))
     } catch (e) {
+      if (!isLatestRequest()) return
+
       setErrorContext({
         code: 'NOTE_LIST_FAILED',
-        action: { label: '再試行', run: () => fetchNotes(excludedIds) },
+        action: { label: '再試行', run: () => fetchNotes(excludedIds, tagId) },
       })
       error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {
-      isLoading.value = false
+      if (isLatestRequest()) isLoading.value = false
     }
+  }
+
+  function clearTagFilter() {
+    noteListRequests.begin()
+    activeTagId.value = null
+    isLoading.value = false
+    isLoadingMore.value = false
   }
 
   async function selectNote(id: string) {
@@ -457,13 +481,13 @@ export const useNoteStore = defineStore('notes', () => {
   async function fetchNextPage() {
     if (isLoading.value || isLoadingMore.value || !hasMoreNotes.value) return
 
+    const isLatestRequest = noteListRequests.begin()
     isLoadingMore.value = true
     error.value = null
     try {
-      const result = await listNotesPage({
-        page: currentListPage + 1,
-        pageSize: NOTE_LIST_PAGE_SIZE,
-      })
+      const result = await listNotesPage(createNoteListInput(currentListPage + 1, activeTagId.value))
+      if (!isLatestRequest()) return
+
       const existingIds = new Set(summaries.value.map((note) => note.id))
       const nextItems = (result.items ?? []).filter((note) =>
         !excludedNoteIds.has(note.id) && !existingIds.has(note.id)
@@ -472,6 +496,8 @@ export const useNoteStore = defineStore('notes', () => {
       currentListPage = result.page
       hasMoreNotes.value = result.hasNext
     } catch (e) {
+      if (!isLatestRequest()) return
+
       setErrorContext({
         code: 'NOTE_LIST_MORE_FAILED',
         action: { label: '再試行', run: () => fetchNextPage() },
@@ -661,6 +687,7 @@ export const useNoteStore = defineStore('notes', () => {
     hasMoreNotes,
     isLoadingMore,
     activeNote,
+    activeTagId,
     isLoading,
     isSaving,
     error,
@@ -675,6 +702,7 @@ export const useNoteStore = defineStore('notes', () => {
     trashedNotes,
     activeNotes,
     fetchNotes,
+    clearTagFilter,
     fetchNextPage,
     selectNote,
     newNote,

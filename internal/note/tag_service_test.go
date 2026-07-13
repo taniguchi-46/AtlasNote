@@ -2,6 +2,7 @@ package note_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -165,6 +166,58 @@ func TestServiceSetNoteTagsIsAtomicAndDoesNotChangeNoteRevision(t *testing.T) {
 	}
 	if clearedResult.Error != nil || len(clearedResult.Tags) != 0 {
 		t.Fatalf("clear result = %#v", clearedResult)
+	}
+}
+
+func TestServiceListPageFiltersBySingleTagAndExcludesTrashedNotes(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _, service, _ := newRecoveryTestService(t)
+	tagged, err := service.Create(ctx, note.CreateInput{Title: "Tagged", Content: "content"})
+	if err != nil {
+		t.Fatalf("create tagged note: %v", err)
+	}
+	other, err := service.Create(ctx, note.CreateInput{Title: "Other", Content: "content"})
+	if err != nil {
+		t.Fatalf("create other note: %v", err)
+	}
+	trashed, err := service.Create(ctx, note.CreateInput{Title: "Trashed", Content: "content"})
+	if err != nil {
+		t.Fatalf("create trashed note: %v", err)
+	}
+	tag := createTagForTest(t, ctx, service, "Project")
+	if _, err := service.SetNoteTags(ctx, tagged.ID, note.SetNoteTagsInput{TagIDs: []string{tag.ID}}); err != nil {
+		t.Fatalf("attach tag to tagged note: %v", err)
+	}
+	if _, err := service.SetNoteTags(ctx, trashed.ID, note.SetNoteTagsInput{TagIDs: []string{tag.ID}}); err != nil {
+		t.Fatalf("attach tag to trashed note: %v", err)
+	}
+	trashed, err = service.Update(ctx, trashed.ID, note.UpdateInput{
+		IsTrashed:        ptr(true),
+		ExpectedRevision: ptr(trashed.Revision),
+	})
+	if err != nil {
+		t.Fatalf("trash tagged note: %v", err)
+	}
+
+	result, err := service.ListPage(ctx, note.NoteListInput{
+		Page:     1,
+		PageSize: 1,
+		TagID:    ptr(tag.ID),
+	})
+	if err != nil {
+		t.Fatalf("list notes by tag: %v", err)
+	}
+	if result.Total != 1 || result.HasNext || len(result.Items) != 1 || result.Items[0].ID != tagged.ID {
+		t.Fatalf("tagged page = %#v", result)
+	}
+	if result.Items[0].ID == other.ID || result.Items[0].IsTrashed {
+		t.Fatalf("unexpected note in tagged page = %#v", result.Items[0])
+	}
+
+	emptyTagID := " "
+	if _, err := service.ListPage(ctx, note.NoteListInput{TagID: &emptyTagID}); !errors.Is(err, note.ErrValidation) {
+		t.Fatalf("empty tag ID error = %v, want ErrValidation", err)
 	}
 }
 

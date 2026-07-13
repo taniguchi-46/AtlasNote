@@ -21,6 +21,7 @@ export const useTagStore = defineStore('tags', () => {
 	const tags = ref<note.Tag[]>([])
 	const activeNoteTags = ref<note.Tag[]>([])
 	const activeNoteId = ref<string | null>(null)
+	const activeNoteTagsReady = ref(false)
 	const isLoading = ref(false)
 	const isMutating = ref(false)
 	const error = ref<string | null>(null)
@@ -77,12 +78,14 @@ export const useTagStore = defineStore('tags', () => {
 		const requestVersion = ++noteTagsRequestVersion
 		activeNoteId.value = noteId
 		activeNoteTags.value = []
+		activeNoteTagsReady.value = false
 		isLoading.value = true
 		error.value = null
 		try {
 			const loadedTags = await listNoteTags(noteId)
 			if (requestVersion === noteTagsRequestVersion) {
 				activeNoteTags.value = loadedTags
+				activeNoteTagsReady.value = true
 			}
 		} catch (cause) {
 			if (requestVersion === noteTagsRequestVersion) {
@@ -102,11 +105,13 @@ export const useTagStore = defineStore('tags', () => {
 		noteTagsRequestVersion += 1
 		activeNoteId.value = null
 		activeNoteTags.value = []
+		activeNoteTagsReady.value = false
 	}
 
 	function applyActiveNoteTags(updatedTags: note.Tag[]) {
 		noteTagsRequestVersion += 1
 		activeNoteTags.value = updatedTags
+		activeNoteTagsReady.value = true
 		isLoading.value = false
 	}
 
@@ -205,6 +210,7 @@ export const useTagStore = defineStore('tags', () => {
 		tags,
 		activeNoteTags,
 		activeNoteId,
+		activeNoteTagsReady,
 		isLoading,
 		isMutating,
 		error,

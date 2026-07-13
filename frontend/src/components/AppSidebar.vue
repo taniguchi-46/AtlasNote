@@ -150,6 +150,7 @@ const navItems = computed<Array<{
 function handleNavClick(section: SidebarSection) {
   appStore.setSidebarSection(section)
   notebookStore.activeNotebookId = null
+  void noteStore.fetchNotes([], null)
 }
 
 function showTrashContextMenu(event: MouseEvent, section: SidebarSection) {

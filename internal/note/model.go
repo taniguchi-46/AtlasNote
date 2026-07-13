@@ -22,8 +22,9 @@ const (
 )
 
 type NoteListInput struct {
-	Page     int `json:"page"`
-	PageSize int `json:"pageSize"`
+	Page     int     `json:"page"`
+	PageSize int     `json:"pageSize"`
+	TagID    *string `json:"tagId,omitempty"`
 }
 
 type NoteListResult struct {

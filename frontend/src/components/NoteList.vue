@@ -192,6 +192,7 @@ import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useSearchStore } from '../stores/useSearchStore'
+import { useTagStore } from '../stores/useTagStore'
 import { NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { NoteUpdateError } from '../utils/updateNotesSequentially'
 
@@ -199,6 +200,7 @@ const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
+const tagStore = useTagStore()
 const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
 
@@ -349,6 +351,10 @@ const isTrashSection = computed(() =>
 
 const sectionTitle = computed(() => {
   if (searchStore.isActive) return '検索結果'
+  if (noteStore.activeTagId) {
+    const tag = tagStore.tags.find((candidate) => candidate.id === noteStore.activeTagId)
+    return tag ? tag.name : 'タグのノート'
+  }
   if (notebookStore.activeNotebookId) {
     const nb = notebookStore.notebooks.find(n => n.id === notebookStore.activeNotebookId)
     return nb ? nb.name : 'すべてのノート'

@@ -14,20 +14,12 @@
       </button>
     </div>
 
-    <input
-      v-model="query"
-      class="tag-search-input"
-      type="search"
-      placeholder="タグを検索"
-      aria-label="タグを検索"
-    />
-
-    <p v-if="filteredTags.length === 0" class="tag-empty">
-      {{ tagStore.tags.length === 0 ? 'タグはまだありません。' : '一致するタグはありません。' }}
+    <p v-if="tagStore.tags.length === 0" class="tag-empty">
+      タグはまだありません。
     </p>
 
     <ul v-else class="tag-list">
-      <li v-for="tag in filteredTags" :key="tag.id" class="tag-list-item">
+      <li v-for="tag in tagStore.tags" :key="tag.id" class="tag-list-item">
         <template v-if="editingTagID === tag.id">
           <input
             v-model="editingName"
@@ -38,24 +30,34 @@
             @keydown.enter.prevent="saveRename(tag.id)"
             @keydown.esc="cancelRename"
           />
-          <button type="button" :disabled="tagStore.isMutating" title="名前を保存" @click="saveRename(tag.id)">
-            <CheckIcon :size="14" />
-          </button>
-          <button type="button" :disabled="tagStore.isMutating" title="名前の変更をやめる" @click="cancelRename">
-            <XIcon :size="14" />
-          </button>
+          <div class="tag-list-actions">
+            <button type="button" :disabled="tagStore.isMutating" title="名前を保存" @click="saveRename(tag.id)">
+              <CheckIcon :size="14" />
+            </button>
+            <button type="button" :disabled="tagStore.isMutating" title="名前の変更をやめる" @click="cancelRename">
+              <XIcon :size="14" />
+            </button>
+          </div>
         </template>
         <template v-else>
-          <span class="tag-list-name" :title="tag.name">
+          <button
+            class="tag-list-name"
+            :class="{ 'is-active': noteStore.activeTagId === tag.id }"
+            type="button"
+            :title="`${tag.name}のノートを表示`"
+            @click="selectTag(tag.id)"
+          >
             <TagIcon :size="13" aria-hidden="true" />
-            {{ tag.name }}
-          </span>
-          <button type="button" :disabled="tagStore.isMutating" title="タグ名を変更" @click="startRename(tag)">
-            <PencilIcon :size="13" />
+            <span class="tag-list-name-text">{{ tag.name }}</span>
           </button>
-          <button class="danger" type="button" :disabled="tagStore.isMutating" title="タグを削除" @click="deleteTag(tag)">
-            <Trash2Icon :size="13" />
-          </button>
+          <div class="tag-list-actions">
+            <button type="button" :disabled="tagStore.isMutating" title="タグ名を変更" @click="startRename(tag)">
+              <PencilIcon :size="13" />
+            </button>
+            <button class="danger" type="button" :disabled="tagStore.isMutating" title="タグを削除" @click="deleteTag(tag)">
+              <Trash2Icon :size="13" />
+            </button>
+          </div>
         </template>
       </li>
     </ul>
@@ -65,26 +67,31 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { CheckIcon, PencilIcon, PlusIcon, TagIcon, Trash2Icon, XIcon } from '@lucide/vue'
 import type { note } from '../../wailsjs/go/models'
 import TagCreateModal from './TagCreateModal.vue'
 import { useTagStore } from '../stores/useTagStore'
+import { useNoteStore } from '../stores/useNoteStore'
+import { useAppStore } from '../stores/useAppStore'
+import { useNotebookStore } from '../stores/useNotebookStore'
+import { useSearchStore } from '../stores/useSearchStore'
 
 const tagStore = useTagStore()
+const noteStore = useNoteStore()
+const appStore = useAppStore()
+const notebookStore = useNotebookStore()
+const searchStore = useSearchStore()
 const isCreateModalOpen = ref(false)
-const query = ref('')
 const editingTagID = ref<string | null>(null)
 const editingName = ref('')
 
-const filteredTags = computed(() => {
-  const normalizedQuery = query.value.normalize('NFC').trim().toLocaleLowerCase()
-  if (!normalizedQuery) return tagStore.tags
-
-  return tagStore.tags.filter((tag) => (
-    tag.name.normalize('NFC').toLocaleLowerCase().includes(normalizedQuery)
-  ))
-})
+async function selectTag(tagID: string) {
+  appStore.setSidebarSection('notes')
+  notebookStore.activeNotebookId = null
+  searchStore.clear()
+  await noteStore.fetchNotes([], tagID)
+}
 
 function startRename(tag: note.Tag) {
   editingTagID.value = tag.id
@@ -113,8 +120,10 @@ async function deleteTag(tag: note.Tag) {
   )
   if (!confirmed) return
 
+  const wasActive = noteStore.activeTagId === tag.id
   try {
     await tagStore.removeTag(tag.id)
+    if (wasActive) await noteStore.fetchNotes([], null)
   } catch (_) {
     // The tag store reports the operation error through the notification center.
   }
@@ -141,7 +150,6 @@ async function deleteTag(tag: note.Tag) {
   font-weight: 600;
 }
 
-.tag-search-input,
 .tag-rename-input {
   min-width: 0;
   height: 27px;
@@ -154,13 +162,8 @@ async function deleteTag(tag: note.Tag) {
   border-radius: 4px;
 }
 
-.tag-search-input {
-  width: 100%;
-  margin-top: 0;
-}
-
 .add-tag-btn,
-.tag-list-item button {
+.tag-list-actions button {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -176,16 +179,16 @@ async function deleteTag(tag: note.Tag) {
 }
 
 .add-tag-btn:hover:not(:disabled),
-.tag-list-item button:hover:not(:disabled) {
+.tag-list-actions button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
-.tag-list-item button.danger:hover:not(:disabled) {
+.tag-list-actions button.danger:hover:not(:disabled) {
   color: var(--color-danger);
 }
 
 .add-tag-btn:disabled,
-.tag-list-item button:disabled {
+.tag-list-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -214,25 +217,61 @@ async function deleteTag(tag: note.Tag) {
   gap: 1px;
 }
 
+.tag-list-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+
 .tag-list-name {
   display: flex;
-  flex: 1;
+  flex: 1 1 0;
   align-items: center;
   min-width: 0;
   gap: 6px;
+  width: auto;
+  height: auto;
   padding: 5px 4px;
   overflow: hidden;
   color: var(--text-primary);
+  font: inherit;
   font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.tag-rename-input {
-  flex: 1;
+.tag-list-name > svg {
+  flex: 0 0 auto;
 }
 
-.tag-search-input:focus,
+.tag-list-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-list-name:hover {
+  background: var(--bg-hover);
+}
+
+.tag-list-name.is-active {
+  color: var(--text-active);
+  background: var(--bg-active);
+}
+
+.tag-rename-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .tag-rename-input:focus {
   outline: 2px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
   outline-offset: -1px;

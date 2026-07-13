@@ -127,11 +127,6 @@
         </div>
       </div>
 
-      <NoteTags
-        :note-id="noteStore.activeNote.id"
-        :disabled="noteStore.activeNote.isTrashed"
-      />
-
       <div class="editor-format-bar" @mousedown.prevent>
         <button
           class="format-btn"
@@ -323,7 +318,17 @@
       </div>
 
       <div class="editor-statusbar">
-        <span>{{ charCount }} 文字</span>
+        <div class="editor-statusbar-left">
+          <NoteTagAddPopover
+            :note-id="noteStore.activeNote.id"
+            :disabled="noteStore.activeNote.isTrashed"
+          />
+          <NoteTags
+            :note-id="noteStore.activeNote.id"
+            :disabled="noteStore.activeNote.isTrashed"
+          />
+          <span>{{ charCount }} 文字</span>
+        </div>
         <span>更新: {{ formatDate(noteStore.activeNote.updatedAt) }}</span>
       </div>
     </template>
@@ -375,6 +380,7 @@ import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import NoteTags from './NoteTags.vue'
+import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { logOperationFailure } from '../utils/operationLogger'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'

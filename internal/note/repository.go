@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -76,13 +77,31 @@ func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteLis
 		return NoteListResult{}, err
 	}
 
+	where, err := noteListWhere(input)
+	if err != nil {
+		return NoteListResult{}, err
+	}
+
+	countQuery := psql.Select("COUNT(*)").From(notesTable)
+	if len(where) > 0 {
+		countQuery = countQuery.Where(where)
+	}
+	countSQL, countArgs, err := countQuery.ToSql()
+	if err != nil {
+		return NoteListResult{}, fmt.Errorf("build note count: %w", err)
+	}
+
 	var total int
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM notes").Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 		return NoteListResult{}, fmt.Errorf("count notes: %w", err)
 	}
 
-	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
-		From(notesTable).
+	noteQuery := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
+		From(notesTable)
+	if len(where) > 0 {
+		noteQuery = noteQuery.Where(where)
+	}
+	query, args, err := noteQuery.
 		OrderBy("updated_at DESC", "id ASC").
 		Limit(uint64(pageSize)).
 		Offset(uint64((page - 1) * pageSize)).
@@ -108,6 +127,25 @@ func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteLis
 		PageSize: pageSize,
 		Total:    total,
 		HasNext:  page*pageSize < total,
+	}, nil
+}
+
+func noteListWhere(input NoteListInput) (sq.And, error) {
+	if input.TagID == nil {
+		return nil, nil
+	}
+
+	tagID := strings.TrimSpace(*input.TagID)
+	if tagID == "" {
+		return nil, fmt.Errorf("%w: tag id must not be empty", ErrValidation)
+	}
+
+	// Tag navigation is an active-note view, so trashed notes are excluded at
+	// the same time as the tag relation is applied. The unfiltered list keeps
+	// its existing behavior and lets the UI switch between active and trash.
+	return sq.And{
+		sq.Expr("EXISTS (SELECT 1 FROM note_tags WHERE note_tags.note_id = notes.id AND note_tags.tag_id = ?)", tagID),
+		sq.Eq{"notes.is_trashed": false},
 	}, nil
 }
 

@@ -1045,6 +1045,13 @@ body.is-pane-resizing * {
   flex-shrink: 0;
 }
 
+.editor-statusbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
 /* ─────────────────────────────────────────
    8. Spinner
 ───────────────────────────────────────── */

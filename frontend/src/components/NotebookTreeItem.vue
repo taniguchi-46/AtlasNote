@@ -92,6 +92,7 @@ import {
 } from 'reka-ui'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
+import { useNoteStore } from '../stores/useNoteStore'
 import type { NotebookDeleteMode } from '../api/notebooks'
 import NotebookCreateModal from './NotebookCreateModal.vue'
 import NotebookDeleteModal from './NotebookDeleteModal.vue'
@@ -104,6 +105,7 @@ const props = defineProps<{
 
 const notebookStore = useNotebookStore()
 const appStore = useAppStore()
+const noteStore = useNoteStore()
 
 const isEditing = ref(false)
 const editName = ref('')
@@ -124,6 +126,7 @@ async function selectIcon(iconName: string) {
 function selectNotebook() {
   notebookStore.activeNotebookId = props.node.id
   appStore.setSidebarSection('notes')
+  void noteStore.fetchNotes([], null)
 }
 
 function openChildCreateModal() {
