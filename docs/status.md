@@ -4,7 +4,7 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認は完了し、Phase 2「整理・検索」の検索基盤を実装中です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤実装は完了しています。タグ・フィルター等の追加機能は未着手です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
