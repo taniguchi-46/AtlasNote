@@ -24,6 +24,43 @@ type SearchDocument struct {
 	IndexedAt   time.Time
 }
 
+// SearchIndexState describes the last canonical Markdown snapshot indexed for a note.
+type SearchIndexState struct {
+	NoteID          string
+	IndexedRevision int64
+	ContentHash     string
+	IndexedAt       time.Time
+}
+
+// GetSearchIndexState returns the derived-index snapshot state for one note.
+// A missing row is not an error because the index can be rebuilt from Markdown.
+func (r *Repository) GetSearchIndexState(ctx context.Context, noteID string) (SearchIndexState, bool, error) {
+	if noteID == "" {
+		return SearchIndexState{}, false, fmt.Errorf("get search index state: note ID is required")
+	}
+
+	var state SearchIndexState
+	var indexedAt string
+	err := r.db.QueryRowContext(ctx, `
+SELECT note_id, indexed_revision, content_hash, indexed_at
+FROM note_search_state
+WHERE note_id = ?
+`, noteID).Scan(&state.NoteID, &state.IndexedRevision, &state.ContentHash, &indexedAt)
+	if err == sql.ErrNoRows {
+		return SearchIndexState{}, false, nil
+	}
+	if err != nil {
+		return SearchIndexState{}, false, fmt.Errorf("get search index state: %w", err)
+	}
+	var parseErr error
+	state.IndexedAt, parseErr = parseTime(indexedAt)
+	if parseErr != nil {
+		return SearchIndexState{}, false, parseErr
+	}
+
+	return state, true, nil
+}
+
 // UpsertSearchIndex replaces one note's indexed Markdown snapshot and its
 // reconciliation state atomically.
 func (r *Repository) UpsertSearchIndex(ctx context.Context, document SearchDocument) error {

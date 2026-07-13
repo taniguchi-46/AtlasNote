@@ -1,6 +1,6 @@
 # Markdown全文検索索引設計
 
-最終更新: 2026-07-12
+最終更新: 2026-07-13
 
 ## 結論
 
@@ -17,8 +17,8 @@ SQLite FTS5とtokenizerの仕様は[SQLite FTS5 Extension](https://www.sqlite.or
 
 - SQLiteの `notes` はメタデータと `content_path` だけを保持する。
 - Markdown本文は `notes/<note-id>.md` に保存される。
-- Repository / Service / Wails APIに検索機能はない。
-- 既存検索UIは入力を `console.log` へ出すだけである。実装時にこのログは削除する。
+- Repository / Service / Wails API、検索Store/UIまで接続済みである。
+- 検索語や本文をログへ出力しない。
 
 ## 比較
 
@@ -80,14 +80,14 @@ FTS索引はMarkdown正本とSQLiteメタデータが確定した後に更新す
 | お気に入り・pin・trash・ノートブック移動 | タイトル・本文が不変なら索引本体は更新しない |
 | 完全削除 | Note recordとMarkdown削除成功後にdelete |
 | 復旧処理 | 復旧完了後に対象noteをreplace。判定できない場合は再構築対象 |
-| 外部Markdown変更 | reconciliationで正本として受け入れ、revision更新後にreplace |
+| 外部Markdown変更 | reconciliationでhash差分を検出し、revision更新後にreplace |
 
 ## 整合性と失敗時の扱い
 
 - ノート保存の成功を、派生索引の更新失敗でrollbackしない。
 - 索引更新失敗は本文を含めず、operation ID、note ID、処理段階、エラー分類だけを記録する。
 - 検索は索引の不整合を検知した場合、不完全な結果を正常結果として扱わず、共通エラーと再構築導線へ接続する。
-- FTS索引の整合性判定用に、note ID、indexed revision、content hashを持つ状態テーブルを検索migrationで追加する。詳細カラムはreconciliation設計時に確定する。
+- FTS索引の整合性判定用に、note ID、indexed revision、content hashを持つ状態テーブルを検索migrationで追加済みである。外部Markdown reconciliationでhashを正本との比較に使用する。
 
 ## 再構築
 
@@ -121,3 +121,12 @@ FTS5の特別コマンドは[FTS5 Special INSERT Commands](https://www.sqlite.or
 - 1〜2文字検索の全件走査が許容時間を超える。
 - 日本語の形態素検索、同義語、かな・漢字正規化が必要になる。
 - これらを計測後、contentless FTS5、独自bigram索引、SQLite外部エンジンを再比較する。
+
+## 外部Markdown reconciliation
+
+- Markdown本文のSHA-256 hashを正本比較に使う。mtimeはOS差・コピー処理による変動があるため、永続的な判定値にはしない。
+- `note_search_state.indexed_revision` が現在のノートrevisionと同じで、`content_hash`だけが異なる場合は外部編集と判定する。Markdownを正本として受け入れ、ノートrevisionをCASで1つ進め、更新日時を更新してから索引を再構築する。
+- 索引stateのrevisionが現在のrevisionより古い場合、外部編集とは断定せず、revisionを進めずに現在のMarkdownから索引を再構築する。これは索引更新失敗からの復旧を誤って競合へ変換しないためである。
+- stateが存在しない場合もrevisionを変更せず、全件再構築で補完する。
+- `<note-id>.md` がない場合は自動削除せず `RecoveryReport.MissingNotes` へ報告する。明示的なDeleteMissing操作でのみDBレコードを削除する。
+- DBにないMarkdown（rename後のファイルを含む）は自動的に別ノートへ紐付けず、`recovery/`へ隔離する。内容の推測による誤結合を避けるためである。

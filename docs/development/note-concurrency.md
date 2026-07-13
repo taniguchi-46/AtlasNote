@@ -1,6 +1,6 @@
 # ノートrevision・競合検出・保存キュー仕様
 
-最終更新: 2026-07-12
+最終更新: 2026-07-13
 
 ## 目的
 
@@ -43,6 +43,14 @@
 - ゴミ箱への移動と復元
 - ノートブック削除に伴うノートの移動またはゴミ箱への移動
 - 外部Markdown変更を正本として受け入れるreconciliation
+
+### 外部Markdown reconciliationの判定
+
+- SHA-256 hashをMarkdown正本との比較値とする。mtimeは永続判定値にしない。
+- `note_search_state.indexed_revision` が現行revisionと同じでhashだけ異なる場合だけ外部編集と判定し、CASでrevisionを1つ進める。
+- 索引stateのrevisionが古い場合は索引だけを再構築し、誤ってrevisionを進めない。
+- `<note-id>.md` の欠落は `MissingNotes` へ報告し、自動削除しない。DBにないMarkdownは `recovery/` へ隔離し、自動renameしない。
+- 判定は起動時復旧と「再検査」操作で行い、復旧後に検索索引を再構築する。
 - 将来の同期、履歴復元、AI出力の確定保存
 
 同じ保存要求内でタイトルと本文を同時に変更しても、revisionの増加は1回とする。起動時の未完了操作復旧では、既に確定したrevisionを再度増加させない。

@@ -1,6 +1,7 @@
 package note_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,106 @@ import (
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
 )
+
+func TestServiceRecoverReconcilesExternalMarkdownEditOnce(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "External", Content: "before"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := store.Write(ctx, created.ID, "after external edit"); err != nil {
+		t.Fatalf("write external markdown: %v", err)
+	}
+
+	report, err := service.Recover(ctx)
+	if err != nil || len(report.MissingNotes) != 0 {
+		t.Fatalf("recover external edit = %#v, %v", report, err)
+	}
+	got, err := repository.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get reconciled record: %v", err)
+	}
+	if got.Revision != created.Revision+1 {
+		t.Fatalf("reconciled revision = %d, want %d", got.Revision, created.Revision+1)
+	}
+
+	if _, err := service.Recover(ctx); err != nil {
+		t.Fatalf("repeat recovery: %v", err)
+	}
+	got, err = repository.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get record after repeat recovery: %v", err)
+	}
+	if got.Revision != created.Revision+1 {
+		t.Fatalf("repeat recovery revision = %d, want %d", got.Revision, created.Revision+1)
+	}
+	result, err := service.Search(ctx, note.SearchInput{Query: "external"})
+	if err != nil || result.Error != nil || result.Total != 1 {
+		t.Fatalf("search reconciled content = %#v, %v", result, err)
+	}
+}
+
+func TestServiceRecoverDoesNotTurnStaleSearchIndexIntoExternalConflict(t *testing.T) {
+	t.Parallel()
+
+	ctx, repository, store, service, _ := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Stale index", Content: "before"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	record, err := repository.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get note record: %v", err)
+	}
+	record.UpdatedAt = time.Now().UTC()
+	if _, err := repository.UpdateCAS(ctx, record, record.Revision); err != nil {
+		t.Fatalf("advance record without index fixture: %v", err)
+	}
+	if err := store.Write(ctx, created.ID, "changed while index was stale"); err != nil {
+		t.Fatalf("write external markdown: %v", err)
+	}
+
+	if _, err := service.Recover(ctx); err != nil {
+		t.Fatalf("recover stale index: %v", err)
+	}
+	reconciled, err := repository.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get recovered record: %v", err)
+	}
+	if reconciled.Revision != created.Revision+1 {
+		t.Fatalf("recovered revision = %d, want %d", reconciled.Revision, created.Revision+1)
+	}
+}
+
+func TestServiceRecoverTreatsRenamedMarkdownAsMissingAndOrphan(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, store, service, notesDir := newRecoveryTestService(t)
+	created, err := service.Create(ctx, note.CreateInput{Title: "Renamed", Content: "content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	contentPath, err := store.ContentPath(created.ID)
+	if err != nil {
+		t.Fatalf("content path: %v", err)
+	}
+	if err := os.Rename(filepath.Join(notesDir, contentPath), filepath.Join(notesDir, "renamed-by-user.md")); err != nil {
+		t.Fatalf("rename markdown fixture: %v", err)
+	}
+
+	report, err := service.Recover(ctx)
+	if err != nil {
+		t.Fatalf("recover renamed markdown: %v", err)
+	}
+	if len(report.MissingNotes) != 1 || report.MissingNotes[0].ID != created.ID {
+		t.Fatalf("missing notes after rename = %#v", report.MissingNotes)
+	}
+	if _, err := os.Stat(filepath.Join(notesDir, "renamed-by-user.md")); !os.IsNotExist(err) {
+		t.Fatalf("renamed orphan was not quarantined: %v", err)
+	}
+}
 
 func TestServiceSearchDelegatesToRepository(t *testing.T) {
 	t.Parallel()

@@ -466,12 +466,30 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 			if readErr != nil {
 				indexBuildFailed = true
 			} else {
+				contentHash := storage.HashContent(content)
+				state, stateFound, stateErr := s.repository.GetSearchIndexState(ctx, record.ID)
+				if stateErr != nil {
+					return RecoveryReport{}, stateErr
+				}
+				// An equal indexed revision with a different hash means the
+				// Markdown file changed outside this process. Accept that file as
+				// canonical and advance revision before rebuilding the derived index.
+				// If the indexed revision is older, only the derived index is stale;
+				// advancing revision in that case would create a false conflict.
+				if stateFound && state.IndexedRevision == record.Revision && state.ContentHash != contentHash {
+					record.UpdatedAt = time.Now().UTC()
+					nextRevision, updateErr := s.repository.UpdateCAS(ctx, record, record.Revision)
+					if updateErr != nil {
+						return RecoveryReport{}, fmt.Errorf("reconcile external markdown for %s: %w", record.ID, updateErr)
+					}
+					record.Revision = nextRevision
+				}
 				documents = append(documents, SearchDocument{
 					NoteID:      record.ID,
 					Title:       record.Title,
 					Body:        content,
 					Revision:    record.Revision,
-					ContentHash: storage.HashContent(content),
+					ContentHash: contentHash,
 				})
 			}
 		}

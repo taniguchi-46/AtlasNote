@@ -1,10 +1,10 @@
 # プロジェクト状況
 
-最終更新: 2026-07-12
+最終更新: 2026-07-13
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認は完了し、Phase 2「整理・検索」の開始準備中です。
+MVP（v0.1）の移行前必須項目とCI確認は完了し、Phase 2「整理・検索」の検索基盤を実装中です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -38,11 +38,16 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - autosave失敗laneの停止・手動再開、対象別 `flush`
 - 保存要求数による正確な `isSaving` 表示
 - ノート操作laneと保存要求カウンターの専用回帰テスト
+- contentful SQLite FTS5 + trigramによるタイトル・本文検索、ページング、入力検証、再構築可能な索引
+- 検索API、検索Store/UI、検索失敗時の共通通知と再試行アクション
+- ノート・ノートブック・検索Store/APIの操作別エラーコード、共通通知、再試行アクション
+- SHA-256 hashによる外部Markdown編集検知、revision更新、検索索引再構築
+- Markdown欠落のMissingNotes報告とrename後の孤児ファイル隔離
 
 ## Phase 2の対象
 
-- 既存検索UIへの実検索処理の接続
-- タイトル検索、本文全文検索、タグ検索
+- 既存検索UIへの実検索処理の接続（完了）
+- タイトル検索、本文全文検索（完了）、タグ検索
 - タグの追加、編集、削除
 - ノートブック、タグ、作成日、更新日のフィルター
 - 並び替え、最近開いたメモ、バックリンク、関連メモ
@@ -60,9 +65,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 ## 継続課題
 
-- Markdown外部変更の検知とreconciliation
-- store / APIエラーの共通通知
-- 並行保存中の状態表示
+- batch操作の部分成功と未処理Promiseの整理
 - Markdown / Rich変換の追加テスト
 - 構造化ログと大量ノート時の性能確認
 - 競合解決UIのコンポーネントテスト
