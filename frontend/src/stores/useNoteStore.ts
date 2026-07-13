@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import {
   listNotes,
@@ -15,6 +15,7 @@ import { createNoteOperationQueue } from '../utils/noteOperationQueue'
 import { createRequestCounter } from '../utils/requestCounter'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
+import { useNotificationStore } from './useNotificationStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
 const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
@@ -78,8 +79,23 @@ export const useNoteStore = defineStore('notes', () => {
   let nextDraftVersion = 0
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
+  const notificationStore = useNotificationStore()
   const savingRequests = createRequestCounter((count) => {
     isSaving.value = count > 0
+  })
+
+  watch(error, (message) => {
+    if (!message) {
+      notificationStore.dismissBySource('notes')
+      return
+    }
+
+    notificationStore.notify(message, {
+      kind: 'error',
+      source: 'notes',
+      code: 'NOTE_OPERATION_FAILED',
+      dedupeKey: 'notes',
+    })
   })
 
   // Computed

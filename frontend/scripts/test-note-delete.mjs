@@ -6,7 +6,7 @@ import ts from 'typescript'
 
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'deleteNotesSequentially.ts')
-const noteListPath = path.join(rootDir, 'src', 'components', 'NoteList.vue')
+const notificationPath = path.join(rootDir, 'src', 'components', 'NotificationCenter.vue')
 const outDir = path.join(rootDir, '.tmp', 'note-delete-test')
 const outFile = path.join(outDir, 'deleteNotesSequentially.mjs')
 
@@ -34,11 +34,11 @@ try {
 }
 
 async function testDeleteErrorIsRenderedAsAnAlert() {
-  const noteListSource = await readFile(noteListPath, 'utf8')
+  const notificationSource = await readFile(notificationPath, 'utf8')
 
-  assert.match(noteListSource, /v-if="noteStore\.error"/)
-  assert.match(noteListSource, /role="alert"/)
-  assert.match(noteListSource, /\{\{ noteStore\.error \}\}/)
+  assert.match(notificationSource, /notificationStore\.notifications/)
+  assert.match(notificationSource, /:role="notification\.kind === 'error' \? 'alert' : 'status'"/)
+  assert.match(notificationSource, /\{\{ notification\.message \}\}/)
 }
 
 async function testAllDeletesSucceed() {
