@@ -50,6 +50,16 @@
       {{ searchStore.isSearching ? '読み込み中...' : '次の検索結果を読み込む' }}
     </button>
 
+    <button
+      v-if="!searchStore.isActive && noteStore.hasMoreNotes"
+      class="note-list-load-more"
+      type="button"
+      :disabled="noteStore.isLoadingMore"
+      @click="noteStore.fetchNextPage()"
+    >
+      {{ noteStore.isLoadingMore ? '隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ...' : '谺｡縺ｮ繝弱・繝医ｒ隱ｭ縺ｿ霎ｼ縺ｿ' }}
+    </button>
+
     <!-- Note items -->
     <ul v-if="displayedNotes.length > 0" class="note-list" role="list">
       <ContextMenuRoot
@@ -505,6 +515,28 @@ function formatDate(iso: string): string {
 }
 
 .note-list-search-more:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.note-list-load-more {
+  align-self: center;
+  margin: 8px 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.note-list-load-more:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.note-list-load-more:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

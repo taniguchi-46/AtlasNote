@@ -164,6 +164,30 @@ func (s *MarkdownStore) Exists(ctx context.Context, id string) (bool, error) {
 	return false, fmt.Errorf("stat markdown content: %w", err)
 }
 
+// ListManagedFiles returns a snapshot of managed Markdown and journal file
+// names. Recovery uses this directory snapshot instead of issuing one Stat
+// call per note.
+func (s *MarkdownStore) ListManagedFiles(ctx context.Context) (map[string]struct{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(s.rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("list managed markdown files: %w", err)
+	}
+
+	files := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !isManagedFile(entry.Name()) {
+			continue
+		}
+		files[entry.Name()] = struct{}{}
+	}
+
+	return files, nil
+}
+
 func (s *MarkdownStore) TempExists(ctx context.Context, id string, operationID string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err

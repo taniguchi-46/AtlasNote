@@ -2,6 +2,7 @@ import type { note } from '../../wailsjs/go/models'
 import {
   CreateNote,
   ListNotes,
+  ListNotesPage,
   GetNote,
   UpdateNote,
   DeleteNote,
@@ -31,6 +32,10 @@ export function createNote(input: note.CreateInput): Promise<note.Note> {
 
 export function listNotes(): Promise<note.Summary[]> {
   return ListNotes()
+}
+
+export function listNotesPage(input: note.NoteListInput): Promise<note.NoteListResult> {
+  return ListNotesPage(input)
 }
 
 export function getNote(id: string): Promise<note.Note> {

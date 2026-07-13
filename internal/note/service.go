@@ -40,6 +40,7 @@ type markdownStore interface {
 	Delete(context.Context, string) error
 	DeleteStagedExists(context.Context, string, string) (bool, error)
 	Exists(context.Context, string) (bool, error)
+	ListManagedFiles(context.Context) (map[string]struct{}, error)
 	QuarantineOrphans(context.Context, map[string]struct{}) error
 	Read(context.Context, string) (string, error)
 	RestoreDelete(context.Context, string, string) error
@@ -183,6 +184,15 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 		return nil, err
 	}
 	return s.repository.List(ctx)
+}
+
+func (s *Service) ListPage(ctx context.Context, input NoteListInput) (NoteListResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return NoteListResult{Items: make([]Summary, 0)}, err
+	}
+	return s.repository.ListPage(ctx, input)
 }
 
 func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, error) {
@@ -440,6 +450,10 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		return RecoveryReport{}, err
 	}
 	report := RecoveryReport{MissingNotes: make([]MissingContent, 0)}
+	managedFiles, err := s.store.ListManagedFiles(ctx)
+	if err != nil {
+		return RecoveryReport{}, err
+	}
 	expected := make(map[string]struct{}, len(records))
 	documents := make([]SearchDocument, 0, len(records))
 	indexBuildFailed := false
@@ -451,10 +465,7 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		if record.ContentPath != contentPath {
 			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
 		}
-		exists, err := s.store.Exists(ctx, record.ID)
-		if err != nil {
-			return RecoveryReport{}, err
-		}
+		_, exists := managedFiles[contentPath]
 		if !exists {
 			report.MissingNotes = append(report.MissingNotes, MissingContent{
 				ID:          record.ID,

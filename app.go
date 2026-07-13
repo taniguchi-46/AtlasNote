@@ -118,6 +118,13 @@ func (a *App) ListNotes() ([]note.Summary, error) {
 	return a.notes.List(a.ctx)
 }
 
+func (a *App) ListNotesPage(input note.NoteListInput) (note.NoteListResult, error) {
+	if a.notes == nil {
+		return note.NoteListResult{Items: make([]note.Summary, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.ListPage(a.ctx, input)
+}
+
 func (a *App) SearchNotes(input note.SearchInput) (note.SearchResult, error) {
 	if a.notes == nil {
 		return note.SearchResult{Items: make([]note.SearchItem, 0)}, errors.New("note service is not initialized")

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import {
-  listNotes,
+  listNotesPage,
   getNote,
   createNote,
   updateNote,
@@ -21,6 +21,7 @@ import { useNotificationStore, type NotificationAction } from './useNotification
 const DEFAULT_NOTE_TITLE = '新しいノート'
 const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
 const MAX_NOTE_TITLE_LENGTH = 200
+const NOTE_LIST_PAGE_SIZE = 100
 
 export type NoteDraft = NoteSaveSnapshot & {
   status: 'dirty' | 'saving' | 'failed' | 'conflicted'
@@ -74,6 +75,8 @@ type NoteErrorContext = {
 export const useNoteStore = defineStore('notes', () => {
   // State
   const summaries = ref<note.Summary[]>([])
+  const hasMoreNotes = ref(false)
+  const isLoadingMore = ref(false)
   const activeNote = ref<note.Note | null>(null)
   const isLoading = ref(false)
   const isSaving = ref(false)
@@ -83,6 +86,8 @@ export const useNoteStore = defineStore('notes', () => {
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
   let nextDraftVersion = 0
+  let currentListPage = 0
+  let excludedNoteIds = new Set<string>()
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
   const notificationStore = useNotificationStore()
@@ -151,9 +156,14 @@ export const useNoteStore = defineStore('notes', () => {
   async function fetchNotes(excludedIds: string[] = []) {
     isLoading.value = true
     error.value = null
+    currentListPage = 0
+    hasMoreNotes.value = false
+    excludedNoteIds = new Set(excludedIds)
     try {
-      const excluded = new Set(excludedIds)
-      summaries.value = ((await listNotes()) ?? []).filter((note) => !excluded.has(note.id))
+      const result = await listNotesPage({ page: 1, pageSize: NOTE_LIST_PAGE_SIZE })
+      currentListPage = result.page
+      hasMoreNotes.value = result.hasNext
+      summaries.value = (result.items ?? []).filter((note) => !excludedNoteIds.has(note.id))
     } catch (e) {
       setErrorContext({
         code: 'NOTE_LIST_FAILED',
@@ -216,6 +226,8 @@ export const useNoteStore = defineStore('notes', () => {
         summaries.value = []
       }
       summaries.value.unshift(toSummary(created))
+      currentListPage = 0
+      hasMoreNotes.value = true
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
     } catch (e) {
@@ -240,6 +252,8 @@ export const useNoteStore = defineStore('notes', () => {
     if (idx !== -1) {
       summaries.value[idx] = toSummary(updated)
     }
+    currentListPage = 0
+    hasMoreNotes.value = summaries.value.length > 0
   }
 
   function getPersistedRevision(noteId: string) {
@@ -440,6 +454,34 @@ export const useNoteStore = defineStore('notes', () => {
     }
   }
 
+  async function fetchNextPage() {
+    if (isLoading.value || isLoadingMore.value || !hasMoreNotes.value) return
+
+    isLoadingMore.value = true
+    error.value = null
+    try {
+      const result = await listNotesPage({
+        page: currentListPage + 1,
+        pageSize: NOTE_LIST_PAGE_SIZE,
+      })
+      const existingIds = new Set(summaries.value.map((note) => note.id))
+      const nextItems = (result.items ?? []).filter((note) =>
+        !excludedNoteIds.has(note.id) && !existingIds.has(note.id)
+      )
+      summaries.value = [...summaries.value, ...nextItems]
+      currentListPage = result.page
+      hasMoreNotes.value = result.hasNext
+    } catch (e) {
+      setErrorContext({
+        code: 'NOTE_LIST_MORE_FAILED',
+        action: { label: '再試行', run: () => fetchNextPage() },
+      })
+      error.value = e instanceof Error ? e.message : '繝弱・繝医・霤ｼ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆'
+    } finally {
+      isLoadingMore.value = false
+    }
+  }
+
   async function copyConflictedDraft(noteId: string) {
     const draft = getDraft(noteId)
     if (draft?.status !== 'conflicted') return null
@@ -616,6 +658,8 @@ export const useNoteStore = defineStore('notes', () => {
 
   return {
     summaries,
+    hasMoreNotes,
+    isLoadingMore,
     activeNote,
     isLoading,
     isSaving,
@@ -631,6 +675,7 @@ export const useNoteStore = defineStore('notes', () => {
     trashedNotes,
     activeNotes,
     fetchNotes,
+    fetchNextPage,
     selectNote,
     newNote,
     persistNote,

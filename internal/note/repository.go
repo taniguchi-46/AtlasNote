@@ -55,7 +55,7 @@ func insertRecord(ctx context.Context, executor sqlExecutor, record Record) erro
 func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
 		From(notesTable).
-		OrderBy("updated_at DESC").
+		OrderBy("updated_at DESC", "id ASC").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build note list: %w", err)
@@ -67,6 +67,51 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 	}
 	defer rows.Close()
 
+	return scanSummaries(rows)
+}
+
+func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteListResult, error) {
+	page, pageSize, err := normalizeNoteListInput(input)
+	if err != nil {
+		return NoteListResult{}, err
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM notes").Scan(&total); err != nil {
+		return NoteListResult{}, fmt.Errorf("count notes: %w", err)
+	}
+
+	query, args, err := psql.Select("id", "notebook_id", "title", "is_favorite", "is_pinned", "is_trashed", "revision", "created_at", "updated_at").
+		From(notesTable).
+		OrderBy("updated_at DESC", "id ASC").
+		Limit(uint64(pageSize)).
+		Offset(uint64((page - 1) * pageSize)).
+		ToSql()
+	if err != nil {
+		return NoteListResult{}, fmt.Errorf("build note list page: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return NoteListResult{}, fmt.Errorf("list note page: %w", err)
+	}
+	defer rows.Close()
+
+	items, err := scanSummaries(rows)
+	if err != nil {
+		return NoteListResult{}, err
+	}
+
+	return NoteListResult{
+		Items:    items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasNext:  page*pageSize < total,
+	}, nil
+}
+
+func scanSummaries(rows *sql.Rows) ([]Summary, error) {
 	notes := make([]Summary, 0)
 	for rows.Next() {
 		var note Summary
@@ -76,6 +121,7 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 			return nil, fmt.Errorf("scan note summary: %w", err)
 		}
 
+		var err error
 		note.CreatedAt, err = parseTime(createdAt)
 		if err != nil {
 			return nil, err
@@ -93,6 +139,26 @@ func (r *Repository) List(ctx context.Context) ([]Summary, error) {
 	}
 
 	return notes, nil
+}
+
+func normalizeNoteListInput(input NoteListInput) (int, int, error) {
+	page := input.Page
+	if page == 0 {
+		page = DefaultNoteListPage
+	}
+	if page < 1 || page > MaxNoteListPage {
+		return 0, 0, fmt.Errorf("%w: note list page must be between 1 and %d", ErrValidation, MaxNoteListPage)
+	}
+
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = DefaultNoteListPageSize
+	}
+	if pageSize < 1 || pageSize > MaxNoteListPageSize {
+		return 0, 0, fmt.Errorf("%w: note list page size must be between 1 and %d", ErrValidation, MaxNoteListPageSize)
+	}
+
+	return page, pageSize, nil
 }
 
 func (r *Repository) Get(ctx context.Context, id string) (Record, error) {

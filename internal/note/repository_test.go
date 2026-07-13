@@ -48,6 +48,81 @@ func TestRepositoryUpdateCASIncrementsRevisionAndRejectsStaleUpdate(t *testing.T
 	}
 }
 
+func TestRepositoryListPageReturnsStablePagesAndTotals(t *testing.T) {
+	t.Parallel()
+
+	repository := newRepositoryTest(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, id := range []string{"page-c", "page-a", "page-b"} {
+		record := note.Record{
+			ID:          id,
+			Title:       id,
+			ContentPath: id + ".md",
+			Revision:    1,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := repository.Create(t.Context(), record); err != nil {
+			t.Fatalf("create note %s: %v", id, err)
+		}
+	}
+
+	first, err := repository.ListPage(t.Context(), note.NoteListInput{Page: 1, PageSize: 2})
+	if err != nil {
+		t.Fatalf("list first page: %v", err)
+	}
+	if first.Page != 1 || first.PageSize != 2 || first.Total != 3 || !first.HasNext {
+		t.Fatalf("first page metadata = %#v", first)
+	}
+	if got := []string{first.Items[0].ID, first.Items[1].ID}; !equalStrings(got, []string{"page-a", "page-b"}) {
+		t.Fatalf("first page IDs = %#v", got)
+	}
+
+	second, err := repository.ListPage(t.Context(), note.NoteListInput{Page: 2, PageSize: 2})
+	if err != nil {
+		t.Fatalf("list second page: %v", err)
+	}
+	if second.HasNext || len(second.Items) != 1 || second.Items[0].ID != "page-c" {
+		t.Fatalf("second page = %#v", second)
+	}
+}
+
+func TestRepositoryListPageAppliesDefaultsAndValidatesBounds(t *testing.T) {
+	t.Parallel()
+
+	repository := newRepositoryTest(t)
+	result, err := repository.ListPage(t.Context(), note.NoteListInput{})
+	if err != nil {
+		t.Fatalf("list with defaults: %v", err)
+	}
+	if result.Page != note.DefaultNoteListPage || result.PageSize != note.DefaultNoteListPageSize {
+		t.Fatalf("default metadata = %#v", result)
+	}
+
+	for _, input := range []note.NoteListInput{
+		{Page: -1},
+		{Page: note.MaxNoteListPage + 1},
+		{PageSize: -1},
+		{PageSize: note.MaxNoteListPageSize + 1},
+	} {
+		if _, err := repository.ListPage(t.Context(), input); !errors.Is(err, note.ErrValidation) {
+			t.Fatalf("input %#v error = %v, want ErrValidation", input, err)
+		}
+	}
+}
+
+func equalStrings(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for i := range actual {
+		if actual[i] != expected[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestRepositoryConcurrentUpdateCASAllowsOnlyOneWriter(t *testing.T) {
 	t.Parallel()
 

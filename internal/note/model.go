@@ -14,6 +14,26 @@ type Summary struct {
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
+const (
+	DefaultNoteListPage     = 1
+	DefaultNoteListPageSize = 100
+	MaxNoteListPage         = 10000
+	MaxNoteListPageSize     = 100
+)
+
+type NoteListInput struct {
+	Page     int `json:"page"`
+	PageSize int `json:"pageSize"`
+}
+
+type NoteListResult struct {
+	Items    []Summary `json:"items"`
+	Page     int       `json:"page"`
+	PageSize int       `json:"pageSize"`
+	Total    int       `json:"total"`
+	HasNext  bool      `json:"hasNext"`
+}
+
 type Note struct {
 	ID         string    `json:"id"`
 	NotebookID *string   `json:"notebookId"`
