@@ -37,6 +37,26 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	if tableName != "note_storage_operations" {
 		t.Fatalf("table name = %q", tableName)
 	}
+
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'note_search'",
+	).Scan(&tableName); err != nil {
+		t.Fatalf("read search index table: %v", err)
+	}
+	if tableName != "note_search" {
+		t.Fatalf("search table name = %q", tableName)
+	}
+
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'note_search_state'",
+	).Scan(&tableName); err != nil {
+		t.Fatalf("read search index state table: %v", err)
+	}
+	if tableName != "note_search_state" {
+		t.Fatalf("search index state table name = %q", tableName)
+	}
 }
 
 func TestSQLiteSupportsFTS5TrigramSearch(t *testing.T) {

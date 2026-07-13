@@ -113,7 +113,26 @@ CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
 	`
 ALTER TABLE notes
 	ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1);
-`,
+	`,
+	`
+CREATE VIRTUAL TABLE IF NOT EXISTS note_search USING fts5(
+	note_id UNINDEXED,
+	title,
+	body,
+	tokenize = 'trigram'
+);
+
+CREATE TABLE IF NOT EXISTS note_search_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
+	ON note_search_state(indexed_revision);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -231,6 +250,24 @@ CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
 	ON note_storage_operations(note_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS note_search USING fts5(
+	note_id UNINDEXED,
+	title,
+	body,
+	tokenize = 'trigram'
+);
+
+CREATE TABLE IF NOT EXISTS note_search_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
+	ON note_search_state(indexed_revision);
 `); err != nil {
 		return fmt.Errorf("ensure indexes: %w", err)
 	}
