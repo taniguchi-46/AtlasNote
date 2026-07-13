@@ -153,6 +153,16 @@ func (s *Service) List(ctx context.Context) ([]Summary, error) {
 	return s.repository.List(ctx)
 }
 
+func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return SearchResult{Items: make([]SearchItem, 0)}, err
+	}
+	return s.repository.Search(ctx, input)
+}
+
 func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

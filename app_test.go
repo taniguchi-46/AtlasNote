@@ -113,6 +113,25 @@ func TestAppReturnsStructuredRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestAppSearchNotesReturnsStructuredValidationError(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(context.Background())
+	t.Cleanup(func() {
+		app.shutdown(t.Context())
+	})
+
+	result, err := app.SearchNotes(note.SearchInput{Query: "ok\x00"})
+	if err != nil {
+		t.Fatalf("search notes returned system error: %v", err)
+	}
+	if result.Error == nil || result.Error.Code != note.SearchErrorQueryInvalid {
+		t.Fatalf("search result = %#v", result)
+	}
+}
+
 func TestNewAppReportsInitializationError(t *testing.T) {
 	tempDir := t.TempDir()
 	blockedDataDir := filepath.Join(tempDir, "blocked")
