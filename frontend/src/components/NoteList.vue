@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="note-list-header">
       <h2 class="note-list-title">{{ sectionTitle }}</h2>
-      <span class="note-list-count">{{ displayedNotes.length }}</span>
+      <span class="note-list-count">{{ displayedCount }}</span>
       <button
         v-if="!isTrashSection"
         id="btn-new-note"
@@ -29,20 +29,36 @@
     <p v-if="noteStore.error" class="note-list-error" role="alert">
       {{ noteStore.error }}
     </p>
+    <p v-if="searchStore.error" class="note-list-error" role="alert">
+      {{ searchStore.error }}
+    </p>
 
     <!-- Loading -->
-    <div v-if="noteStore.isLoading && displayedNotes.length === 0" class="note-list-empty">
+    <div v-if="(noteStore.isLoading || searchStore.isSearching) && displayedNotes.length === 0" class="note-list-empty">
       <div class="spinner" aria-label="読み込み中..." />
     </div>
 
     <!-- Empty state -->
     <div v-else-if="displayedNotes.length === 0" class="note-list-empty">
       <FileTextIcon :size="32" class="empty-icon" />
-      <p class="empty-label">ノートはありません</p>
+      <p class="empty-label">{{ searchStore.isActive ? '検索結果がありません' : 'ノートはありません' }}</p>
     </div>
 
+    <p v-if="searchStore.isActive && searchStore.hasNext" class="note-list-search-limit">
+      検索結果が多いため、追加の結果を読み込めます。
+    </p>
+    <button
+      v-if="searchStore.isActive && searchStore.hasNext"
+      class="note-list-search-more"
+      type="button"
+      :disabled="searchStore.isSearching"
+      @click="searchStore.nextPage()"
+    >
+      {{ searchStore.isSearching ? '読み込み中...' : '次の検索結果を読み込む' }}
+    </button>
+
     <!-- Note items -->
-    <ul v-else class="note-list" role="list">
+    <ul v-if="displayedNotes.length > 0" class="note-list" role="list">
       <ContextMenuRoot
         v-for="note in displayedNotes"
         :key="note.id"
@@ -70,6 +86,9 @@
                 <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
               </div>
               <p class="note-item-title">{{ note.title || '(無題)' }}</p>
+              <p v-if="searchSnippet(note.id)" class="note-item-snippet">
+                {{ searchSnippet(note.id) }}
+              </p>
             </button>
           </li>
         </ContextMenuTrigger>
@@ -169,10 +188,12 @@ import type { note } from '../../wailsjs/go/models'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
+import { useSearchStore } from '../stores/useSearchStore'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
+const searchStore = useSearchStore()
 const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
 
@@ -258,6 +279,7 @@ async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'resto
       clearSelectedNotes(targetIds)
       break
   }
+  if (searchStore.isActive) await searchStore.refresh()
 }
 
 async function handleMoveToNotebook(notebookId: string | null) {
@@ -265,6 +287,7 @@ async function handleMoveToNotebook(notebookId: string | null) {
   if (targetIds.length === 0) return
 
   await noteStore.moveNotesToNotebook(targetIds, notebookId)
+  if (searchStore.isActive) await searchStore.refresh()
   clearSelectedNotes(targetIds)
 }
 
@@ -286,6 +309,7 @@ async function emptyTrash() {
   if (!confirmed) return
 
   await noteStore.emptyTrash()
+  if (searchStore.isActive) await searchStore.refresh()
   selectedNoteIds.value = new Set()
   lastSelectedNoteId.value = null
 }
@@ -299,6 +323,7 @@ const isTrashSection = computed(() =>
 )
 
 const sectionTitle = computed(() => {
+  if (searchStore.isActive) return '検索結果'
   if (notebookStore.activeNotebookId) {
     const nb = notebookStore.notebooks.find(n => n.id === notebookStore.activeNotebookId)
     return nb ? nb.name : 'すべてのノート'
@@ -313,6 +338,21 @@ const sectionTitle = computed(() => {
 })
 
 const displayedNotes = computed(() => {
+  if (searchStore.isActive) {
+    let list = searchStore.items.map(item => item.note)
+    switch (appStore.sidebarSection) {
+      case 'uncategorized': list = list.filter(n => !n.notebookId); break
+      case 'favorites': list = list.filter(n => n.isFavorite && !n.isTrashed); break
+      case 'pinned': list = list.filter(n => n.isPinned && !n.isTrashed); break
+      case 'trash': list = list.filter(n => n.isTrashed); break
+      default: list = list.filter(n => !n.isTrashed); break
+    }
+    if (notebookStore.activeNotebookId) {
+      list = list.filter(n => n.notebookId === notebookStore.activeNotebookId)
+    }
+    return list
+  }
+
   let list: note.Summary[] = []
   switch (appStore.sidebarSection) {
     case 'uncategorized': list = noteStore.activeNotes.filter(n => !n.notebookId); break
@@ -326,6 +366,19 @@ const displayedNotes = computed(() => {
   }
   return list
 })
+
+const displayedCount = computed(() => {
+  if (!searchStore.isActive) return displayedNotes.value.length
+  if (['uncategorized', 'favorites', 'pinned'].includes(appStore.sidebarSection)) {
+    return displayedNotes.value.length
+  }
+  return searchStore.total
+})
+const searchItemsById = computed(() => new Map(searchStore.items.map(item => [item.note.id, item])))
+
+function searchSnippet(noteId: string) {
+  return (searchItemsById.value.get(noteId)?.snippet ?? '').replace(/<\/?mark>/g, '')
+}
 
 const notebookOptions = computed(() => {
   const depthById = new Map<string, number>()
@@ -420,6 +473,44 @@ function formatDate(iso: string): string {
   border-radius: 6px;
   color: var(--color-danger);
   font-size: 12px;
+}
+
+.note-list-search-limit {
+  margin: 8px 12px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.note-list-search-more {
+  align-self: center;
+  margin: 8px 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.note-list-search-more:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.note-list-search-more:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.note-item-snippet {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 :global(.context-menu-item) {

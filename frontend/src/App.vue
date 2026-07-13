@@ -4,7 +4,7 @@
       :is-always-on-top="isAlwaysOnTop"
       @sync="handleSync"
       @search="handleSearch"
-      @new-note="noteStore.newNote()"
+      @new-note="handleNewNote"
       @toggle-always-on-top="handleToggleAlwaysOnTop"
       @open-settings="handleOpenSettings"
     />
@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import AppTopBar from './components/AppTopBar.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
@@ -118,6 +118,8 @@ import { CancelClose, CompleteClose } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
+import { useNotebookStore } from './stores/useNotebookStore'
+import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
 import {
   EDITOR_WIDTH_MIN,
   NOTE_LIST_WIDTH_MAX,
@@ -131,6 +133,8 @@ type ResizablePane = 'sidebar' | 'noteList'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
+const notebookStore = useNotebookStore()
+const searchStore = useSearchStore()
 const settingsStore = useSettingsStore()
 const startupStatus = ref<StartupStatus | null>(null)
 const isRecoveryBusy = ref(false)
@@ -149,13 +153,23 @@ watchEffect(() => {
   document.documentElement.style.setProperty('--font-family-base', settingsStore.fontFamily)
 })
 
-// Placeholder handlers for TopBar actions
+const searchFilters = computed<SearchFilters>(() => ({
+  notebookId: notebookStore.activeNotebookId,
+  includeTrashed: appStore.sidebarSection === 'trash' && !notebookStore.activeNotebookId,
+}))
+
+// TopBar actions
 function handleSync() {
   console.log('Sync clicked')
 }
 
 function handleSearch(query: string) {
-  console.log('Search query:', query)
+  void searchStore.search(query, searchFilters.value)
+}
+
+async function handleNewNote() {
+  await noteStore.newNote()
+  if (searchStore.isActive) await searchStore.refresh()
 }
 
 async function handleToggleAlwaysOnTop() {
@@ -172,6 +186,17 @@ function handleOpenSettings() {
   settingsStore.openSettings()
 }
 
+watch(
+  [() => appStore.sidebarSection, () => notebookStore.activeNotebookId],
+  () => {
+    if (searchStore.isActive) void searchStore.search(searchStore.query, searchFilters.value)
+  },
+)
+
+watch(() => noteStore.saveFeedbackVersion, () => {
+  if (searchStore.isActive) void searchStore.refresh()
+})
+
 function missingNoteIds(status: StartupStatus | null) {
   return status?.missingNotes.map((note) => note.id) ?? []
 }
@@ -179,6 +204,7 @@ function missingNoteIds(status: StartupStatus | null) {
 async function applyRecoveryStatus(status: StartupStatus) {
   startupStatus.value = status
   await noteStore.fetchNotes(missingNoteIds(status))
+  if (searchStore.isActive) await searchStore.search(searchStore.query, searchFilters.value)
 }
 
 async function handleReinspectRecovery() {
