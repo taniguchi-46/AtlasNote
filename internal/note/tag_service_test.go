@@ -215,6 +215,15 @@ func TestServiceListPageFiltersBySingleTagAndExcludesTrashedNotes(t *testing.T) 
 		t.Fatalf("unexpected note in tagged page = %#v", result.Items[0])
 	}
 
+	missingTagID := "missing-tag"
+	emptyResult, err := service.ListPage(ctx, note.NoteListInput{TagID: &missingTagID})
+	if err != nil {
+		t.Fatalf("list notes for missing tag: %v", err)
+	}
+	if emptyResult.Total != 0 || emptyResult.HasNext || len(emptyResult.Items) != 0 {
+		t.Fatalf("missing tag page = %#v", emptyResult)
+	}
+
 	emptyTagID := " "
 	if _, err := service.ListPage(ctx, note.NoteListInput{TagID: &emptyTagID}); !errors.Is(err, note.ErrValidation) {
 		t.Fatalf("empty tag ID error = %v, want ErrValidation", err)

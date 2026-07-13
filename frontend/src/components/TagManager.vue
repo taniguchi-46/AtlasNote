@@ -123,7 +123,10 @@ async function deleteTag(tag: note.Tag) {
   const wasActive = noteStore.activeTagId === tag.id
   try {
     await tagStore.removeTag(tag.id)
-    if (wasActive) await noteStore.fetchNotes([], null)
+    if (wasActive) {
+      noteStore.clearTagFilter()
+      await noteStore.fetchNotes([], null)
+    }
   } catch (_) {
     // The tag store reports the operation error through the notification center.
   }

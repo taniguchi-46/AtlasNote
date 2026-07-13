@@ -89,7 +89,7 @@ Go Backend
 - `note_tags`は`(note_id, tag_id)`複合主キーと両方向の`ON DELETE CASCADE`を使う。タグ別ノート検索に備え、`(tag_id, note_id)`の逆引きINDEXを置く。
 - タグの作成・改名・削除、ノートのタグ付与・解除はRepository / Service / Wails API / フロントAPI / Piniaの責務境界を通す。ComponentからWails APIを直接呼ばない。
 - タグ操作はMarkdown、`notes.updated_at`、`notes.revision`、FTS5索引、保存操作ジャーナルを変更しない。ゴミ箱内ノートのタグは保持し、UIからの変更だけを無効化する。
-- タグの確定仕様、migration、rollback、構造化エラーは `docs/development/tag-design.md` を正とする。タグ条件を使うノート検索・フィルターは後続タスクで追加する。
+- タグの確定仕様、migration、rollback、構造化エラーは `docs/development/tag-design.md` を正とする。タグクリックは単一タグの通常一覧へ遷移し、ノートブック選択および全文検索条件とは同時に保持しない。
 
 ## 外部連携
 

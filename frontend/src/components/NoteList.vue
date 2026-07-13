@@ -24,6 +24,15 @@
       >
         ゴミ箱を空にする
       </button>
+      <button
+        v-if="noteStore.activeTagId"
+        class="note-list-back-button"
+        type="button"
+        @click="returnToNormalList"
+      >
+        <XIcon :size="14" />
+        <span>通常一覧へ戻る</span>
+      </button>
     </div>
 
     <!-- Loading -->
@@ -170,6 +179,7 @@ import {
   PinIcon,
   Trash2Icon,
   RotateCcwIcon,
+  XIcon,
 } from '@lucide/vue'
 import {
   ContextMenuContent,
@@ -342,6 +352,13 @@ async function emptyTrash() {
 
 function createNewNote() {
   noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
+}
+
+async function returnToNormalList() {
+  searchStore.clear()
+  noteStore.clearTagFilter()
+  appStore.setSidebarSection('notes')
+  await noteStore.fetchNotes([], null)
 }
 
 const isTrashSection = computed(() =>
@@ -537,6 +554,25 @@ function formatDate(iso: string): string {
   margin: 8px 12px 0;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.note-list-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.note-list-back-button:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .note-list-search-more {
