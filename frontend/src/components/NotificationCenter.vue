@@ -10,6 +10,15 @@
     >
       <span class="notification-message">{{ notification.message }}</span>
       <button
+        v-if="notification.action"
+        type="button"
+        class="notification-action"
+        :disabled="notificationStore.isActionRunning(notification.id)"
+        @click="notificationStore.runAction(notification.id)"
+      >
+        {{ notification.action.label }}
+      </button>
+      <button
         type="button"
         class="notification-dismiss"
         aria-label="通知を閉じる"
@@ -84,6 +93,26 @@ const notificationStore = useNotificationStore()
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+}
+
+.notification-action {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  color: currentColor;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notification-action:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.notification-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .notification-dismiss:hover {

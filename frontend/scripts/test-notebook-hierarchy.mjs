@@ -43,6 +43,10 @@ try {
   const updateIndex = storeSource.indexOf('const updated = await updateNotebook(', validationIndex)
   assert.notEqual(validationIndex, -1)
   assert.ok(updateIndex > validationIndex, 'cycle validation must run before the update API call')
+  assert.match(storeSource, /useNotificationStore/)
+  assert.match(storeSource, /NOTEBOOK_LIST_FAILED/)
+  assert.match(storeSource, /NOTEBOOK_MOVE_INVALID/)
+  assert.match(storeSource, /run: \(\) => fetchNotebooks/)
 
   console.log('notebook hierarchy tests passed')
 } finally {

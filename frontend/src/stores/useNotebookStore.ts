@@ -1,13 +1,19 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { note } from '../../wailsjs/go/models'
 import { listNotebooks, createNotebook, updateNotebook, deleteNotebook, type NotebookDeleteMode } from '../api/notebooks'
 import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
 import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
 import { useNoteStore } from './useNoteStore'
+import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 
 export interface NotebookNode extends note.Notebook {
 	children: NotebookNode[]
+}
+
+type NotebookErrorContext = {
+	code: string
+	action?: NotificationAction
 }
 
 export const useNotebookStore = defineStore('notebooks', () => {
@@ -15,6 +21,29 @@ export const useNotebookStore = defineStore('notebooks', () => {
 	const activeNotebookId = ref<string | null>(null)
 	const isLoading = ref(false)
 	const error = ref<string | null>(null)
+	const notificationStore = useNotificationStore()
+	const errorContext = ref<NotebookErrorContext | null>(null)
+
+	watch(error, (message) => {
+		if (!message) {
+			notificationStore.dismissBySource('notebooks')
+			return
+		}
+
+		const context = errorContext.value ?? { code: 'NOTEBOOK_OPERATION_FAILED' }
+		notificationStore.notify(message, {
+			kind: 'error',
+			source: 'notebooks',
+			code: context.code,
+			retryable: Boolean(context.action),
+			action: context.action,
+			dedupeKey: `notebooks:${context.code}`,
+		})
+	}, { flush: 'sync' })
+
+	function setErrorContext(context: NotebookErrorContext) {
+		errorContext.value = context
+	}
 
 	const notebookTree = computed(() => {
 		const map = new Map<string, NotebookNode>()
@@ -48,6 +77,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		try {
 			notebooks.value = (await listNotebooks()) ?? []
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_LIST_FAILED',
+				action: { label: '再試行', run: () => fetchNotebooks() },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックの読み込みに失敗しました'
 		} finally {
 			isLoading.value = false
@@ -68,6 +101,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 			notebooks.value.push(nb)
 			return nb
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_CREATE_FAILED',
+				action: { label: '再試行', run: () => newNotebook(name, parentId, icon) },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックの作成に失敗しました'
 			throw e
 		}
@@ -82,6 +119,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 				notebooks.value[idx] = updated
 			}
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_RENAME_FAILED',
+				action: { label: '再試行', run: () => renameNotebook(id, name) },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックの更新に失敗しました'
 		}
 	}
@@ -89,6 +130,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 	async function moveNotebook(id: string, parentId: string | null) {
 		error.value = null
 		if (wouldCreateNotebookCycle(notebooks.value, id, parentId)) {
+			setErrorContext({ code: 'NOTEBOOK_MOVE_INVALID' })
 			error.value = 'ノートブックを自分自身または子孫の下へ移動することはできません'
 			return
 		}
@@ -102,6 +144,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 				notebooks.value[idx] = updated
 			}
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_MOVE_FAILED',
+				action: { label: '再試行', run: () => moveNotebook(id, parentId) },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックの移動に失敗しました'
 		}
 	}
@@ -121,6 +167,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 			}
 			await useNoteStore().fetchNotes()
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_DELETE_FAILED',
+				action: { label: '再試行', run: () => removeNotebook(id, mode) },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックの削除に失敗しました'
 			throw e
 		}
@@ -152,6 +202,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 				notebooks.value[index] = updated
 			}
 		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_ICON_UPDATE_FAILED',
+				action: { label: '再試行', run: () => updateNotebookIcon(id, icon) },
+			})
 			error.value = e instanceof Error ? e.message : 'ノートブックアイコンの更新に失敗しました'
 		}
 	}

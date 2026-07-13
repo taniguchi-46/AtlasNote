@@ -15,7 +15,7 @@ import { createNoteOperationQueue } from '../utils/noteOperationQueue'
 import { createRequestCounter } from '../utils/requestCounter'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
-import { useNotificationStore } from './useNotificationStore'
+import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
 const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
@@ -65,6 +65,11 @@ function toSummary(updated: note.Note): note.Summary {
   } as note.Summary
 }
 
+type NoteErrorContext = {
+  code: string
+  action?: NotificationAction
+}
+
 export const useNoteStore = defineStore('notes', () => {
   // State
   const summaries = ref<note.Summary[]>([])
@@ -80,6 +85,7 @@ export const useNoteStore = defineStore('notes', () => {
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
   const notificationStore = useNotificationStore()
+  const errorContext = ref<NoteErrorContext | null>(null)
   const savingRequests = createRequestCounter((count) => {
     isSaving.value = count > 0
   })
@@ -90,13 +96,20 @@ export const useNoteStore = defineStore('notes', () => {
       return
     }
 
+    const context = errorContext.value ?? { code: 'NOTE_OPERATION_FAILED' }
     notificationStore.notify(message, {
       kind: 'error',
       source: 'notes',
-      code: 'NOTE_OPERATION_FAILED',
-      dedupeKey: 'notes',
+      code: context.code,
+      retryable: Boolean(context.action),
+      action: context.action,
+      dedupeKey: `notes:${context.code}`,
     })
-  })
+  }, { flush: 'sync' })
+
+  function setErrorContext(context: NoteErrorContext) {
+    errorContext.value = context
+  }
 
   // Computed
   const pinnedNotes = computed(() =>
@@ -141,6 +154,10 @@ export const useNoteStore = defineStore('notes', () => {
       const excluded = new Set(excludedIds)
       summaries.value = ((await listNotes()) ?? []).filter((note) => !excluded.has(note.id))
     } catch (e) {
+      setErrorContext({
+        code: 'NOTE_LIST_FAILED',
+        action: { label: '再試行', run: () => fetchNotes(excludedIds) },
+      })
       error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {
       isLoading.value = false
@@ -165,6 +182,10 @@ export const useNoteStore = defineStore('notes', () => {
       }
     } catch (e) {
       if (isLatestRequest()) {
+        setErrorContext({
+          code: 'NOTE_LOAD_FAILED',
+          action: { label: '再試行', run: () => selectNote(id) },
+        })
         error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
       }
     } finally {
@@ -197,6 +218,13 @@ export const useNoteStore = defineStore('notes', () => {
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
     } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CREATE_FAILED',
+        action: {
+          label: '再試行',
+          run: () => newNote(title, content, notebookId),
+        },
+      })
       error.value = e instanceof Error ? e.message : 'ノートの作成に失敗しました'
     } finally {
       endSaving()
@@ -239,6 +267,9 @@ export const useNoteStore = defineStore('notes', () => {
         expectedRevision: requirePersistedRevision(id),
       })
     } catch (e) {
+      setErrorContext({
+        code: e instanceof NoteRevisionConflictError ? e.code : 'NOTE_SAVE_FAILED',
+      })
       onFailure?.(e)
       error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
       return null
@@ -397,6 +428,10 @@ export const useNoteStore = defineStore('notes', () => {
       replaceDraft(noteId, null)
       return latestNote
     } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CONFLICT_RELOAD_FAILED',
+        action: { label: '再試行', run: () => reloadConflictedNote(noteId) },
+      })
       error.value = e instanceof Error ? e.message : 'ノートの再読み込みに失敗しました'
       return null
     } finally {
@@ -431,6 +466,10 @@ export const useNoteStore = defineStore('notes', () => {
       }
       return created
     } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CONFLICT_COPY_FAILED',
+        action: { label: '再試行', run: () => copyConflictedDraft(noteId) },
+      })
       error.value = e instanceof Error ? e.message : '競合下書きのコピー保存に失敗しました'
       return null
     } finally {
@@ -481,6 +520,7 @@ export const useNoteStore = defineStore('notes', () => {
         })
       }
     } catch (e) {
+      setErrorContext({ code: 'NOTES_BATCH_UPDATE_FAILED' })
       error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
       throw e
     } finally {
@@ -514,6 +554,13 @@ export const useNoteStore = defineStore('notes', () => {
       summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
       if (activeNote.value?.id === id) activeNote.value = null
     } catch (e) {
+      const isRevisionConflict = e instanceof NoteRevisionConflictError
+      setErrorContext({
+        code: isRevisionConflict ? e.code : 'NOTE_DELETE_FAILED',
+        action: isRevisionConflict
+          ? undefined
+          : { label: '再試行', run: () => permanentlyDeleteNote(id) },
+      })
       error.value = e instanceof Error ? e.message : 'ノートの削除に失敗しました'
       throw e
     }
@@ -534,6 +581,7 @@ export const useNoteStore = defineStore('notes', () => {
         ),
       )
     } catch (e) {
+      setErrorContext({ code: 'NOTES_BATCH_DELETE_FAILED' })
       if (e instanceof NoteDeleteError) deletedIds = e.deletedIds
       error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'
       throw e

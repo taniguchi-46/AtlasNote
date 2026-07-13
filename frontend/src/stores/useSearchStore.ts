@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import type { note } from '../../wailsjs/go/models'
 import { searchNotes } from '../api/search'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
-import { useNotificationStore } from './useNotificationStore'
+import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 
 export type SearchFilters = {
   notebookId: string | null
@@ -45,13 +45,24 @@ export const useSearchStore = defineStore('search', () => {
     hasNext.value = result.hasNext
   }
 
-  function notifySearchError(message: string, code: string, retryable?: boolean) {
+  function notifySearchError(
+    message: string,
+    code: string,
+    retryable?: boolean,
+    action?: NotificationAction,
+  ) {
+    const resolvedAction = action ?? (
+      code === 'SEARCH_REQUEST_FAILED'
+        ? { label: '再試行', run: () => refresh() }
+        : undefined
+    )
     notificationStore.notify(message, {
       kind: 'error',
       source: 'search',
       code,
-      retryable,
-      dedupeKey: 'search',
+      retryable: retryable ?? Boolean(resolvedAction),
+      action: resolvedAction,
+      dedupeKey: `search:${code}`,
     })
   }
 
@@ -93,7 +104,10 @@ export const useSearchStore = defineStore('search', () => {
       if (result.error) {
         error.value = result.error.message
         errorCode.value = result.error.code
-        notifySearchError(result.error.message, result.error.code, result.error.retryable)
+        const action = result.error.retryable
+          ? { label: '再試行', run: () => refresh() }
+          : undefined
+        notifySearchError(result.error.message, result.error.code, result.error.retryable, action)
         return
       }
 

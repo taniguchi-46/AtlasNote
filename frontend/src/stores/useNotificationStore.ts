@@ -3,6 +3,11 @@ import { ref } from 'vue'
 
 export type NotificationKind = 'info' | 'success' | 'warning' | 'error'
 
+export type NotificationAction = {
+  label: string
+  run: () => void | Promise<unknown>
+}
+
 export type AppNotification = {
   id: number
   kind: NotificationKind
@@ -10,6 +15,7 @@ export type AppNotification = {
   source?: string
   code?: string
   retryable?: boolean
+  action?: NotificationAction
   dedupeKey: string
 }
 
@@ -18,6 +24,7 @@ export type NotificationOptions = {
   source?: string
   code?: string
   retryable?: boolean
+  action?: NotificationAction
   dedupeKey?: string
 }
 
@@ -25,6 +32,7 @@ let nextNotificationId = 0
 
 export const useNotificationStore = defineStore('notifications', () => {
   const notifications = ref<AppNotification[]>([])
+  const actionRunningId = ref<number | null>(null)
 
   function notify(message: string, options: NotificationOptions = {}) {
     const dedupeKey = options.dedupeKey
@@ -37,6 +45,7 @@ export const useNotificationStore = defineStore('notifications', () => {
       existing.source = options.source
       existing.code = options.code
       existing.retryable = options.retryable
+      existing.action = options.action
       return existing.id
     }
 
@@ -47,6 +56,7 @@ export const useNotificationStore = defineStore('notifications', () => {
       source: options.source,
       code: options.code,
       retryable: options.retryable,
+      action: options.action,
       dedupeKey,
     }
     notifications.value.push(notification)
@@ -65,5 +75,35 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value = []
   }
 
-  return { notifications, notify, dismiss, dismissBySource, clear }
+  function isActionRunning(id: number) {
+    return actionRunningId.value === id
+  }
+
+  async function runAction(id: number) {
+    if (actionRunningId.value !== null) return
+
+    const notification = notifications.value.find((item) => item.id === id)
+    if (!notification?.action) return
+
+    const action = notification.action
+    actionRunningId.value = id
+    dismiss(id)
+    try {
+      await action.run()
+    } catch (_) {
+      // The operation owns its error state and reports a new notification.
+    } finally {
+      actionRunningId.value = null
+    }
+  }
+
+  return {
+    notifications,
+    notify,
+    dismiss,
+    dismissBySource,
+    clear,
+    isActionRunning,
+    runAction,
+  }
 })
