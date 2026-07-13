@@ -29,10 +29,6 @@
     <p v-if="noteStore.error" class="note-list-error" role="alert">
       {{ noteStore.error }}
     </p>
-    <p v-if="searchStore.error" class="note-list-error" role="alert">
-      {{ searchStore.error }}
-    </p>
-
     <!-- Loading -->
     <div v-if="(noteStore.isLoading || searchStore.isSearching) && displayedNotes.length === 0" class="note-list-empty">
       <div class="spinner" aria-label="読み込み中..." />

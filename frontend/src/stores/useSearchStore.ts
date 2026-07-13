@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { note } from '../../wailsjs/go/models'
 import { searchNotes } from '../api/search'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
+import { useNotificationStore } from './useNotificationStore'
 
 export type SearchFilters = {
   notebookId: string | null
@@ -33,6 +34,7 @@ export const useSearchStore = defineStore('search', () => {
   const errorCode = ref<string | null>(null)
   const filters = ref<SearchFilters>({ notebookId: null, includeTrashed: false })
   const requestGuard = createLatestRequestGuard()
+  const notificationStore = useNotificationStore()
 
   const isActive = computed(() => query.value.trim().length > 0)
 
@@ -41,6 +43,16 @@ export const useSearchStore = defineStore('search', () => {
     items.value = result.items
     total.value = result.total
     hasNext.value = result.hasNext
+  }
+
+  function notifySearchError(message: string, code: string, retryable?: boolean) {
+    notificationStore.notify(message, {
+      kind: 'error',
+      source: 'search',
+      code,
+      retryable,
+      dedupeKey: 'search',
+    })
   }
 
   async function search(
@@ -62,6 +74,7 @@ export const useSearchStore = defineStore('search', () => {
     if (!isActive.value) {
       page.value = DEFAULT_PAGE
       isSearching.value = false
+      notificationStore.dismissBySource('search')
       return
     }
 
@@ -80,9 +93,11 @@ export const useSearchStore = defineStore('search', () => {
       if (result.error) {
         error.value = result.error.message
         errorCode.value = result.error.code
+        notifySearchError(result.error.message, result.error.code, result.error.retryable)
         return
       }
 
+      notificationStore.dismissBySource('search')
       page.value = result.page
       items.value = append ? [...items.value, ...(result.items ?? [])] : (result.items ?? [])
       total.value = result.total
@@ -91,6 +106,7 @@ export const useSearchStore = defineStore('search', () => {
       if (!isLatestRequest()) return
       error.value = cause instanceof Error ? cause.message : '検索に失敗しました。'
       errorCode.value = 'SEARCH_REQUEST_FAILED'
+      notifySearchError(error.value ?? '検索に失敗しました', 'SEARCH_REQUEST_FAILED')
     } finally {
       if (isLatestRequest()) isSearching.value = false
     }
@@ -113,6 +129,7 @@ export const useSearchStore = defineStore('search', () => {
     error.value = null
     errorCode.value = null
     isSearching.value = false
+    notificationStore.dismissBySource('search')
     clearResult()
   }
 

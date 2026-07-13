@@ -97,6 +97,7 @@
 
     <!-- Modals -->
     <SettingsModal />
+    <NotificationCenter />
   </div>
 </template>
 
@@ -107,6 +108,7 @@ import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import NotificationCenter from './components/NotificationCenter.vue'
 import {
   deleteMissingNote,
   getStartupStatus,
