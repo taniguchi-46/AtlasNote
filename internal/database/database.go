@@ -137,6 +137,26 @@ CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
 ALTER TABLE note_search_state
 	ADD COLUMN content_mtime_ns INTEGER NOT NULL DEFAULT 0;
 	`,
+	`
+CREATE TABLE IF NOT EXISTS tags (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+	normalized_name TEXT NOT NULL UNIQUE CHECK(length(normalized_name) > 0),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS note_tags (
+	note_id TEXT NOT NULL,
+	tag_id TEXT NOT NULL,
+	PRIMARY KEY (note_id, tag_id),
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
+	ON note_tags(tag_id, note_id);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -273,6 +293,25 @@ CREATE TABLE IF NOT EXISTS note_search_state (
 
 CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
 	ON note_search_state(indexed_revision);
+
+CREATE TABLE IF NOT EXISTS tags (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+	normalized_name TEXT NOT NULL UNIQUE CHECK(length(normalized_name) > 0),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS note_tags (
+	note_id TEXT NOT NULL,
+	tag_id TEXT NOT NULL,
+	PRIMARY KEY (note_id, tag_id),
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
+	ON note_tags(tag_id, note_id);
 `); err != nil {
 		return fmt.Errorf("ensure indexes: %w", err)
 	}

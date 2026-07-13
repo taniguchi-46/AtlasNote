@@ -222,6 +222,48 @@ func (a *App) DeleteNotebook(id string, input note.NotebookDeleteInput) error {
 	return a.notes.DeleteNotebook(a.ctx, id, input)
 }
 
+func (a *App) ListTags() ([]note.Tag, error) {
+	if a.notes == nil {
+		return make([]note.Tag, 0), errors.New("note service is not initialized")
+	}
+	return a.notes.ListTags(a.ctx)
+}
+
+func (a *App) ListNoteTags(noteID string) (note.NoteTagsResult, error) {
+	if a.notes == nil {
+		return note.NoteTagsResult{Tags: make([]note.Tag, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.ListNoteTags(a.ctx, noteID)
+}
+
+func (a *App) CreateTag(input note.TagCreateInput) (note.TagMutationResult, error) {
+	if a.notes == nil {
+		return note.TagMutationResult{}, errors.New("note service is not initialized")
+	}
+	return a.notes.CreateTag(a.ctx, input)
+}
+
+func (a *App) UpdateTag(tagID string, input note.TagUpdateInput) (note.TagMutationResult, error) {
+	if a.notes == nil {
+		return note.TagMutationResult{}, errors.New("note service is not initialized")
+	}
+	return a.notes.UpdateTag(a.ctx, tagID, input)
+}
+
+func (a *App) DeleteTag(tagID string) (note.TagDeleteResult, error) {
+	if a.notes == nil {
+		return note.TagDeleteResult{}, errors.New("note service is not initialized")
+	}
+	return a.notes.DeleteTag(a.ctx, tagID)
+}
+
+func (a *App) SetNoteTags(noteID string, input note.SetNoteTagsInput) (note.NoteTagsResult, error) {
+	if a.notes == nil {
+		return note.NoteTagsResult{Tags: make([]note.Tag, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.SetNoteTags(a.ctx, noteID, input)
+}
+
 func (a *App) GetStartupStatus() StartupStatus {
 	a.statusMu.RLock()
 	defer a.statusMu.RUnlock()

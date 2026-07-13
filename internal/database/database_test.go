@@ -57,6 +57,29 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	if tableName != "note_search_state" {
 		t.Fatalf("search index state table name = %q", tableName)
 	}
+
+	for _, expectedTable := range []string{"tags", "note_tags"} {
+		if err := db.QueryRowContext(
+			t.Context(),
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+			expectedTable,
+		).Scan(&tableName); err != nil {
+			t.Fatalf("read %s table: %v", expectedTable, err)
+		}
+		if tableName != expectedTable {
+			t.Fatalf("table name = %q, want %q", tableName, expectedTable)
+		}
+	}
+
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_note_tags_tag_id_note_id'",
+	).Scan(&tableName); err != nil {
+		t.Fatalf("read note tag reverse index: %v", err)
+	}
+	if tableName != "idx_note_tags_tag_id_note_id" {
+		t.Fatalf("note tag reverse index = %q", tableName)
+	}
 }
 
 func TestSQLiteSupportsFTS5TrigramSearch(t *testing.T) {
@@ -220,6 +243,116 @@ VALUES (
 	if _, err := db.ExecContext(t.Context(), "UPDATE notes SET revision = 0 WHERE id = 'existing-note'"); err == nil {
 		t.Fatal("revision constraint accepted zero")
 	}
+}
+
+func TestOpenMigratesVersionFiveDatabaseWithoutChangingExistingNote(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:5] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 5"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version five: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO notes (
+	id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
+)
+VALUES (
+	'existing-note', 'Existing note', 'existing-note.md', 1, 0, 0, 7,
+	'2026-07-10T00:00:00Z', '2026-07-10T01:00:00Z'
+)
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy note: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	var title string
+	var contentPath string
+	var revision int64
+	var createdAt string
+	var updatedAt string
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT title, content_path, revision, created_at, updated_at FROM notes WHERE id = 'existing-note'",
+	).Scan(&title, &contentPath, &revision, &createdAt, &updatedAt); err != nil {
+		t.Fatalf("read migrated note: %v", err)
+	}
+	if title != "Existing note" || contentPath != "existing-note.md" || revision != 7 ||
+		createdAt != "2026-07-10T00:00:00Z" || updatedAt != "2026-07-10T01:00:00Z" {
+		t.Fatalf("migrated note changed: title=%q path=%q revision=%d created=%q updated=%q", title, contentPath, revision, createdAt, updatedAt)
+	}
+
+	for _, table := range []string{"tags", "note_tags"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+			t.Fatalf("count migrated %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("migrated %s count = %d, want 0", table, count)
+		}
+	}
+}
+
+func TestTagForeignKeysCascadeRelations(t *testing.T) {
+	t.Parallel()
+
+	db, err := Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	if _, err := db.ExecContext(t.Context(), `
+INSERT INTO notes (
+	id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
+)
+VALUES ('note-1', 'Note', 'note-1.md', 0, 0, 0, 1, '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z');
+INSERT INTO tags (id, name, normalized_name, created_at, updated_at)
+VALUES ('tag-1', 'Work', 'work', '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z');
+INSERT INTO note_tags (note_id, tag_id) VALUES ('note-1', 'tag-1');
+`); err != nil {
+		t.Fatalf("create note tag relation: %v", err)
+	}
+
+	if _, err := db.ExecContext(t.Context(), "DELETE FROM tags WHERE id = 'tag-1'"); err != nil {
+		t.Fatalf("delete tag: %v", err)
+	}
+	assertTableCount(t, db, "notes", 1)
+	assertTableCount(t, db, "note_tags", 0)
+
+	if _, err := db.ExecContext(t.Context(), `
+INSERT INTO tags (id, name, normalized_name, created_at, updated_at)
+VALUES ('tag-2', 'Personal', 'personal', '2026-07-13T00:00:00Z', '2026-07-13T00:00:00Z');
+INSERT INTO note_tags (note_id, tag_id) VALUES ('note-1', 'tag-2');
+DELETE FROM notes WHERE id = 'note-1';
+`); err != nil {
+		t.Fatalf("delete note with tag relation: %v", err)
+	}
+	assertTableCount(t, db, "tags", 1)
+	assertTableCount(t, db, "note_tags", 0)
 }
 
 func TestOpenRejectsDatabaseFromNewerVersionWithoutModification(t *testing.T) {
@@ -409,5 +542,17 @@ VALUES (?, 'missing-parent', 'Invalid', '2026-07-11T00:00:00Z', '2026-07-11T00:0
 `, id)
 	if err == nil {
 		t.Fatal("foreign key violating insert succeeded")
+	}
+}
+
+func assertTableCount(t *testing.T, db *sql.DB, table string, want int) {
+	t.Helper()
+
+	var count int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	if count != want {
+		t.Fatalf("%s count = %d, want %d", table, count, want)
 	}
 }

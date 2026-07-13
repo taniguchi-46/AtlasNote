@@ -82,6 +82,15 @@ Go Backend
 - 索引更新失敗でMarkdown正本の保存をrollbackせず、不整合は検出・再構築する。
 - 索引方式、更新タイミング、再構築の確定仕様は `docs/development/search-index.md` を正とする。
 
+### タグとノート関連
+
+- タグはSQLiteの`tags`テーブル、ノートとの多対多関連は`note_tags`テーブルへ保存し、Markdown本文へタグ情報を書き込まない。
+- タグ名はServiceでNFC正規化、Unicode空白の正規化、制御文字拒否、100 Unicode文字以内の検証を行う。Unicode case-fold後の`normalized_name`にはUNIQUE制約を置き、表示名の大文字小文字は保持する。
+- `note_tags`は`(note_id, tag_id)`複合主キーと両方向の`ON DELETE CASCADE`を使う。タグ別ノート検索に備え、`(tag_id, note_id)`の逆引きINDEXを置く。
+- タグの作成・改名・削除、ノートのタグ付与・解除はRepository / Service / Wails API / フロントAPI / Piniaの責務境界を通す。ComponentからWails APIを直接呼ばない。
+- タグ操作はMarkdown、`notes.updated_at`、`notes.revision`、FTS5索引、保存操作ジャーナルを変更しない。ゴミ箱内ノートのタグは保持し、UIからの変更だけを無効化する。
+- タグの確定仕様、migration、rollback、構造化エラーは `docs/development/tag-design.md` を正とする。タグ条件を使うノート検索・フィルターは後続タスクで追加する。
+
 ## 外部連携
 
 | 連携 | 方針 |
@@ -100,5 +109,5 @@ Go Backend
 
 ## 未確定事項
 
-- タグ、バックリンク、関連メモに必要なデータ構造と更新境界。
+- バックリンク、関連メモに必要なデータ構造と更新境界。
 - AI 機能の呼び出し境界を Go 側に集約するか、フロントエンド側の設定 UI とどう分けるか。

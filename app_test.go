@@ -132,6 +132,49 @@ func TestAppSearchNotesReturnsStructuredValidationError(t *testing.T) {
 	}
 }
 
+func TestAppTagOperationsReturnStructuredErrors(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(context.Background())
+	t.Cleanup(func() {
+		app.shutdown(t.Context())
+	})
+
+	emptyResult, err := app.CreateTag(note.TagCreateInput{Name: "\u00a0\u2003"})
+	if err != nil {
+		t.Fatalf("create empty tag: %v", err)
+	}
+	if emptyResult.Error == nil || emptyResult.Error.Code != note.TagErrorNameEmpty {
+		t.Fatalf("empty tag result = %#v", emptyResult)
+	}
+
+	createdResult, err := app.CreateTag(note.TagCreateInput{Name: "Project"})
+	if err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+	if createdResult.Error != nil || createdResult.Tag == nil {
+		t.Fatalf("create tag result = %#v", createdResult)
+	}
+
+	conflictResult, err := app.CreateTag(note.TagCreateInput{Name: "project"})
+	if err != nil {
+		t.Fatalf("create duplicate tag: %v", err)
+	}
+	if conflictResult.Error == nil || conflictResult.Error.Code != note.TagErrorNameConflict {
+		t.Fatalf("duplicate tag result = %#v", conflictResult)
+	}
+
+	setResult, err := app.SetNoteTags("missing-note", note.SetNoteTagsInput{TagIDs: []string{createdResult.Tag.ID}})
+	if err != nil {
+		t.Fatalf("set missing note tags: %v", err)
+	}
+	if setResult.Error == nil || setResult.Error.Code != note.TagErrorNoteNotFound {
+		t.Fatalf("missing note tag result = %#v", setResult)
+	}
+}
+
 func TestNewAppReportsInitializationError(t *testing.T) {
 	tempDir := t.TempDir()
 	blockedDataDir := filepath.Join(tempDir, "blocked")

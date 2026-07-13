@@ -4,7 +4,7 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤実装は完了しています。タグ・フィルター等の追加機能は未着手です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤およびタグCRUD・ノート関連付けは完了しています。タグ条件によるノート検索・フィルター等の追加機能は未着手です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -26,6 +26,9 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
 - schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
 - schema version 5の検索状態`content_mtime_ns` migrationと既存行の初回hash再照合
+- schema version 6の`tags` / `note_tags` migration、Unicode正規化・case-foldによる同名防止、外部キーCASCADE
+- タグのRepository / Service / Wails API、構造化タグエラー、フロントAPI / Pinia Store
+- ノート編集画面のタグ付与・解除、タグ候補検索・作成、サイドバーでのタグ検索・改名・削除
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
 - ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
@@ -56,8 +59,8 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 ## Phase 2の対象
 
 - 既存検索UIへの実検索処理の接続（完了）
-- タイトル検索、本文全文検索（完了）、タグ検索
-- タグの追加、編集、削除
+- タイトル検索、本文全文検索（完了）、タグ条件によるノート検索（未実装）
+- タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
 - ノートブック、タグ、作成日、更新日のフィルター
 - 並び替え、最近開いたメモ、バックリンク、関連メモ
 - テーブルコピー
@@ -67,7 +70,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - revision、競合検出、保存キューの仕様は `docs/development/note-concurrency.md` で確定済み
 - 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
 - 検索API、ページング、入力検証、エラー形式は `docs/development/search-api.md` で確定済み
-- タグのデータモデルと制約
+- タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
 - バックリンクの抽出規則と関連メモの判定基準
 - 検索、フィルター、並び替えを組み合わせるAPIと画面状態
 - DB変更時のmigration、既存データへの影響、rollback方法
@@ -115,6 +118,7 @@ wails build
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |
+| `docs/development/tag-design.md` | タグの制約、migration、API、実装・検証状況 |
 | `docs/todo/todo-phese2.md` | Phase 2の作業チェックリスト |
 | `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
 | `docs/development/setup.md` | 開発環境セットアップ |

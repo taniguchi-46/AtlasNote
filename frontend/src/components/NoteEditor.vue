@@ -127,6 +127,11 @@
         </div>
       </div>
 
+      <NoteTags
+        :note-id="noteStore.activeNote.id"
+        :disabled="noteStore.activeNote.isTrashed"
+      />
+
       <div class="editor-format-bar" @mousedown.prevent>
         <button
           class="format-btn"
@@ -369,6 +374,7 @@ import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import NoteTags from './NoteTags.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { logOperationFailure } from '../utils/operationLogger'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'

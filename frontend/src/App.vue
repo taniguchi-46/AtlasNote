@@ -122,6 +122,7 @@ import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
 import { useNotebookStore } from './stores/useNotebookStore'
 import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
+import { useTagStore } from './stores/useTagStore'
 import { logOperationFailure } from './utils/operationLogger'
 import {
   EDITOR_WIDTH_MIN,
@@ -138,6 +139,7 @@ const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
+const tagStore = useTagStore()
 const settingsStore = useSettingsStore()
 const startupStatus = ref<StartupStatus | null>(null)
 const isRecoveryBusy = ref(false)
@@ -397,10 +399,14 @@ onMounted(async () => {
     startupStatus.value = await getStartupStatus()
     if (startupStatus.value.ready) {
       await noteStore.fetchNotes(missingNoteIds(startupStatus.value))
+      await tagStore.fetchTags()
     }
   } catch (_) {
     // Network or Wails not available (dev browser mode)
-    await noteStore.fetchNotes().catch(() => {})
+    await Promise.all([
+      noteStore.fetchNotes().catch(() => {}),
+      tagStore.fetchTags().catch(() => {}),
+    ])
   }
 
   // Apply initial always-on-top status

@@ -68,6 +68,58 @@ type DeleteInput struct {
 	ExpectedRevision int64 `json:"expectedRevision"`
 }
 
+const MaxTagNameLength = 100
+
+type Tag struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type TagCreateInput struct {
+	Name string `json:"name"`
+}
+
+type TagUpdateInput struct {
+	Name string `json:"name"`
+}
+
+type SetNoteTagsInput struct {
+	TagIDs []string `json:"tagIds"`
+}
+
+type TagError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Field     string `json:"field,omitempty"`
+	Retryable bool   `json:"retryable"`
+}
+
+type TagMutationResult struct {
+	Tag   *Tag      `json:"tag,omitempty"`
+	Error *TagError `json:"error,omitempty"`
+}
+
+type TagDeleteResult struct {
+	Deleted bool      `json:"deleted"`
+	Error   *TagError `json:"error,omitempty"`
+}
+
+type NoteTagsResult struct {
+	Tags  []Tag     `json:"tags"`
+	Error *TagError `json:"error,omitempty"`
+}
+
+const (
+	TagErrorNameEmpty    = "TAG_NAME_EMPTY"
+	TagErrorNameTooLong  = "TAG_NAME_TOO_LONG"
+	TagErrorNameInvalid  = "TAG_NAME_INVALID"
+	TagErrorNameConflict = "TAG_NAME_CONFLICT"
+	TagErrorNotFound     = "TAG_NOT_FOUND"
+	TagErrorNoteNotFound = "TAG_NOTE_NOT_FOUND"
+)
+
 const (
 	SearchScopeAll   = "all"
 	SearchScopeTitle = "title"

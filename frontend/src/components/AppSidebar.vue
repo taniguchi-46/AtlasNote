@@ -60,6 +60,8 @@
       </div>
     </div>
 
+    <TagManager />
+
     <div class="sidebar-spacer" />
 
     <button
@@ -88,6 +90,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import NotebookTreeItem from './NotebookTreeItem.vue'
 import NotebookCreateModal from './NotebookCreateModal.vue'
+import TagManager from './TagManager.vue'
 import type { SidebarSection } from '../stores/useAppStore'
 
 const noteStore = useNoteStore()
