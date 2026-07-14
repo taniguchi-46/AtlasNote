@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atlas Note Code Review"
+  short_description: "Criticalから優先し、根拠に基づいてコードと差分をレビューする"
+  default_prompt: "$code-review を使用して、[対象差分またはファイル]をCriticalから順にレビューしてください。"
