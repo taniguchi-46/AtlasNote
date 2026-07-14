@@ -4,6 +4,47 @@
     <div class="note-list-header">
       <h2 class="note-list-title">{{ sectionTitle }}</h2>
       <span class="note-list-count">{{ displayedCount }}</span>
+      <DropdownMenuRoot>
+        <DropdownMenuTrigger as-child>
+          <button
+            class="note-list-sort-trigger"
+            :class="{ 'is-active': appStore.sortOption }"
+            type="button"
+            aria-label="並び替え"
+            aria-haspopup="menu"
+            :title="sortButtonLabel"
+          >
+            <ArrowDownUpIcon :size="16" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPortal>
+          <DropdownMenuContent
+            class="note-list-sort-menu"
+            :data-theme="appStore.theme"
+            side="bottom"
+            align="end"
+            :side-offset="6"
+          >
+            <DropdownMenuLabel class="note-list-sort-label">並び替え</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              :model-value="appStore.sortOption"
+              @update:model-value="handleSortChange"
+            >
+              <DropdownMenuRadioItem
+                v-for="option in sortOptions"
+                :key="option.value || 'default'"
+                class="note-list-sort-item"
+                :value="option.value"
+              >
+                <DropdownMenuItemIndicator class="note-list-sort-indicator">
+                  <CheckIcon :size="14" />
+                </DropdownMenuItemIndicator>
+                {{ option.value ? option.label : defaultSortLabel }}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenuPortal>
+      </DropdownMenuRoot>
       <button
         v-if="!isTrashSection"
         id="btn-new-note"
@@ -171,6 +212,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
+  ArrowDownUpIcon,
+  CheckIcon,
   ChevronRightIcon,
   FileTextIcon,
   FolderInputIcon,
@@ -192,10 +235,18 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItemIndicator,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
 } from 'reka-ui'
 import type { note } from '../../wailsjs/go/models'
 import { useNoteStore } from '../stores/useNoteStore'
-import { useAppStore } from '../stores/useAppStore'
+import { NOTE_SORT_OPTIONS, useAppStore, type NoteSortOption } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useSearchStore } from '../stores/useSearchStore'
 import { useTagStore } from '../stores/useTagStore'
@@ -207,6 +258,14 @@ const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const tagStore = useTagStore()
+const sortOptions = NOTE_SORT_OPTIONS
+const defaultSortLabel = computed(() => (
+  searchStore.isActive ? '既定（関連度順）' : '既定（更新日時・新しい順）'
+))
+const sortButtonLabel = computed(() => {
+  const selected = sortOptions.find(option => option.value === appStore.sortOption)
+  return selected?.value ? selected.label : defaultSortLabel.value
+})
 const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
 const noteListRef = ref<HTMLUListElement | null>(null)
@@ -317,6 +376,17 @@ async function handleMoveToNotebook(notebookId: string | null) {
   }
 }
 
+function handleSortChange(value: unknown) {
+  if (typeof value !== 'string' || !sortOptions.some(option => option.value === value)) return
+  appStore.setSortOption(value as NoteSortOption)
+  if (searchStore.isActive) {
+    void searchStore.refresh()
+    return
+  }
+
+  void noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent')
+}
+
 function completedBatchIds(error: unknown) {
   if (error instanceof NoteUpdateError) return error.updatedIds
   if (error instanceof NoteDeleteError) return error.deletedIds
@@ -358,7 +428,7 @@ async function returnToNormalList() {
   searchStore.clear()
   noteStore.clearTagFilter()
   appStore.setSidebarSection('notes')
-  await noteStore.fetchNotes([], null)
+  await noteStore.fetchNotes([], null, false)
 }
 
 const isTrashSection = computed(() =>
@@ -379,6 +449,7 @@ const sectionTitle = computed(() => {
     case 'uncategorized': return '未分類'
     case 'favorites': return 'お気に入り'
     case 'pinned': return 'ピン留め'
+    case 'recent': return '最近更新した'
     case 'trash': return 'ゴミ箱'
     default: return 'すべてのノート'
   }
@@ -405,6 +476,7 @@ const displayedNotes = computed(() => {
     case 'uncategorized': list = noteStore.activeNotes.filter(n => !n.notebookId); break
     case 'favorites': list = noteStore.favoriteNotes; break
     case 'pinned': list = noteStore.pinnedNotes; break
+    case 'recent': list = noteStore.activeNotes; break
     case 'trash': list = noteStore.trashedNotes; break
     default: list = noteStore.activeNotes; break
   }
@@ -494,6 +566,72 @@ function formatDate(iso: string): string {
 </script>
 
 <style scoped>
+.note-list-sort-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.note-list-sort-trigger:hover,
+.note-list-sort-trigger[data-state='open'],
+.note-list-sort-trigger.is-active {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+:global(.note-list-sort-menu) {
+  z-index: 1300;
+  min-width: 214px;
+  padding: 4px 0;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  outline: none;
+}
+
+:global(.note-list-sort-label) {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.note-list-sort-item) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 12px 6px 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+:global(.note-list-sort-item[data-highlighted]) {
+  background-color: var(--bg-hover);
+  outline: none;
+}
+
+:global(.note-list-sort-indicator) {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  margin-right: 4px;
+  color: var(--brand-primary);
+}
+
 .note-list-new-note-btn {
   display: inline-flex;
   align-items: center;

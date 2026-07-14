@@ -21,10 +21,22 @@ const (
 	MaxNoteListPageSize     = 100
 )
 
+const (
+	NoteSortByUpdatedAt = "updatedAt"
+	NoteSortByCreatedAt = "createdAt"
+	NoteSortByTitle     = "title"
+
+	NoteSortDirectionAsc  = "asc"
+	NoteSortDirectionDesc = "desc"
+)
+
 type NoteListInput struct {
-	Page     int     `json:"page"`
-	PageSize int     `json:"pageSize"`
-	TagID    *string `json:"tagId,omitempty"`
+	Page          int     `json:"page"`
+	PageSize      int     `json:"pageSize"`
+	TagID         *string `json:"tagId,omitempty"`
+	SortBy        string  `json:"sortBy,omitempty"`
+	SortDirection string  `json:"sortDirection,omitempty"`
+	TodayOnly     bool    `json:"todayOnly,omitempty"`
 }
 
 type NoteListResult struct {
@@ -139,6 +151,8 @@ type SearchInput struct {
 	IncludeTrashed bool    `json:"includeTrashed"`
 	Page           int     `json:"page"`
 	PageSize       int     `json:"pageSize"`
+	SortBy         string  `json:"sortBy,omitempty"`
+	SortDirection  string  `json:"sortDirection,omitempty"`
 }
 
 type SearchItem struct {
@@ -164,14 +178,16 @@ type SearchResult struct {
 }
 
 const (
-	SearchErrorQueryTooLong      = "SEARCH_QUERY_TOO_LONG"
-	SearchErrorQueryInvalid      = "SEARCH_QUERY_INVALID"
-	SearchErrorScopeInvalid      = "SEARCH_SCOPE_INVALID"
-	SearchErrorPageInvalid       = "SEARCH_PAGE_INVALID"
-	SearchErrorPageSizeInvalid   = "SEARCH_PAGE_SIZE_INVALID"
-	SearchErrorIndexNotReady     = "SEARCH_INDEX_NOT_READY"
-	SearchErrorIndexInconsistent = "SEARCH_INDEX_INCONSISTENT"
-	SearchErrorIndexFailed       = "SEARCH_INDEX_FAILED"
+	SearchErrorQueryTooLong         = "SEARCH_QUERY_TOO_LONG"
+	SearchErrorQueryInvalid         = "SEARCH_QUERY_INVALID"
+	SearchErrorScopeInvalid         = "SEARCH_SCOPE_INVALID"
+	SearchErrorPageInvalid          = "SEARCH_PAGE_INVALID"
+	SearchErrorPageSizeInvalid      = "SEARCH_PAGE_SIZE_INVALID"
+	SearchErrorSortByInvalid        = "SEARCH_SORT_BY_INVALID"
+	SearchErrorSortDirectionInvalid = "SEARCH_SORT_DIRECTION_INVALID"
+	SearchErrorIndexNotReady        = "SEARCH_INDEX_NOT_READY"
+	SearchErrorIndexInconsistent    = "SEARCH_INDEX_INCONSISTENT"
+	SearchErrorIndexFailed          = "SEARCH_INDEX_FAILED"
 )
 
 const ErrorCodeRevisionConflict = "NOTE_REVISION_CONFLICT"

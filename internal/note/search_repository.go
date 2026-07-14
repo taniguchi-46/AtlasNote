@@ -3,6 +3,7 @@ package note
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -272,6 +273,13 @@ SELECT notes.id, notes.notebook_id, notes.title,
 	if useFTS {
 		orderBy = " ORDER BY bm25(note_search) ASC, notes.updated_at DESC, notes.id ASC"
 	}
+	if normalized.SortBy != "" || normalized.SortDirection != "" {
+		sortSpec, err := normalizeNoteSort(normalized.SortBy, normalized.SortDirection)
+		if err != nil {
+			return result, fmt.Errorf("build note search sort: %w", err)
+		}
+		orderBy = fmt.Sprintf(" ORDER BY notes.%s %s, notes.id ASC", sortSpec.Column, sortSpec.Direction)
+	}
 	query := selectColumns + fromSQL + whereSQL + orderBy + " LIMIT ? OFFSET ?"
 	args := append(append([]any(nil), whereArgs...), normalized.PageSize, (normalized.Page-1)*normalized.PageSize)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -334,6 +342,8 @@ type normalizedSearchInput struct {
 	IncludeTrashed bool
 	Page           int
 	PageSize       int
+	SortBy         string
+	SortDirection  string
 }
 
 func normalizeSearchInput(input SearchInput) (normalizedSearchInput, *SearchError) {
@@ -344,6 +354,8 @@ func normalizeSearchInput(input SearchInput) (normalizedSearchInput, *SearchErro
 		IncludeTrashed: input.IncludeTrashed,
 		Page:           input.Page,
 		PageSize:       input.PageSize,
+		SortBy:         input.SortBy,
+		SortDirection:  input.SortDirection,
 	}
 	if normalized.Scope == "" {
 		normalized.Scope = SearchScopeAll
@@ -403,6 +415,23 @@ func normalizeSearchInput(input SearchInput) (normalizedSearchInput, *SearchErro
 			Message:   "ページサイズが不正です。",
 			Field:     "pageSize",
 			Retryable: false,
+		}
+	}
+	if normalized.SortBy != "" || normalized.SortDirection != "" {
+		if _, err := normalizeNoteSort(normalized.SortBy, normalized.SortDirection); err != nil {
+			searchError := &SearchError{
+				Message:   "並び替え条件が不正です。",
+				Field:     "sortBy",
+				Retryable: false,
+			}
+			switch {
+			case errors.Is(err, ErrSortByInvalid):
+				searchError.Code = SearchErrorSortByInvalid
+			case errors.Is(err, ErrSortDirectionInvalid):
+				searchError.Code = SearchErrorSortDirectionInvalid
+				searchError.Field = "sortDirection"
+			}
+			return normalized, searchError
 		}
 	}
 

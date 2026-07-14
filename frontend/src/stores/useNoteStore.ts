@@ -17,6 +17,7 @@ import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSe
 import { updateNotesSequentially } from '../utils/updateNotesSequentially'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
+import { parseNoteSortOption, useAppStore } from './useAppStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
 const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
@@ -92,6 +93,7 @@ export const useNoteStore = defineStore('notes', () => {
   const noteSelectionRequests = createLatestRequestGuard()
   const noteOperations = createNoteOperationQueue()
   const notificationStore = useNotificationStore()
+  const appStore = useAppStore()
   const errorContext = ref<NoteErrorContext | null>(null)
   const savingRequests = createRequestCounter((count) => {
     isSaving.value = count > 0
@@ -154,18 +156,47 @@ export const useNoteStore = defineStore('notes', () => {
     drafts.value = nextDrafts
   }
 
+  function sortSummaries() {
+    const sort = parseNoteSortOption(appStore.sortOption)
+    const sortBy = sort?.sortBy ?? 'updatedAt'
+    const direction = sort?.sortDirection === 'asc' ? 1 : -1
+
+    summaries.value = [...summaries.value].sort((left, right) => {
+      let comparison = 0
+      if (sortBy === 'title') {
+        comparison = left.title.localeCompare(right.title, 'ja')
+      } else if (sortBy === 'createdAt') {
+        comparison = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+      } else {
+        comparison = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()
+      }
+      return comparison === 0 ? left.id.localeCompare(right.id) : comparison * direction
+    })
+  }
+
   // Actions
-  function createNoteListInput(page: number, tagId: string | null) {
+  function createNoteListInput(page: number, tagId: string | null, todayOnly = false) {
+    const sort = parseNoteSortOption(appStore.sortOption)
     return {
       page,
       pageSize: NOTE_LIST_PAGE_SIZE,
       ...(tagId ? { tagId } : {}),
+      ...(sort ? sort : {}),
+      ...(todayOnly ? { todayOnly: true } : {}),
     } as note.NoteListInput
   }
 
-  async function fetchNotes(excludedIds: string[] = [], tagId: string | null = null) {
+  let currentTodayOnly = false
+
+  async function fetchNotes(
+    excludedIds: string[] = [],
+    tagId: string | null = null,
+    todayOnly?: boolean,
+  ) {
     const isLatestRequest = noteListRequests.begin()
     activeTagId.value = tagId
+    const effectiveTodayOnly = todayOnly ?? appStore.sidebarSection === 'recent'
+    currentTodayOnly = effectiveTodayOnly
     isLoading.value = true
     isLoadingMore.value = false
     error.value = null
@@ -173,7 +204,7 @@ export const useNoteStore = defineStore('notes', () => {
     hasMoreNotes.value = false
     excludedNoteIds = new Set(excludedIds)
     try {
-      const result = await listNotesPage(createNoteListInput(1, tagId))
+      const result = await listNotesPage(createNoteListInput(1, tagId, effectiveTodayOnly))
       if (!isLatestRequest()) return
 
       currentListPage = result.page
@@ -184,7 +215,7 @@ export const useNoteStore = defineStore('notes', () => {
 
       setErrorContext({
         code: 'NOTE_LIST_FAILED',
-        action: { label: '再試行', run: () => fetchNotes(excludedIds, tagId) },
+        action: { label: '再試行', run: () => fetchNotes(excludedIds, tagId, effectiveTodayOnly) },
       })
       error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
     } finally {
@@ -250,6 +281,7 @@ export const useNoteStore = defineStore('notes', () => {
         summaries.value = []
       }
       summaries.value.unshift(toSummary(created))
+      sortSummaries()
       // 新規追加だけで次ページの有無は変わらないため、現在のページング状態を維持する。
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
@@ -275,6 +307,7 @@ export const useNoteStore = defineStore('notes', () => {
     if (idx !== -1) {
       summaries.value[idx] = toSummary(updated)
     }
+    sortSummaries()
     currentListPage = 0
     hasMoreNotes.value = summaries.value.length > 0
   }
@@ -484,7 +517,7 @@ export const useNoteStore = defineStore('notes', () => {
     isLoadingMore.value = true
     error.value = null
     try {
-      const result = await listNotesPage(createNoteListInput(currentListPage + 1, activeTagId.value))
+      const result = await listNotesPage(createNoteListInput(currentListPage + 1, activeTagId.value, currentTodayOnly))
       if (!isLatestRequest()) return
 
       const existingIds = new Set(summaries.value.map((note) => note.id))
@@ -525,6 +558,7 @@ export const useNoteStore = defineStore('notes', () => {
         ...(sourceNote?.notebookId ? { notebookId: sourceNote.notebookId } : {}),
       })
       summaries.value.unshift(toSummary(created))
+      sortSummaries()
       autoTitleNoteId.value = null
       activeNote.value = created
 

@@ -70,6 +70,19 @@ func TestRepositorySearchIndexesMarkdownAndPaginates(t *testing.T) {
 	if titleOnly.Items[0].Note.ID != first.ID || titleOnly.Items[0].MatchScope != note.SearchScopeTitle || titleOnly.Items[0].Snippet != "" {
 		t.Fatalf("title search item = %#v", titleOnly.Items[0])
 	}
+
+	sorted, err := repository.Search(t.Context(), note.SearchInput{
+		Query:         "全文検索",
+		PageSize:      10,
+		SortBy:        note.NoteSortByCreatedAt,
+		SortDirection: note.NoteSortDirectionAsc,
+	})
+	if err != nil {
+		t.Fatalf("sorted search: %v", err)
+	}
+	if sorted.Error != nil || len(sorted.Items) != 2 || sorted.Items[0].Note.ID != second.ID || sorted.Items[1].Note.ID != first.ID {
+		t.Fatalf("sorted search result = %#v", sorted)
+	}
 }
 
 func TestRepositorySearchIndexStateStoresContentMTime(t *testing.T) {
@@ -122,6 +135,8 @@ func TestRepositorySearchValidationAndShortQueryFallback(t *testing.T) {
 		{name: "scope", input: note.SearchInput{Query: "abc", Scope: "body"}, code: note.SearchErrorScopeInvalid},
 		{name: "page", input: note.SearchInput{Query: "abc", Page: -1}, code: note.SearchErrorPageInvalid},
 		{name: "page size", input: note.SearchInput{Query: "abc", PageSize: note.MaxSearchPageSize + 1}, code: note.SearchErrorPageSizeInvalid},
+		{name: "sort field", input: note.SearchInput{Query: "abc", SortBy: "updated_at", SortDirection: note.NoteSortDirectionDesc}, code: note.SearchErrorSortByInvalid},
+		{name: "sort direction", input: note.SearchInput{Query: "abc", SortBy: note.NoteSortByTitle, SortDirection: "desc; DROP TABLE notes"}, code: note.SearchErrorSortDirectionInvalid},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

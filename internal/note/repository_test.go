@@ -111,6 +111,105 @@ func TestRepositoryListPageAppliesDefaultsAndValidatesBounds(t *testing.T) {
 	}
 }
 
+func TestRepositoryListPageSupportsAllowlistedSortAndTodayFilter(t *testing.T) {
+	t.Parallel()
+
+	repository := newRepositoryTest(t)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC()
+
+	for _, record := range []note.Record{
+		{ID: "sort-z", Title: "Zeta", ContentPath: "sort-z.md", Revision: 1, CreatedAt: todayStart.Add(-4 * time.Hour), UpdatedAt: todayStart.Add(3 * time.Hour)},
+		{ID: "sort-a", Title: "Alpha", ContentPath: "sort-a.md", Revision: 1, CreatedAt: todayStart.Add(-3 * time.Hour), UpdatedAt: todayStart.Add(2 * time.Hour)},
+		{ID: "sort-old", Title: "Old", ContentPath: "sort-old.md", Revision: 1, CreatedAt: todayStart.Add(-48 * time.Hour), UpdatedAt: todayStart.Add(-time.Hour)},
+		{ID: "sort-trash", Title: "Trash", ContentPath: "sort-trash.md", IsTrashed: true, Revision: 1, CreatedAt: todayStart.Add(-2 * time.Hour), UpdatedAt: todayStart.Add(time.Hour)},
+		{ID: "sort-future", Title: "Future", ContentPath: "sort-future.md", Revision: 1, CreatedAt: todayStart.Add(24 * time.Hour), UpdatedAt: todayStart.Add(24 * time.Hour)},
+	} {
+		if err := repository.Create(t.Context(), record); err != nil {
+			t.Fatalf("create %s: %v", record.ID, err)
+		}
+	}
+
+	byTitle, err := repository.ListPage(t.Context(), note.NoteListInput{
+		PageSize:      10,
+		SortBy:        note.NoteSortByTitle,
+		SortDirection: note.NoteSortDirectionAsc,
+	})
+	if err != nil {
+		t.Fatalf("list by title: %v", err)
+	}
+	if got := summaryIDs(byTitle.Items); !equalStrings(got, []string{"sort-a", "sort-future", "sort-old", "sort-trash", "sort-z"}) {
+		t.Fatalf("title sort IDs = %#v", got)
+	}
+
+	today, err := repository.ListPage(t.Context(), note.NoteListInput{PageSize: 10, TodayOnly: true})
+	if err != nil {
+		t.Fatalf("list today: %v", err)
+	}
+	if got := summaryIDs(today.Items); !equalStrings(got, []string{"sort-z", "sort-a"}) {
+		t.Fatalf("today IDs = %#v", got)
+	}
+
+	for _, input := range []note.NoteListInput{
+		{SortBy: "updated_at", SortDirection: note.NoteSortDirectionDesc},
+		{SortBy: note.NoteSortByTitle, SortDirection: "desc; DROP TABLE notes"},
+		{SortBy: note.NoteSortByTitle},
+	} {
+		if _, err := repository.ListPage(t.Context(), input); !errors.Is(err, note.ErrValidation) {
+			t.Fatalf("invalid sort input %#v error = %v, want ErrValidation", input, err)
+		}
+	}
+}
+
+func TestRepositoryTodayFilterHandlesTrashRestoreAndPermanentDelete(t *testing.T) {
+	t.Parallel()
+
+	repository := newRepositoryTest(t)
+	record := createRepositoryTestNote(t, repository, "today-lifecycle")
+
+	result, err := repository.ListPage(t.Context(), note.NoteListInput{TodayOnly: true})
+	if err != nil || len(result.Items) != 1 || result.Items[0].ID != record.ID {
+		t.Fatalf("initial today result = %#v, err=%v", result, err)
+	}
+
+	record.IsTrashed = true
+	record.UpdatedAt = time.Now().UTC()
+	if _, err := repository.UpdateCAS(t.Context(), record, record.Revision); err != nil {
+		t.Fatalf("trash note: %v", err)
+	}
+	result, err = repository.ListPage(t.Context(), note.NoteListInput{TodayOnly: true})
+	if err != nil || result.Total != 0 {
+		t.Fatalf("trashed today result = %#v, err=%v", result, err)
+	}
+
+	record.Revision++
+	record.IsTrashed = false
+	record.UpdatedAt = time.Now().UTC()
+	if _, err := repository.UpdateCAS(t.Context(), record, record.Revision); err != nil {
+		t.Fatalf("restore note: %v", err)
+	}
+	result, err = repository.ListPage(t.Context(), note.NoteListInput{TodayOnly: true})
+	if err != nil || result.Total != 1 || result.Items[0].ID != record.ID {
+		t.Fatalf("restored today result = %#v, err=%v", result, err)
+	}
+
+	if err := repository.DeleteCAS(t.Context(), record.ID, record.Revision+1); err != nil {
+		t.Fatalf("permanently delete note: %v", err)
+	}
+	result, err = repository.ListPage(t.Context(), note.NoteListInput{TodayOnly: true})
+	if err != nil || result.Total != 0 {
+		t.Fatalf("deleted today result = %#v, err=%v", result, err)
+	}
+}
+
+func summaryIDs(items []note.Summary) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
 func equalStrings(actual, expected []string) bool {
 	if len(actual) != len(expected) {
 		return false

@@ -7,6 +7,8 @@ import ts from 'typescript'
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'notebookHierarchy.ts')
 const storePath = path.join(rootDir, 'src', 'stores', 'useNotebookStore.ts')
+const treeItemPath = path.join(rootDir, 'src', 'components', 'NotebookTreeItem.vue')
+const sidebarPath = path.join(rootDir, 'src', 'components', 'AppSidebar.vue')
 const outDir = path.join(rootDir, '.tmp', 'notebook-hierarchy-test')
 const outFile = path.join(outDir, 'notebookHierarchy.mjs')
 
@@ -39,6 +41,8 @@ try {
   assert.equal(wouldCreateNotebookCycle(notebooks, 'parent', null), false)
 
   const storeSource = await readFile(storePath, 'utf8')
+  const treeItemSource = await readFile(treeItemPath, 'utf8')
+  const sidebarSource = await readFile(sidebarPath, 'utf8')
   const validationIndex = storeSource.indexOf('wouldCreateNotebookCycle(notebooks.value, id, parentId)')
   const updateIndex = storeSource.indexOf('const updated = await updateNotebook(', validationIndex)
   assert.notEqual(validationIndex, -1)
@@ -47,6 +51,13 @@ try {
   assert.match(storeSource, /NOTEBOOK_LIST_FAILED/)
   assert.match(storeSource, /NOTEBOOK_MOVE_INVALID/)
   assert.match(storeSource, /run: \(\) => fetchNotebooks/)
+  assert.match(storeSource, /draggedNotebookId/)
+  assert.match(treeItemSource, /:draggable="!isEditing"/)
+  assert.match(treeItemSource, /@dragstart="handleDragStart"/)
+  assert.match(treeItemSource, /@drop\.stop\.prevent="handleDrop"/)
+  assert.match(treeItemSource, /wouldCreateNotebookCycle\(notebookStore\.notebooks, draggedId, props\.node\.id\)/)
+  assert.match(sidebarSource, /@drop="handleRootDrop"/)
+  assert.match(sidebarSource, /ルートへ移動/)
 
   console.log('notebook hierarchy tests passed')
 } finally {

@@ -1112,6 +1112,10 @@ body.is-pane-resizing * {
   gap: 2px;
 }
 
+.notebooks-tree.is-dragging {
+  min-height: 42px;
+}
+
 .notebook-tree-item {
   display: flex;
   flex-direction: column;
@@ -1139,6 +1143,25 @@ body.is-pane-resizing * {
 .notebook-row.is-active {
   background: var(--bg-active);
   color: var(--text-active);
+}
+
+.notebook-row.is-dragging {
+  opacity: 0.45;
+}
+
+.notebook-row.is-drop-target {
+  outline: 1px dashed var(--brand-primary);
+  background: var(--bg-hover);
+}
+
+.notebook-root-drop-zone {
+  min-height: 30px;
+  padding: 7px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .notebook-icon {

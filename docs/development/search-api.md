@@ -26,6 +26,8 @@ SearchInput {
   IncludeTrashed bool     // 既定false
   Page           int      // 1からのページ番号
   PageSize       int      // 既定30、最大100
+  SortBy         string   // 省略時は検索種別の既定順。"updatedAt" | "createdAt" | "title"
+  SortDirection  string   // SortBy指定時に必須。"asc" | "desc"
 }
 ```
 
@@ -33,6 +35,7 @@ SearchInput {
 - `Scope="title"` は `notes.title` のparameterized `LIKE` を使用する。
 - `NotebookID` は存在しないIDをゼロ件とし、バリデーションエラーにはしない。
 - `IncludeTrashed=false` でtrashを除外する。検索結果からの誤操作を防ぐため、既定は現行アクティブノートと合わせる。
+- `SortBy` と `SortDirection` は組み合わせて指定する。両方省略時は既定順を使用し、片方だけ、または許可リスト外の値は入力エラーとする。
 
 ### response
 
@@ -72,8 +75,8 @@ SearchError {
 - `Page` の既定値は1、許可範囲は1〜10000。
 - `Total` はフィルター後の総件数を返す。`HasNext` は `Page*PageSize < Total` で判定する。
 - `Total` 用のcount queryとデータqueryは同じ検索条件・trash条件・notebook条件を使用する。
-- `Scope="all"` の並び順はrelevance降順、`updated_at DESC`、`id ASC`の順とする。
-- `Scope="title"` は `updated_at DESC`、`id ASC`の順とする。
+- `SortBy` 未指定時、`Scope="all"` の並び順はrelevance降順、`updated_at DESC`、`id ASC`の順、`Scope="title"` は `updated_at DESC`、`id ASC`の順とする。
+- `SortBy` 指定時は許可された列・方向で並べ、同値は `id ASC` で固定する。検索関連度順は明示的な並び替えを指定した場合に置き換える。
 - 同一スコアで同点の結果の順序を `id` で固定し、ページ間のフラップを防ぐ。
 
 ## 入力バリデーション
@@ -84,6 +87,7 @@ SearchError {
 - NULとUnicodeの制御文字は拒否し、 `SEARCH_QUERY_INVALID` を返す。改行・タブは空白区切りとして許可する。
 - `Scope` は `all` または `title` のみ。それ以外は `SEARCH_SCOPE_INVALID` 。
 - `Page` は1以上、10000以下。`PageSize` は1以上、100以下。不正値は `SEARCH_PAGE_INVALID` または `SEARCH_PAGE_SIZE_INVALID` 。
+- `SortBy` は `updatedAt`、`createdAt`、`title` のみ。`SortDirection` は `asc`、`desc` のみ。組み合わせが不正な場合は `SEARCH_SORT_BY_INVALID` または `SEARCH_SORT_DIRECTION_INVALID`。
 - 文字列をSQLやFTS5の検索式へ連結しない。通常検索はクエリをリテラルのフレーズへエスケープし、複数語はANDで結合する。全てparameter bindingを使用する。
 
 ## エラーコード
@@ -95,6 +99,8 @@ SearchError {
 | `SEARCH_SCOPE_INVALID` | validation | false | scopeが未定義 |
 | `SEARCH_PAGE_INVALID` | validation | false | pageが範囲外 |
 | `SEARCH_PAGE_SIZE_INVALID` | validation | false | pageSizeが範囲外 |
+| `SEARCH_SORT_BY_INVALID` | validation | false | sortByが未定義または単独指定 |
+| `SEARCH_SORT_DIRECTION_INVALID` | validation | false | sortDirectionが未定義または単独指定 |
 | `SEARCH_INDEX_NOT_READY` | state | true | migration・再構築中で検索不可 |
 | `SEARCH_INDEX_INCONSISTENT` | state | true | 索引と正本の不整合を検出 |
 | `SEARCH_INDEX_FAILED` | internal | true | 索引更新・検索の内部失敗 |

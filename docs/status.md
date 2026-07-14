@@ -4,7 +4,7 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤およびタグCRUD・ノート関連付けは完了しています。並び替え、最近開いたメモ、バックリンク、関連メモは未着手です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、並び替え・最近更新した一覧・ノートブック移動は完了しています。バックリンク、関連メモは未着手です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -56,13 +56,16 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - `noteAutoSave.ts`によるautosave coordinator分離とunexpected rejectionの失敗lane処理
 - 本文を含めないoperationログ（note ID、処理段階、エラー分類のみ）
 - 単一タグ遷移、解除・0件表示
+- ノート一覧の許可リスト付き並び替え（更新日時、作成日時、タイトル）
+- 「最近更新した」一覧（ローカル日付の当日00:00〜翌日00:00未満、`updated_at`基準、ゴミ箱除外）
+- ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
 
 ## Phase 2の対象
 
 - 既存検索UIへの実検索処理の接続（完了）
 - タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
 - タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
-- 並び替え、最近開いたメモ、バックリンク、関連メモ
+- バックリンク、関連メモ
 - テーブルコピー
 
 ## Phase 2着手前の設計事項
@@ -72,7 +75,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 検索API、ページング、入力検証、エラー形式は `docs/development/search-api.md` で確定済み
 - タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
 - バックリンクの抽出規則と関連メモの判定基準
-- 検索とタグ遷移の画面状態は実装済み。並び替えとの組み合わせは並び替え実装時に確定する。
+- 検索とタグ遷移の画面状態、および並び替えとの組み合わせは実装済み。
 - DB変更時のmigration、既存データへの影響、rollback方法
 
 ## 継続課題
@@ -99,6 +102,7 @@ npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:notebook-hierarchy
+npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
 npm --prefix frontend run test:operation-logger
 go test ./...

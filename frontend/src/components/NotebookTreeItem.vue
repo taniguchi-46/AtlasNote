@@ -2,8 +2,18 @@
   <div class="notebook-tree-item">
     <div
       class="notebook-row"
-      :class="{ 'is-active': notebookStore.activeNotebookId === node.id }"
+      :class="{
+        'is-active': notebookStore.activeNotebookId === node.id,
+        'is-dragging': notebookStore.draggedNotebookId === node.id,
+        'is-drop-target': isDropTarget,
+      }"
+      :draggable="!isEditing"
       @click="selectNotebook"
+      @dragstart="handleDragStart"
+      @dragend="handleDragEnd"
+      @dragover.stop="handleDragOver"
+      @dragleave.stop="handleDragLeave"
+      @drop.stop.prevent="handleDrop"
     >
       <PopoverRoot v-model:open="isIconPickerOpen">
         <PopoverTrigger as-child>
@@ -98,6 +108,7 @@ import NotebookCreateModal from './NotebookCreateModal.vue'
 import NotebookDeleteModal from './NotebookDeleteModal.vue'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import { resolveNotebookIcon } from '../utils/notebookIcons'
+import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
 
 const props = defineProps<{
   node: NotebookNode
@@ -115,8 +126,55 @@ const isDeleteModalOpen = ref(false)
 const isDeleting = ref(false)
 const deleteError = ref('')
 const isIconPickerOpen = ref(false)
+const isDropTarget = ref(false)
 
 const currentIcon = computed(() => resolveNotebookIcon(props.node.icon))
+const canAcceptDrop = computed(() => {
+  const draggedId = notebookStore.draggedNotebookId
+  return Boolean(
+    draggedId
+      && draggedId !== props.node.id
+      && !wouldCreateNotebookCycle(notebookStore.notebooks, draggedId, props.node.id),
+  )
+})
+
+function handleDragStart(event: DragEvent) {
+  if (isEditing.value) return
+  notebookStore.beginNotebookDrag(props.node.id)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', props.node.id)
+  }
+}
+
+function handleDragEnd() {
+  isDropTarget.value = false
+  notebookStore.endNotebookDrag()
+}
+
+function handleDragOver(event: DragEvent) {
+  if (!canAcceptDrop.value) {
+    isDropTarget.value = false
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+    return
+  }
+  isDropTarget.value = true
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function handleDragLeave() {
+  isDropTarget.value = false
+}
+
+function handleDrop() {
+  isDropTarget.value = false
+  if (!canAcceptDrop.value) return
+  const draggedId = notebookStore.draggedNotebookId
+  if (!draggedId) return
+  void notebookStore.moveNotebook(draggedId, props.node.id)
+  notebookStore.endNotebookDrag()
+}
 
 async function selectIcon(iconName: string) {
   await notebookStore.updateNotebookIcon(props.node.id, iconName)

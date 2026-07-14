@@ -19,6 +19,7 @@ type NotebookErrorContext = {
 export const useNotebookStore = defineStore('notebooks', () => {
 	const notebooks = ref<note.Notebook[]>([])
 	const activeNotebookId = ref<string | null>(null)
+	const draggedNotebookId = ref<string | null>(null)
 	const isLoading = ref(false)
 	const error = ref<string | null>(null)
 	const notificationStore = useNotificationStore()
@@ -43,6 +44,14 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
 	function setErrorContext(context: NotebookErrorContext) {
 		errorContext.value = context
+	}
+
+	function beginNotebookDrag(id: string) {
+		draggedNotebookId.value = id
+	}
+
+	function endNotebookDrag() {
+		draggedNotebookId.value = null
 	}
 
 	const notebookTree = computed(() => {
@@ -213,6 +222,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 	return {
 		notebooks,
 		activeNotebookId,
+		draggedNotebookId,
 		isLoading,
 		error,
 		notebookTree,
@@ -222,5 +232,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		moveNotebook,
 		removeNotebook,
 		updateNotebookIcon,
+		beginNotebookDrag,
+		endNotebookDrag,
 	}
 })

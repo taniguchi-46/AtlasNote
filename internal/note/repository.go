@@ -76,6 +76,10 @@ func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteLis
 	if err != nil {
 		return NoteListResult{}, err
 	}
+	sortSpec, err := normalizeNoteSort(input.SortBy, input.SortDirection)
+	if err != nil {
+		return NoteListResult{}, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
 
 	where, err := noteListWhere(input)
 	if err != nil {
@@ -102,7 +106,7 @@ func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteLis
 		noteQuery = noteQuery.Where(where)
 	}
 	query, args, err := noteQuery.
-		OrderBy("updated_at DESC", "id ASC").
+		OrderBy(fmt.Sprintf("%s %s", sortSpec.Column, sortSpec.Direction), "id ASC").
 		Limit(uint64(pageSize)).
 		Offset(uint64((page - 1) * pageSize)).
 		ToSql()
@@ -131,22 +135,42 @@ func (r *Repository) ListPage(ctx context.Context, input NoteListInput) (NoteLis
 }
 
 func noteListWhere(input NoteListInput) (sq.And, error) {
-	if input.TagID == nil {
+	where := sq.And{}
+	if input.TagID != nil {
+		tagID := strings.TrimSpace(*input.TagID)
+		if tagID == "" {
+			return nil, fmt.Errorf("%w: tag id must not be empty", ErrValidation)
+		}
+
+		// Tag navigation is an active-note view, so trashed notes are excluded at
+		// the same time as the tag relation is applied. The unfiltered list keeps
+		// its existing behavior and lets the UI switch between active and trash.
+		where = append(where,
+			sq.Expr("EXISTS (SELECT 1 FROM note_tags WHERE note_tags.note_id = notes.id AND note_tags.tag_id = ?)", tagID),
+			sq.Eq{"notes.is_trashed": false},
+		)
+	}
+
+	if input.TodayOnly {
+		now := time.Now()
+		todayStart := startOfToday(now)
+		tomorrowStart := todayStart.In(time.Local).AddDate(0, 0, 1).UTC()
+		where = append(where,
+			sq.Eq{"notes.is_trashed": false},
+			sq.GtOrEq{"notes.updated_at": formatTime(todayStart)},
+			sq.Lt{"notes.updated_at": formatTime(tomorrowStart)},
+		)
+	}
+
+	if len(where) == 0 {
 		return nil, nil
 	}
+	return where, nil
+}
 
-	tagID := strings.TrimSpace(*input.TagID)
-	if tagID == "" {
-		return nil, fmt.Errorf("%w: tag id must not be empty", ErrValidation)
-	}
-
-	// Tag navigation is an active-note view, so trashed notes are excluded at
-	// the same time as the tag relation is applied. The unfiltered list keeps
-	// its existing behavior and lets the UI switch between active and trash.
-	return sq.And{
-		sq.Expr("EXISTS (SELECT 1 FROM note_tags WHERE note_tags.note_id = notes.id AND note_tags.tag_id = ?)", tagID),
-		sq.Eq{"notes.is_trashed": false},
-	}, nil
+func startOfToday(now time.Time) time.Time {
+	localNow := now.In(time.Local)
+	return time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, localNow.Location()).UTC()
 }
 
 func scanSummaries(rows *sql.Rows) ([]Summary, error) {

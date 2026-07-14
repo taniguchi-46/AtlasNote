@@ -4,6 +4,7 @@ import type { note } from '../../wailsjs/go/models'
 import { searchNotes } from '../api/search'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
+import { parseNoteSortOption, useAppStore } from './useAppStore'
 
 export type SearchFilters = {
   notebookId: string | null
@@ -35,6 +36,7 @@ export const useSearchStore = defineStore('search', () => {
   const filters = ref<SearchFilters>({ notebookId: null, includeTrashed: false })
   const requestGuard = createLatestRequestGuard()
   const notificationStore = useNotificationStore()
+  const appStore = useAppStore()
 
   const isActive = computed(() => query.value.trim().length > 0)
 
@@ -91,6 +93,7 @@ export const useSearchStore = defineStore('search', () => {
 
     isSearching.value = true
     try {
+      const sort = parseNoteSortOption(appStore.sortOption)
       const result = await searchNotes({
         query: nextQuery,
         scope: 'all',
@@ -98,6 +101,7 @@ export const useSearchStore = defineStore('search', () => {
         includeTrashed: filters.value.includeTrashed,
         page: nextPage,
         pageSize: DEFAULT_PAGE_SIZE,
+        ...(sort ? sort : {}),
       } as note.SearchInput)
       if (!isLatestRequest()) return
 

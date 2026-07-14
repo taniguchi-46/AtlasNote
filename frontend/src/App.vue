@@ -170,7 +170,9 @@ function handleSync() {
 function handleSearch(query: string) {
   noteStore.clearTagFilter()
   void searchStore.search(query, searchFilters.value)
-  if (!query.trim()) void noteStore.fetchNotes([], null)
+  if (!query.trim()) {
+    void noteStore.fetchNotes([], null, appStore.sidebarSection === 'recent')
+  }
 }
 
 async function handleNewNote() {

@@ -51,12 +51,25 @@
           <PlusIcon :size="14" />
         </button>
       </div>
-      <div class="notebooks-tree">
+      <div
+        class="notebooks-tree"
+        :class="{ 'is-dragging': notebookStore.draggedNotebookId }"
+        @dragover="handleRootDragOver"
+        @drop="handleRootDrop"
+      >
         <NotebookTreeItem
           v-for="node in notebookStore.notebookTree"
           :key="node.id"
           :node="node"
         />
+        <div
+          v-if="notebookStore.draggedNotebookId"
+          class="notebook-root-drop-zone"
+          @dragover.stop="handleRootDragOver"
+          @drop.stop.prevent="handleRootDrop"
+        >
+          ルートへ移動
+        </div>
       </div>
     </div>
 
@@ -84,10 +97,11 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { PlusIcon, FileTextIcon, FolderOpenIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon } from '@lucide/vue'
+import { PlusIcon, FileTextIcon, FolderOpenIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon, Clock3Icon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
+import { useSearchStore } from '../stores/useSearchStore'
 import NotebookTreeItem from './NotebookTreeItem.vue'
 import NotebookCreateModal from './NotebookCreateModal.vue'
 import TagManager from './TagManager.vue'
@@ -96,6 +110,7 @@ import type { SidebarSection } from '../stores/useAppStore'
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
+const searchStore = useSearchStore()
 const isRootCreateModalOpen = ref(false)
 const trashContextMenu = ref({
   visible: false,
@@ -120,6 +135,12 @@ const navItems = computed<Array<{
     label: 'すべてのノート',
     icon: FileTextIcon,
     count: noteStore.activeNotes.length,
+  },
+  {
+    section: 'recent',
+    label: '最近更新した',
+    icon: Clock3Icon,
+    count: 0,
   },
   {
     section: 'uncategorized',
@@ -150,7 +171,29 @@ const navItems = computed<Array<{
 function handleNavClick(section: SidebarSection) {
   appStore.setSidebarSection(section)
   notebookStore.activeNotebookId = null
-  void noteStore.fetchNotes([], null)
+  searchStore.clear()
+  void noteStore.fetchNotes([], null, section === 'recent')
+}
+
+function handleRootDragOver(event: DragEvent) {
+  const draggedId = notebookStore.draggedNotebookId
+  if (!draggedId) return
+  const source = notebookStore.notebooks.find(notebook => notebook.id === draggedId)
+  if (!source?.parentId) {
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+    return
+  }
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function handleRootDrop(event: DragEvent) {
+  event.preventDefault()
+  const draggedId = notebookStore.draggedNotebookId
+  if (!draggedId) return
+  const source = notebookStore.notebooks.find(notebook => notebook.id === draggedId)
+  if (source?.parentId) void notebookStore.moveNotebook(draggedId, null)
+  notebookStore.endNotebookDrag()
 }
 
 function showTrashContextMenu(event: MouseEvent, section: SidebarSection) {
