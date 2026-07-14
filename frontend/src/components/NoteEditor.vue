@@ -262,6 +262,15 @@
           <button
             class="format-btn"
             type="button"
+            title="表をコピー"
+            aria-label="表をコピー"
+            @click="copyCurrentTable"
+          >
+            <ClipboardCopyIcon :size="15" />
+          </button>
+          <button
+            class="format-btn"
+            type="button"
             title="下に行を追加"
             @click="addTableRow"
           >
@@ -337,9 +346,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import type { JSONContent } from '@tiptap/core'
 import {
   BoldIcon,
   CheckSquareIcon,
+  ClipboardCopyIcon,
   CodeIcon,
   Columns3Icon,
   FileTextIcon,
@@ -363,7 +374,11 @@ import {
   Trash2Icon,
 } from '@lucide/vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
-import { DOMParser as ProseMirrorDOMParser } from '@tiptap/pm/model'
+import {
+  DOMParser as ProseMirrorDOMParser,
+  DOMSerializer as ProseMirrorDOMSerializer,
+} from '@tiptap/pm/model'
+import type { Selection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
@@ -378,11 +393,17 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { logOperationFailure } from '../utils/operationLogger'
+import {
+  createTableClipboardPayload,
+  createTiptapTableClipboardPayload,
+  writeTableClipboard,
+} from '../utils/tableClipboard'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 
 const CustomTableCell = TableCell.extend({
@@ -395,6 +416,7 @@ const CustomTableHeader = TableHeader.extend({
 
 const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
+const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
@@ -448,6 +470,12 @@ const editor = new Editor({
       lowlight,
     }),
   ],
+  editorProps: {
+    clipboardTextSerializer(_content, view) {
+      const table = findRichTableNode(view.state.selection)
+      return table ? createTiptapTableClipboardPayload(table).plainText : ''
+    },
+  },
   onSelectionUpdate() {
     editorStateVersion.value += 1
   },
@@ -887,6 +915,75 @@ function deleteTable() {
   }
 
   editor.chain().focus().deleteTable().run()
+}
+
+async function copyCurrentTable() {
+  try {
+    const payload = getCurrentTableClipboardPayload()
+    if (!payload) return
+    await writeTableClipboard(payload)
+  } catch (error) {
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.table-copy',
+      errorCategory: getClipboardErrorCategory(error),
+    })
+    notificationStore.notify('表をコピーできませんでした', {
+      kind: 'error',
+      source: 'editor',
+      code: 'TABLE_COPY_FAILED',
+    })
+  }
+}
+
+function getCurrentTableClipboardPayload() {
+  if (editMode.value === 'markdown') {
+    const tableRange = findMarkdownTableRange()
+    if (!tableRange) return null
+    const markdown = localMarkdown.value.slice(tableRange.start, tableRange.end)
+    return createTableClipboardPayload(markdown, parseMarkdownToRichHtml(markdown))
+  }
+
+  const table = findRichTableNode(editor.state.selection)
+  if (!table) return null
+
+  const markdown = createTiptapTableClipboardPayload(table).markdown
+  return createTableClipboardPayload(markdown, serializeRichTableToHtml(table))
+}
+
+function findRichTableNode(selection: Selection): JSONContent | null {
+  const { $from } = selection
+
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth)
+    if (node.type.name === 'table') return node.toJSON()
+  }
+
+  return null
+}
+
+function serializeRichTableToHtml(table: JSONContent) {
+  const node = editor.schema.nodeFromJSON(table)
+  const serializer = ProseMirrorDOMSerializer.fromSchema(editor.schema)
+  const element = serializer.serializeNode(node, { document })
+  return element instanceof HTMLElement ? element.outerHTML : ''
+}
+
+function getClipboardErrorCategory(error: unknown) {
+  const errorName = error instanceof DOMException || error instanceof Error
+    ? error.name
+    : ''
+
+  switch (errorName) {
+    case 'DataError':
+      return 'clipboard-data-error'
+    case 'NotAllowedError':
+      return 'clipboard-not-allowed'
+    case 'NotSupportedError':
+      return 'clipboard-not-supported'
+    default:
+      return 'clipboard-write-failed'
+  }
 }
 
 function handleMarkdownInput() {

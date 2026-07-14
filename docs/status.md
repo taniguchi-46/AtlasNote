@@ -4,7 +4,7 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、並び替え・最近更新した一覧・ノートブック移動は完了しています。バックリンク、関連メモは未着手です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。バックリンク、関連メモは未着手です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -59,6 +59,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - ノート一覧の許可リスト付き並び替え（更新日時、作成日時、タイトル）
 - 「最近更新した」一覧（ローカル日付の当日00:00〜翌日00:00未満、`updated_at`基準、ゴミ箱除外）
 - ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
+- 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
 
 ## Phase 2の対象
 
@@ -66,7 +67,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
 - タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
 - バックリンク、関連メモ
-- テーブルコピー
+- テーブルコピー（完了）
 
 ## Phase 2着手前の設計事項
 
@@ -104,6 +105,7 @@ npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
+npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:operation-logger
 go test ./...
 wails build

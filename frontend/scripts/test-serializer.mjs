@@ -112,6 +112,34 @@ const cases = [
     expected: '| A | B |\n| --- | --- |\n| 1 | 2 |',
   },
   {
+    name: 'table cell escaping and hard breaks',
+    input: doc(table([
+      tableRow([tableHeader('A'), tableHeader('B')]),
+      tableRow([
+        tableCell('literal | * _ [ ] ~ ` \\'),
+        tableCellContent([
+          paragraph([
+            text('bold | *', [{ type: 'bold' }]),
+            { type: 'hardBreak' },
+            text('next'),
+          ]),
+        ]),
+      ]),
+    ])),
+    expected: '| A | B |\n| --- | --- |\n| literal \\| \\* \\_ \\[ \\] \\~ \\` \\\\ | **bold \\| \\***&#10;next |',
+  },
+  {
+    name: 'table pipe in plain and code text',
+    input: doc(table([
+      tableRow([tableHeader('A'), tableHeader('B')]),
+      tableRow([
+        tableCell('literal\\|pipe'),
+        tableCellContent([paragraph([text('code | pipe', [{ type: 'code' }])])]),
+      ]),
+    ])),
+    expected: '| A | B |\n| --- | --- |\n| literal\\\\|pipe | `code \\| pipe` |',
+  },
+  {
     name: 'image',
     input: doc({ type: 'image', attrs: { src: 'note-assets/a.png', alt: 'a]b' } }),
     expected: '![a\\]b](note-assets/a.png)',
@@ -193,4 +221,8 @@ function tableHeader(value) {
 
 function tableCell(value) {
   return { type: 'tableCell', content: [paragraph([text(value)])] }
+}
+
+function tableCellContent(content) {
+  return { type: 'tableCell', content }
 }

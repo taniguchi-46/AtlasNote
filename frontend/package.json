@@ -19,6 +19,7 @@
     "test:notebook-hierarchy": "node scripts/test-notebook-hierarchy.mjs",
     "test:note-list-view": "node scripts/test-note-list-view.mjs",
     "test:serializer": "node scripts/test-serializer.mjs",
+    "test:table-copy": "node scripts/test-table-copy.mjs",
     "test:markdown-safety": "node scripts/test-markdown-safety.mjs",
     "preview": "vite preview"
   },

@@ -145,6 +145,7 @@ npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
+npm --prefix frontend run test:table-copy
 wails build
 ```
 
