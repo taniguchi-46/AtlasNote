@@ -46,7 +46,7 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
-| WebDAV Sync | 将来の同期処理。競合解決方針は未確定 |
+| WebDAV Sync | `docs/development/webdav-sync.md` の確定設計に従う将来の同期処理。実装前 |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援 |
 
 ## データ / 状態管理
@@ -57,6 +57,7 @@ Go Backend
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
+- 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
 
 ### SQLite / Markdown の整合性
 
@@ -104,7 +105,7 @@ Go Backend
 
 | 連携 | 方針 |
 | --- | --- |
-| WebDAV | ローカルデータの同期に使う予定。認証方式と競合解決は未確定 |
+| WebDAV | ローカルデータの同期に使う予定。`head`/manifest/object配置、HTTPS/Basic認証、outbox、競合解決は `docs/development/webdav-sync.md` の確定設計で管理する |
 | AI API | ユーザー自身の API Key を利用する。保存方式、対応プロバイダ、モデル選択は未確定 |
 | OS Keychain | API Key 保存先の候補。採用可否は未確定 |
 

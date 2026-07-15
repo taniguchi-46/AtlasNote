@@ -6,6 +6,8 @@
 
 MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、ノートリンク・バックリンク、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。関連メモはPhase 4へ完全移管しています。
 
+Phase 3「同期」は、WebDAV同期設計のレビューと未確定事項の決定まで完了し、実装前の状態です。WebDAV通信、同期用migration、認証情報の保存処理は未実装です。
+
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
 ## 実装済み
@@ -90,7 +92,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
-- Phase 3のWebDAV同期設計（認証、durable outbox、同期競合解決）は `docs/todo/todo-phese3.md` で管理する。
+- Phase 3のWebDAV同期実装（認証、manifest方式のdurable outbox、同期競合解決）は確定済みの `docs/development/webdav-sync.md` を正とし、実装TODOを `docs/todo/todo-phese3.md` で管理する。
 - API Keyの保存方式と暗号化方針
 - AIプロバイダー、モデル選択、課金表示
 
@@ -124,6 +126,7 @@ wails build
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
+| `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
