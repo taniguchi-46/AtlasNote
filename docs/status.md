@@ -4,7 +4,7 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、ノートリンク・バックリンク、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。関連メモは未着手です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、ノートリンク・バックリンク、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。関連メモはPhase 4へ完全移管しています。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -68,7 +68,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 既存検索UIへの実検索処理の接続（完了）
 - タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
 - タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
-- ノートリンク・バックリンク（完了）、関連メモ
+- ノートリンク・バックリンク（完了）
 - テーブルコピー（完了）
 
 ## Phase 2着手前の設計事項
@@ -77,7 +77,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
 - 検索API、ページング、入力検証、エラー形式は `docs/development/search-api.md` で確定済み
 - タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
-- ノートリンク・バックリンクの記法、抽出規則、更新境界は設計・実装済み。関連メモの判定基準は未確定
+- ノートリンク・バックリンクの記法、抽出規則、更新境界は設計・実装済み。関連メモはPhase 4の対象として移管済み。
 - 検索とタグ遷移の画面状態、および並び替えとの組み合わせは実装済み。
 - DB変更時のmigration、既存データへの影響、rollback方法
 
@@ -90,7 +90,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
-- WebDAV同期時の競合解決
+- Phase 3のWebDAV同期設計（認証、durable outbox、同期競合解決）は `docs/todo/todo-phese3.md` で管理する。
 - API Keyの保存方式と暗号化方針
 - AIプロバイダー、モデル選択、課金表示
 
@@ -124,6 +124,7 @@ wails build
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
+| `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |

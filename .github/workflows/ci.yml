@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev-MVP
+      - dev-Phase2
   pull_request:
   workflow_dispatch:
 
@@ -70,3 +71,30 @@ jobs:
 
       - name: Run notebook hierarchy tests
         run: npm --prefix frontend run test:notebook-hierarchy
+
+      - name: Run note operation queue tests
+        run: npm --prefix frontend run test:note-operation-queue
+
+      - name: Run note batch tests
+        run: npm --prefix frontend run test:note-batch
+
+      - name: Run notification store tests
+        run: npm --prefix frontend run test:notifications
+
+      - name: Run tag store tests
+        run: npm --prefix frontend run test:tags
+
+      - name: Run operation logger tests
+        run: npm --prefix frontend run test:operation-logger
+
+      - name: Run note link tests
+        run: npm --prefix frontend run test:note-links
+
+      - name: Run note list view tests
+        run: npm --prefix frontend run test:note-list-view
+
+      - name: Run table copy tests
+        run: npm --prefix frontend run test:table-copy
+
+      - name: Run markdown safety tests
+        run: npm --prefix frontend run test:markdown-safety
