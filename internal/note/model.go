@@ -47,6 +47,27 @@ type NoteListResult struct {
 	HasNext  bool      `json:"hasNext"`
 }
 
+const (
+	DefaultBacklinkPage     = 1
+	DefaultBacklinkPageSize = 20
+	MaxBacklinkPage         = 10000
+	MaxBacklinkPageSize     = 100
+)
+
+type BacklinkListInput struct {
+	NoteID   string `json:"noteId"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+}
+
+type BacklinkListResult struct {
+	Items    []Summary `json:"items"`
+	Page     int       `json:"page"`
+	PageSize int       `json:"pageSize"`
+	Total    int       `json:"total"`
+	HasNext  bool      `json:"hasNext"`
+}
+
 type Note struct {
 	ID         string    `json:"id"`
 	NotebookID *string   `json:"notebookId"`
@@ -228,6 +249,23 @@ type Record struct {
 	Revision    int64
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type NoteLinkDocument struct {
+	SourceNoteID  string
+	TargetNoteIDs []string
+	Revision      int64
+	ContentHash   string
+	ContentMTime  time.Time
+	IndexedAt     time.Time
+}
+
+type NoteLinkIndexState struct {
+	NoteID           string
+	IndexedRevision  int64
+	ContentHash      string
+	ContentMTimeUnix int64
+	IndexedAt        time.Time
 }
 
 const (

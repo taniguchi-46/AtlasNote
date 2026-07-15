@@ -314,6 +314,66 @@ VALUES (
 	}
 }
 
+func TestOpenMigratesVersionSixDatabaseWithEmptyNoteLinkIndex(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:6] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 6"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version six: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO notes (
+	id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
+)
+VALUES (
+	'existing-note', 'Existing note', 'existing-note.md', 0, 0, 0, 3,
+	'2026-07-10T00:00:00Z', '2026-07-10T01:00:00Z'
+)
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy note: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	for _, table := range []string{"note_links", "note_link_state"} {
+		var count int
+		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+			t.Fatalf("count migrated %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("migrated %s count = %d, want 0", table, count)
+		}
+	}
+
+	var title string
+	var revision int64
+	if err := db.QueryRowContext(t.Context(), "SELECT title, revision FROM notes WHERE id = 'existing-note'").Scan(&title, &revision); err != nil {
+		t.Fatalf("read migrated note: %v", err)
+	}
+	if title != "Existing note" || revision != 3 {
+		t.Fatalf("migrated note changed: title=%q revision=%d", title, revision)
+	}
+}
+
 func TestTagForeignKeysCascadeRelations(t *testing.T) {
 	t.Parallel()
 

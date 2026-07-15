@@ -154,8 +154,29 @@ CREATE TABLE IF NOT EXISTS note_tags (
 	FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
-	ON note_tags(tag_id, note_id);
+	CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
+		ON note_tags(tag_id, note_id);
+	`,
+	`
+CREATE TABLE IF NOT EXISTS note_links (
+	source_note_id TEXT NOT NULL,
+	target_note_id TEXT NOT NULL,
+	PRIMARY KEY (source_note_id, target_note_id),
+	FOREIGN KEY(source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_links_target_source
+	ON note_links(target_note_id, source_note_id);
+
+CREATE TABLE IF NOT EXISTS note_link_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
 	`,
 }
 
@@ -312,6 +333,26 @@ CREATE TABLE IF NOT EXISTS note_tags (
 
 CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
 	ON note_tags(tag_id, note_id);
+
+CREATE TABLE IF NOT EXISTS note_links (
+	source_note_id TEXT NOT NULL,
+	target_note_id TEXT NOT NULL,
+	PRIMARY KEY (source_note_id, target_note_id),
+	FOREIGN KEY(source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_links_target_source
+	ON note_links(target_note_id, source_note_id);
+
+CREATE TABLE IF NOT EXISTS note_link_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
 `); err != nil {
 		return fmt.Errorf("ensure indexes: %w", err)
 	}

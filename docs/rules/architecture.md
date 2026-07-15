@@ -91,6 +91,15 @@ Go Backend
 - タグ操作はMarkdown、`notes.updated_at`、`notes.revision`、FTS5索引、保存操作ジャーナルを変更しない。ゴミ箱内ノートのタグは保持し、UIからの変更だけを無効化する。
 - タグの確定仕様、migration、rollback、構造化エラーは `docs/development/tag-design.md` を正とする。タグクリックは単一タグの通常一覧へ遷移し、ノートブック選択および全文検索条件とは同時に保持しない。
 
+### ノートリンク・バックリンク
+
+- ノートリンクは標準Markdownリンクの `atlasnote://note/<32桁小文字hex ID>` を使う。ノートIDをリンク先の正本とし、タイトル変更ではMarkdownのリンクラベルを書き換えない。
+- Markdown本文は正本のまま保持し、`note_links`（source / targetの複合主キー）と`note_link_state`（revision・本文hash・mtime）をSQLiteの再構築可能な派生索引として管理する。存在しないリンク先は本文に残すが、索引には登録しない。
+- 抽出はコードフェンス、インラインコード、エスケープされたリンク、画像、外部URLを除外し、同一ノートへの重複リンクを1件にまとめる。自己リンク・循環リンクは許可する。
+- ノート保存・起動復旧で索引を更新し、索引更新失敗はMarkdown保存をrollbackせず、バックリンク取得をエラーとして通知する。復旧処理で再構築できるようにする。
+- バックリンクは対象ノートへの逆引きで、ゴミ箱のsourceノートを除外してページングする。ゴミ箱化・復元では関係を保持し、完全削除では外部キーのCASCADEで関係を削除する。
+- リンクの抽出規則、migration、API、Store、UIの確定仕様は実装とテスト（`internal/note/link_*_test.go`、`frontend/scripts/test-note-links.mjs`）を正とする。
+
 ## 外部連携
 
 | 連携 | 方針 |

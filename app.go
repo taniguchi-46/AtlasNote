@@ -132,6 +132,13 @@ func (a *App) SearchNotes(input note.SearchInput) (note.SearchResult, error) {
 	return a.notes.Search(a.ctx, input)
 }
 
+func (a *App) ListBacklinks(input note.BacklinkListInput) (note.BacklinkListResult, error) {
+	if a.notes == nil {
+		return note.BacklinkListResult{Items: make([]note.Summary, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.ListBacklinks(a.ctx, input)
+}
+
 func (a *App) GetNote(id string) (note.Note, error) {
 	if a.notes == nil {
 		return note.Note{}, errors.New("note service is not initialized")

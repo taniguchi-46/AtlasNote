@@ -1,10 +1,10 @@
 # プロジェクト状況
 
-最終更新: 2026-07-14
+最終更新: 2026-07-15
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。バックリンク、関連メモは未着手です。
+MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、ノートリンク・バックリンク、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。関連メモは未着手です。
 
 Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
 
@@ -27,8 +27,10 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
 - schema version 5の検索状態`content_mtime_ns` migrationと既存行の初回hash再照合
 - schema version 6の`tags` / `note_tags` migration、Unicode正規化・case-foldによる同名防止、外部キーCASCADE
+- schema version 7の`note_links` / `note_link_state` migration、target/source逆引きINDEX、外部キーCASCADE
 - タグのRepository / Service / Wails API、構造化タグエラー、フロントAPI / Pinia Store
 - ノート編集画面のタグ付与・解除、タグ候補検索・作成、サイドバーでのタグ一覧表示・改名・削除
+- ノートリンクのMarkdown記法・抽出、SQLiteリンク索引、バックリンクAPI・Store・UI
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
 - ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
@@ -66,7 +68,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 既存検索UIへの実検索処理の接続（完了）
 - タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
 - タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
-- バックリンク、関連メモ
+- ノートリンク・バックリンク（完了）、関連メモ
 - テーブルコピー（完了）
 
 ## Phase 2着手前の設計事項
@@ -75,7 +77,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
 - 検索API、ページング、入力検証、エラー形式は `docs/development/search-api.md` で確定済み
 - タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
-- バックリンクの抽出規則と関連メモの判定基準
+- ノートリンク・バックリンクの記法、抽出規則、更新境界は設計・実装済み。関連メモの判定基準は未確定
 - 検索とタグ遷移の画面状態、および並び替えとの組み合わせは実装済み。
 - DB変更時のmigration、既存データへの影響、rollback方法
 
@@ -107,6 +109,7 @@ npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
 npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:operation-logger
+npm --prefix frontend run test:note-links
 go test ./...
 wails build
 ```

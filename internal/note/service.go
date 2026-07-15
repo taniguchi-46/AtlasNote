@@ -26,10 +26,11 @@ var (
 )
 
 type Service struct {
-	repository        *Repository
-	store             markdownStore
-	mu                sync.Mutex
-	searchIndexFailed bool
+	repository          *Repository
+	store               markdownStore
+	mu                  sync.Mutex
+	searchIndexFailed   bool
+	noteLinkIndexFailed bool
 }
 
 type markdownStore interface {
@@ -87,6 +88,36 @@ func (s *Service) refreshSearchIndexStateLocked(ctx context.Context, record Reco
 		storage.HashContent(content),
 	); err != nil {
 		s.searchIndexFailed = true
+	}
+}
+
+func (s *Service) updateNoteLinkIndexLocked(ctx context.Context, record Record, content string) {
+	contentMTime, _ := s.store.ModTime(ctx, record.ID)
+	if err := s.repository.ReplaceNoteLinks(ctx, NoteLinkDocument{
+		SourceNoteID:  record.ID,
+		TargetNoteIDs: ExtractNoteLinkTargets(content),
+		Revision:      record.Revision,
+		ContentHash:   storage.HashContent(content),
+		ContentMTime:  contentMTime,
+	}); err != nil {
+		s.noteLinkIndexFailed = true
+	}
+}
+
+func (s *Service) deleteNoteLinkIndexLocked(ctx context.Context, noteID string) {
+	if err := s.repository.DeleteNoteLinkIndex(ctx, noteID); err != nil {
+		s.noteLinkIndexFailed = true
+	}
+}
+
+func (s *Service) refreshNoteLinkIndexStateLocked(ctx context.Context, record Record, content string) {
+	if err := s.repository.RefreshNoteLinkIndexState(
+		ctx,
+		record.ID,
+		record.Revision,
+		storage.HashContent(content),
+	); err != nil {
+		s.noteLinkIndexFailed = true
 	}
 }
 
@@ -163,6 +194,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	}
 	// Search索引は派生データのため、更新に失敗してもMarkdownとNote recordはrollbackしない。
 	s.updateSearchIndexLocked(ctx, record, content)
+	s.updateNoteLinkIndexLocked(ctx, record, content)
 	// 4. 保存完了の印として StorageOperation レコードを削除する
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
@@ -219,6 +251,22 @@ func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, 
 		Retryable: true,
 	}
 	return result, nil
+}
+
+func (s *Service) ListBacklinks(ctx context.Context, input BacklinkListInput) (BacklinkListResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return BacklinkListResult{Items: make([]Summary, 0)}, err
+	}
+	if s.noteLinkIndexFailed {
+		return BacklinkListResult{Items: make([]Summary, 0)}, ErrBacklinkIndexFailed
+	}
+	if _, err := s.repository.Get(ctx, input.NoteID); err != nil {
+		return BacklinkListResult{Items: make([]Summary, 0)}, err
+	}
+	return s.repository.ListBacklinks(ctx, input)
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Note, error) {
@@ -339,6 +387,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			return Note{}, fmt.Errorf("commit markdown update: %w; rollback note record: %v", err, rollbackErr)
 		}
 		s.updateSearchIndexLocked(ctx, record, content)
+		s.updateNoteLinkIndexLocked(ctx, record, content)
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 	} else {
 		nextRevision, err := s.repository.UpdateCAS(ctx, record, expectedRevision)
@@ -351,6 +400,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		} else {
 			s.refreshSearchIndexStateLocked(ctx, record, content)
 		}
+		s.refreshNoteLinkIndexStateLocked(ctx, record, content)
 	}
 
 	return Note{
@@ -418,6 +468,7 @@ func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) erro
 		return fmt.Errorf("commit markdown delete: %w", err)
 	}
 	s.deleteSearchIndexLocked(ctx, record.ID)
+	s.deleteNoteLinkIndexLocked(ctx, record.ID)
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
 	return nil
@@ -462,6 +513,7 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 	stateFound := make(map[string]bool, len(records))
 	missingIDs := make([]string, 0)
 	canReuseIndex := true
+	canReuseLinkIndex := true
 	for _, record := range records {
 		contentPath, err := s.store.ContentPath(record.ID)
 		if err != nil {
@@ -490,24 +542,38 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		if !found || state.IndexedRevision != record.Revision || state.ContentMTimeUnix != managedFile.ModTime.UnixNano() {
 			canReuseIndex = false
 		}
+		linkState, linkFound, linkStateErr := s.repository.GetNoteLinkIndexState(ctx, record.ID)
+		if linkStateErr != nil {
+			return RecoveryReport{}, linkStateErr
+		}
+		if !linkFound || linkState.IndexedRevision != record.Revision || linkState.ContentMTimeUnix != managedFile.ModTime.UnixNano() {
+			canReuseLinkIndex = false
+		}
 	}
 
 	if err := s.store.QuarantineOrphans(ctx, expected); err != nil {
 		return RecoveryReport{}, err
 	}
-	if canReuseIndex {
+	if canReuseIndex && canReuseLinkIndex {
 		indexBuildFailed := false
+		linkIndexBuildFailed := false
 		for _, id := range missingIDs {
 			if err := s.repository.DeleteSearchIndex(ctx, id); err != nil {
 				indexBuildFailed = true
 			}
+			if err := s.repository.DeleteNoteLinkIndex(ctx, id); err != nil {
+				linkIndexBuildFailed = true
+			}
 		}
 		s.searchIndexFailed = indexBuildFailed
+		s.noteLinkIndexFailed = linkIndexBuildFailed
 		return report, nil
 	}
 
 	documents := make([]SearchDocument, 0, len(records))
+	linkDocuments := make([]NoteLinkDocument, 0, len(records))
 	indexBuildFailed := false
+	linkIndexBuildFailed := false
 	for _, record := range records {
 		contentPath, err := s.store.ContentPath(record.ID)
 		if err != nil {
@@ -523,6 +589,7 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		content, readErr := s.store.Read(ctx, record.ID)
 		if readErr != nil {
 			indexBuildFailed = true
+			linkIndexBuildFailed = true
 			continue
 		}
 		contentHash := storage.HashContent(content)
@@ -549,13 +616,24 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 			ContentHash:  contentHash,
 			ContentMTime: managedFile.ModTime,
 		})
+		linkDocuments = append(linkDocuments, NoteLinkDocument{
+			SourceNoteID:  record.ID,
+			TargetNoteIDs: ExtractNoteLinkTargets(content),
+			Revision:      record.Revision,
+			ContentHash:   contentHash,
+			ContentMTime:  managedFile.ModTime,
+		})
 		expected[contentPath] = struct{}{}
 	}
 
 	if err := s.repository.ReplaceSearchIndex(ctx, documents); err != nil {
 		indexBuildFailed = true
 	}
+	if err := s.repository.ReplaceNoteLinkIndex(ctx, linkDocuments); err != nil {
+		linkIndexBuildFailed = true
+	}
 	s.searchIndexFailed = indexBuildFailed
+	s.noteLinkIndexFailed = linkIndexBuildFailed
 	return report, nil
 }
 
@@ -592,6 +670,7 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 		return err
 	}
 	s.deleteSearchIndexLocked(ctx, record.ID)
+	s.deleteNoteLinkIndexLocked(ctx, record.ID)
 	return nil
 }
 
@@ -655,8 +734,10 @@ func (s *Service) recoverUpsertLocked(ctx context.Context, operation StorageOper
 	content, readErr := s.store.Read(ctx, operation.NoteID)
 	if readErr != nil {
 		s.searchIndexFailed = true
+		s.noteLinkIndexFailed = true
 	} else {
 		s.updateSearchIndexLocked(ctx, record, content)
+		s.updateNoteLinkIndexLocked(ctx, record, content)
 	}
 
 	return s.repository.CompleteStorageOperation(ctx, operation.ID)
@@ -701,6 +782,7 @@ func (s *Service) recoverDeleteLocked(ctx context.Context, operation StorageOper
 	}
 
 	s.deleteSearchIndexLocked(ctx, operation.NoteID)
+	s.deleteNoteLinkIndexLocked(ctx, operation.NoteID)
 	return s.repository.CompleteStorageOperation(ctx, operation.ID)
 }
 

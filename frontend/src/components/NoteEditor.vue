@@ -246,6 +246,14 @@
           <TerminalIcon :size="15" />
         </button>
 
+        <NoteLinkPopover
+          v-if="noteStore.activeNote"
+          :note-id="noteStore.activeNote.id"
+          :disabled="noteStore.activeNote.isTrashed"
+          @opened="rememberRichSelection"
+          @select="insertNoteLink"
+        />
+
         <span class="format-divider" />
 
         <button
@@ -319,8 +327,9 @@
           v-model="localMarkdown"
           class="markdown-textarea"
           placeholder="ここにMarkdownで内容を入力してください..."
+          title="Ctrl / Cmd + クリックでノートリンクを開く"
           @input="handleMarkdownInput"
-          @click="updateMarkdownSelection"
+          @click="handleMarkdownClick"
           @keyup="updateMarkdownSelection"
           @select="updateMarkdownSelection"
         />
@@ -336,6 +345,7 @@
             :note-id="noteStore.activeNote.id"
             :disabled="noteStore.activeNote.isTrashed"
           />
+          <NoteBacklinks :note-id="noteStore.activeNote.id" />
           <span>{{ charCount }} 文字</span>
         </div>
         <span>更新: {{ formatDate(noteStore.activeNote.updatedAt) }}</span>
@@ -397,6 +407,8 @@ import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
+import NoteLinkPopover from './NoteLinkPopover.vue'
+import NoteBacklinks from './NoteBacklinks.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { logOperationFailure } from '../utils/operationLogger'
 import {
@@ -405,6 +417,12 @@ import {
   writeTableClipboard,
 } from '../utils/tableClipboard'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
+import {
+  createNoteLinkHref,
+  createNoteLinkMarkdown,
+  findNoteLinkTargetAt,
+  parseNoteLinkHref,
+} from '../utils/noteLink'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -439,6 +457,7 @@ const markdownSelectionVersion = ref(0)
 let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
+let savedRichSelection: { from: number; to: number } | null = null
 
 const editor = new Editor({
   extensions: [
@@ -454,6 +473,14 @@ const editor = new Editor({
     }),
     Link.configure({
       openOnClick: false,
+      protocols: ['atlasnote'],
+      isAllowedUri: (url, context) => {
+        if (url.startsWith('atlasnote:')) {
+          return parseNoteLinkHref(url) !== null
+        }
+
+        return context.defaultValidate(url)
+      },
     }),
     Image,
     Table.configure({
@@ -474,6 +501,17 @@ const editor = new Editor({
     clipboardTextSerializer(_content, view) {
       const table = findRichTableNode(view.state.selection)
       return table ? createTiptapTableClipboardPayload(table).plainText : ''
+    },
+    handleClick(_view, _pos, event) {
+      const target = event.target
+      if (!(target instanceof Element)) return false
+
+      const href = target.closest('a')?.getAttribute('href') ?? ''
+      const noteId = parseNoteLinkHref(href)
+      if (!noteId) return false
+
+      void noteStore.selectNote(noteId)
+      return true
     },
   },
   onSelectionUpdate() {
@@ -501,6 +539,7 @@ watch(
   (note) => {
     if (!note) {
       activeNoteId = null
+      savedRichSelection = null
       return
     }
 
@@ -514,6 +553,7 @@ watch(
         : note.title)
 
     if (noteChanged) {
+      savedRichSelection = null
       resetSaveFeedback()
       localMarkdown.value = editableContent
       isRichDirty.value = false
@@ -859,6 +899,52 @@ function toggleCodeBlock() {
   toggleMarkdownCodeBlock()
 }
 
+function rememberRichSelection() {
+  if (editMode.value !== 'wysiwyg') return
+
+  const { from, to } = editor.state.selection
+  savedRichSelection = { from, to }
+}
+
+function insertNoteLink(target: { id: string; title: string }) {
+  const href = createNoteLinkHref(target.id)
+
+  if (editMode.value === 'markdown') {
+    const selection = getMarkdownSelection()
+    if (!selection) return
+
+    const markdown = createNoteLinkMarkdown(target.title, target.id)
+    replaceMarkdownRange(
+      selection.start,
+      selection.end,
+      markdown,
+      selection.start + markdown.length,
+      selection.start + markdown.length,
+    )
+    return
+  }
+
+  const selection = savedRichSelection ?? {
+    from: editor.state.selection.from,
+    to: editor.state.selection.to,
+  }
+  savedRichSelection = null
+
+  const chain = editor.chain().focus().setTextSelection(selection)
+  if (selection.from === selection.to) {
+    chain
+      .insertContent({
+        type: 'text',
+        text: target.title,
+        marks: [{ type: 'link', attrs: { href } }],
+      })
+      .run()
+    return
+  }
+
+  chain.setLink({ href }).run()
+}
+
 function insertTable() {
   if (editMode.value === 'markdown') {
     insertMarkdownTable()
@@ -990,6 +1076,20 @@ function handleMarkdownInput() {
   updateMarkdownSelection()
   updateAutoTitleFromMarkdown(localMarkdown.value)
   scheduleAutoSave(localMarkdown.value)
+}
+
+function handleMarkdownClick(event: MouseEvent) {
+  updateMarkdownSelection()
+  if (!event.ctrlKey && !event.metaKey) return
+
+  const textarea = markdownTextarea.value
+  if (!textarea) return
+
+  const noteID = findNoteLinkTargetAt(localMarkdown.value, textarea.selectionStart)
+  if (!noteID) return
+
+  event.preventDefault()
+  void noteStore.selectNote(noteID)
 }
 
 function updateAutoTitleFromMarkdown(markdown: string) {
