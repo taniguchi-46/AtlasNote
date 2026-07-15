@@ -21,13 +21,14 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 このプロジェクトでは、AI Agent 向けの共通ドキュメントと設定を以下に整理しています。
 
+- `docs/README.md`: ドキュメント全体の入口と正本の役割。
 - `docs/rules/`: Agent 共通で参照するプロジェクト知識、設計、規約。
 - `docs/status.md`: 現在の作業状況。
-- `docs/development/scopes/scope.md`: Phase 2 を含む開発ロードマップと機能要件。
+- `docs/development/scopes/scope.md`: Phase ごとの開発ロードマップと機能要件。
 - `.agents/`: Agent 固有の行動指針とスキル (`.agents/AGENTS.md` など)。
 - `.codex/`: テンプレート類。
 
-作業前に `docs/status.md`、`docs/development/scopes/scope.md`、`docs/rules/ai.md` を確認してください。
+作業前に `docs/README.md`、`docs/status.md`、`docs/development/scopes/scope.md`、`docs/rules/ai.md` を確認してください。
 
 ---
 
@@ -51,6 +52,7 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 
 ## 開発環境セットアップとガイド
 
+- [ドキュメント入口](docs/README.md)
 - 初めて開発に参加する方向けの全体像・解説: [初心者向け開発ガイド](docs/development/beginner-guide.md)
 - 詳細な開発環境のセットアップと起動方法: [開発環境セットアップ](docs/development/setup.md)
 

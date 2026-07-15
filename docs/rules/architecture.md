@@ -46,7 +46,7 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
-| WebDAV Sync | `docs/development/webdav-sync.md` の確定設計に従う将来の同期処理。実装前 |
+| WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3確定設計に従う同期処理。実装前 |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援 |
 
 ## データ / 状態管理
@@ -71,7 +71,7 @@ Go Backend
 - 同一プロセス内のノート・ノートブック操作は Service で直列化し、重複する自動保存による世代ずれを防ぐ。
 - アプリ起動時はSQLiteやMarkdownへアクセスする前に、データディレクトリ直下の `atlasnote.lock` をOSレベルで排他取得する。同じデータディレクトリを使用する2つ目のプロセスはwriterとして初期化しない。
 - ロックはアプリ終了時にSQLite接続を閉じてから解放する。ロックファイルの存在自体ではなくOSロックの取得結果で判定し、異常終了後にファイルが残っても次回起動を妨げない。
-- クラウド同期・履歴・AIストリーミングを開始する前に、単一writer保証とは別に整数 `revision` と `expectedRevision` によるCASを追加する。
+- 単一writer保証とは別に、整数 `revision` と `expectedRevision` による同一端末内のCASを管理する。端末間の比較には同期用のhead、manifest、object、baseを使用する。
 - revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/note-concurrency.md` を正とする。
 - ローカル保存キューと将来の同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 
@@ -105,7 +105,7 @@ Go Backend
 
 | 連携 | 方針 |
 | --- | --- |
-| WebDAV | ローカルデータの同期に使う予定。`head`/manifest/object配置、HTTPS/Basic認証、outbox、競合解決は `docs/development/webdav-sync.md` の確定設計で管理する |
+| WebDAV | Phase 3で採用する同期方式。設計は確定済み・実装前で、`head`/manifest/object配置、HTTPS/Basic認証、outbox、競合解決は `docs/development/webdav-sync.md` を正とする |
 | AI API | ユーザー自身の API Key を利用する。保存方式、対応プロバイダ、モデル選択は未確定 |
 | OS Keychain | API Key 保存先の候補。採用可否は未確定 |
 

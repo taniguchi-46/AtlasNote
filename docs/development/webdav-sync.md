@@ -6,6 +6,8 @@
 
 Phase 3の設計レビュー済み・実装前です。本書の同期対象、リモート形式、認証、outbox、競合、自動同期の契約を確定しました。WebDAV通信、同期用migration、認証情報の保存処理はまだ実装しません。
 
+本書はPhase 3同期契約の正本です。実装順序は [`implementation-plan.md`](implementation-plan.md)、進捗は [`todo-phese3.md`](../todo/todo-phese3.md) を参照します。
+
 ## 1. 目的と前提
 
 Phase 3では、複数端末のAtlas Note間でノートと管理情報をWebDAV経由で同期する。ローカルファーストを維持し、WebDAVが利用できない場合もローカルの作成・編集・検索を継続できることを前提とする。

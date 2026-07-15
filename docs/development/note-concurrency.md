@@ -15,9 +15,9 @@
 | 永続revision | SQLiteに保存するノート単位のCASトークン | SQLite |
 | draft version | フロントエンドで入力snapshotの新旧を判定する世代番号 | メモリのみ |
 | operation ID | SQLite / Markdown操作ジャーナルとログを関連付ける識別子 | 操作完了までSQLite |
-| sync version | WebDAVのETag、同期元hash、last-synced baseなど端末間同期に使う情報 | 将来設計 |
+| sync version | WebDAVのETag、同期元hash、last-synced baseなど端末間同期に使う情報 | Phase 3設計で定義・実装前 |
 
-- 現在フロントエンドで使っている `revision` は永続revisionではない。実装時に `draftVersion` などへ改名する。
+- フロントエンドの入力snapshot世代は `draftVersion` として扱い、永続revisionとは分離する。
 - 永続revisionは端末内で更新順序を判定する値であり、端末間の新旧比較には使用しない。
 - operation IDは監査・復旧用であり、CASトークンには使用しない。
 
@@ -25,7 +25,7 @@
 
 ### データモデル
 
-- `notes` に `revision INTEGER NOT NULL DEFAULT 1` を追加する。
+- schema version 3 migrationで `notes` に `revision INTEGER NOT NULL DEFAULT 1` を追加済み。
 - 新規ノートのrevisionは `1` とする。
 - 既存ノートはmigration時にrevision `1`として扱う。
 - `Note`、`Summary`、内部Record、更新・削除APIでrevisionを受け渡す。
@@ -51,7 +51,7 @@
 - 索引stateのrevisionが古い場合は索引だけを再構築し、誤ってrevisionを進めない。
 - `<note-id>.md` の欠落は `MissingNotes` へ報告し、自動削除しない。DBにないMarkdownは `recovery/` へ隔離し、自動renameしない。
 - 判定は起動時復旧と「再検査」操作で行い、復旧後に検索索引を再構築する。
-- 将来の同期、履歴復元、AI出力の確定保存
+- 将来の同期、履歴復元、AI出力の確定保存も、ローカル保存成功時はrevisionを増加させる対象とする。
 
 同じ保存要求内でタイトルと本文を同時に変更しても、revisionの増加は1回とする。起動時の未完了操作復旧では、既に確定したrevisionを再度増加させない。
 
@@ -190,12 +190,12 @@ WHERE id = ? AND revision = ?;
 
 ## migrationとrollback
 
-- revision追加は既存migrationとは分けて新しいschema versionとして追加する。
+- revision追加はschema version 3 migrationとして実装済みである。
 - migrationは既存ノートの本文、タイトル、日時、`content_path`を変更しない。
 - 既存行はrevision `1`でbackfillする。
 - migration失敗時はトランザクションをrollbackし、`PRAGMA user_version`を進めない。
 - 現在はdown migration基盤がないため、旧アプリへ戻す場合はmigration前DBバックアップの復元をrollback手順とする。
-- migration実装時は既存データ保持、失敗rollback、新しいschema versionを旧アプリが拒否することをテストする。
+- migrationでは既存データ保持、失敗rollback、新しいschema versionを旧アプリが拒否することをテストする。
 
 ## 実装時の受け入れ条件
 
@@ -222,14 +222,16 @@ WHERE id = ? AND revision = ?;
 - 同期用durable outboxのテーブル設計
 - 全面的な `NoteEditor` 分割
 
-## 実装順序
+## 実装順序（完了記録）
 
-1. revision migration、モデル、RepositoryのCASを実装する。
-2. Serviceの更新・削除・補償・復旧へrevisionを接続する。
-3. Wails APIとフロントエンド型へ `expectedRevision` と競合情報を接続する。
-4. 現在のフロント用 `revision` を `draftVersion` へ改名する。
-5. autosaveをノート単位queueへ拡張し、メタデータ更新も同じlaneへ接続する。
-6. `isSaving`をqueue状態または要求数から算出する。
-7. 最小の競合表示とdraft保持・破棄導線を追加する。
-8. 正常系、競合、補償、復旧、並行保存テストを追加する。
-9. 実装状態を `docs/status.md` と `docs/todo/todo-phese2.md` へ反映する。
+以下はPhase 2で実装した順序の記録です。Phase 3の同期outboxは [`webdav-sync.md`](webdav-sync.md) と [`implementation-plan.md`](implementation-plan.md) に従って別途実装します。
+
+1. revision migration、モデル、RepositoryのCASを実装済み。
+2. Serviceの更新・削除・補償・復旧へrevisionを接続済み。
+3. Wails APIとフロントエンド型へ `expectedRevision` と競合情報を接続済み。
+4. フロントエンドの入力snapshot世代を `draftVersion` として永続revisionから分離済み。
+5. autosaveをノート単位queueへ拡張し、メタデータ更新も同じlaneへ接続済み。
+6. `isSaving`をqueue状態または要求数から算出済み。
+7. 最小の競合表示とdraft保持・破棄導線を追加済み。
+8. 正常系、競合、補償、復旧、並行保存テストを追加済み。
+9. 実装状態を `docs/status.md` と `docs/todo/todo-phese2.md` へ反映済み。

@@ -4,11 +4,11 @@
 
 ## 現在のフェーズ
 
-MVP（v0.1）の移行前必須項目とCI確認、Phase 2「整理・検索」の検索基盤、タグCRUD・ノート関連付け、ノートリンク・バックリンク、並び替え・最近更新した一覧・ノートブック移動・テーブルコピーは完了しています。関連メモはPhase 4へ完全移管しています。
+MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機能は実装済みです。Phase 2のCI受け入れは [GitHub ActionsのCI run #29383600495](https://github.com/taniguchi-46/AtlasNote/actions/runs/29383600495) で成功しています。残課題とPhase 3への持ち越し条件は下記に分けて記録します。関連メモはPhase 4へ完全移管しています。
 
 Phase 3「同期」は、WebDAV同期設計のレビューと未確定事項の決定まで完了し、実装前の状態です。WebDAV通信、同期用migration、認証情報の保存処理は未実装です。
 
-Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `docs/development/scopes/scope-phese2.md` を正とします。
+要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗チェックは `docs/todo/todo-phese3.md` を正とします。
 
 ## 実装済み
 
@@ -31,7 +31,7 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - schema version 6の`tags` / `note_tags` migration、Unicode正規化・case-foldによる同名防止、外部キーCASCADE
 - schema version 7の`note_links` / `note_link_state` migration、target/source逆引きINDEX、外部キーCASCADE
 - タグのRepository / Service / Wails API、構造化タグエラー、フロントAPI / Pinia Store
-- ノート編集画面のタグ付与・解除、タグ候補検索・作成、サイドバーでのタグ一覧表示・改名・削除
+- ノート編集画面の既存タグ選択ポップアップ、サイドバーでのタグ一覧表示・作成・改名・削除
 - ノートリンクのMarkdown記法・抽出、SQLiteリンク索引、バックリンクAPI・Store・UI
 - `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
 - Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
@@ -65,15 +65,15 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
 - 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
 
-## Phase 2の対象
+## Phase 2の完了範囲
 
 - 既存検索UIへの実検索処理の接続（完了）
 - タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
-- タグの追加、編集、削除、ノートへの付与・解除、タグ名の候補検索（完了）
+- タグの追加、編集、削除、ノートへの付与・解除、単一タグの通常一覧遷移（完了。タグ名検索と全文検索へのタグ条件は対象外）
 - ノートリンク・バックリンク（完了）
 - テーブルコピー（完了）
 
-## Phase 2着手前の設計事項
+## Phase 2で確定した設計
 
 - revision、競合検出、保存キューの仕様は `docs/development/note-concurrency.md` で確定済み
 - 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
@@ -81,18 +81,31 @@ Phase 2の全体要件は `docs/development/scopes/scope.md`、詳細要件は `
 - タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
 - ノートリンク・バックリンクの記法、抽出規則、更新境界は設計・実装済み。関連メモはPhase 4の対象として移管済み。
 - 検索とタグ遷移の画面状態、および並び替えとの組み合わせは実装済み。
-- DB変更時のmigration、既存データへの影響、rollback方法
+- schema version 3〜7のmigration、既存データへの影響、rollback方法を確認済み
+
+## Phase 2 CI受け入れ結果
+
+- 2026-07-15の`dev-Phase2`、commit `5dc5df4`に対するCI run #29383600495が成功した。
+- Wails build、Go tests、Frontend typecheck、serializer、autosave、note selection/delete、notebook hierarchy、note operation queue、batch、notifications、tags、operation logger、note links、note list view、table copy、Markdown safetyの全ステップが成功した。
+- CI成功commit以降のアプリコード差分はなく、Phase 3への後続差分と現在の未コミット差分はドキュメントのみである。
 
 ## 継続課題
 
-- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知、5,000件基準値の記録まで完了。継続比較は未完了）
-- 競合解決UIのコンポーネントテスト
+- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知、5,000件基準値の記録まで完了。継続比較はPhase 3の大量同期・一覧更新受け入れ時に行う）
+- 競合解決UIのコンポーネントテスト（Phase 3の競合UI実装完了前に追加する）
+- Rich機能を追加する際のserializer round-tripテスト（Rich serializer変更時のみ対応し、Phase 3同期の開始条件にはしない）
+
+## Phase 3着手条件
+
+- WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
+- Phase 2のCI受け入れ条件は確認済みです。上記の残課題は、記載した条件でPhase 3へ持ち越します。
+- 同期実装は `docs/development/webdav-sync.md` の契約を変更せずに開始します。
 
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
-- Phase 3のWebDAV同期実装（認証、manifest方式のdurable outbox、同期競合解決）は確定済みの `docs/development/webdav-sync.md` を正とし、実装TODOを `docs/todo/todo-phese3.md` で管理する。
+- Phase 3のWebDAV同期実装（認証、manifest方式のdurable outbox、同期競合解決）は確定済みの `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗を `docs/todo/todo-phese3.md` で管理する。
 - API Keyの保存方式と暗号化方針
 - AIプロバイダー、モデル選択、課金表示
 
@@ -103,13 +116,17 @@ npm run frontend:build
 npm run frontend:typecheck
 npm run frontend:lint
 npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-operation-queue
 npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
+npm --prefix frontend run test:notifications
+npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
 npm --prefix frontend run test:table-copy
+npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger
 npm --prefix frontend run test:note-links
 go test ./...
@@ -122,6 +139,7 @@ wails build
 
 | ファイル | 役割 |
 | --- | --- |
+| `docs/README.md` | ドキュメント入口と正本の役割 |
 | `README.md` | プロジェクト概要 |
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
@@ -132,7 +150,7 @@ wails build
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |
 | `docs/development/tag-design.md` | タグの制約、migration、API、実装・検証状況 |
-| `docs/todo/todo-phese2.md` | Phase 2の作業チェックリスト |
+| `docs/todo/todo-phese2.md` | Phase 2の実績・残課題 |
 | `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
 | `docs/development/setup.md` | 開発環境セットアップ |
 | `docs/development/tech-stack.md` | 採用技術 |

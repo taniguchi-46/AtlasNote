@@ -78,16 +78,22 @@ npm run frontend:typecheck
 npm run frontend:lint
 go test ./...
 npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-operation-queue
 npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:serializer
 npm --prefix frontend run test:notifications
+npm --prefix frontend run test:tags
 npm --prefix frontend run test:operation-logger
+npm --prefix frontend run test:note-links
+npm --prefix frontend run test:note-list-view
+npm --prefix frontend run test:table-copy
+npm --prefix frontend run test:markdown-safety
 ```
 
-Frontendの`lint`は`vue-tsc --noEmit`を実行する。専用formatter scriptは追加せず、Go変更時は`gofmt`、Markdown変更時は`git diff --check`を確認する。
+Frontendの`lint`は`vue-tsc --noEmit`を実行する。CIで実行するテストの全一覧は [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) を参照する。専用formatter scriptは追加せず、Go変更時は`gofmt`、Markdown変更時は`git diff --check`を確認する。
 
 ## Docker の扱い
 

@@ -16,14 +16,15 @@ Atlas Note で現在採用している技術をまとめます。バージョン
 | Editor | Markdown textarea + Tiptap |
 | Storage | Markdown |
 | Data Access | Repository + Squirrel |
-| Sync | WebDAV を中心に検討 |
+| Sync | WebDAV（Phase 3設計確定、実装前） |
 | AI | ユーザー自身の API Key を利用する方針 |
 
 ## 未確定事項
 
 - デスクトップアプリの配布対象 OS とビルド手順。
-- Phase 2 の全文検索方式と索引構成。
-- WebDAV と AI 機能の詳細設計。
+- AI 機能の詳細設計。
+
+WebDAVの同期契約は [`webdav-sync.md`](webdav-sync.md) で確定しており、実装順序は [`implementation-plan.md`](implementation-plan.md) で管理する。
 
 ## 開発コマンド
 

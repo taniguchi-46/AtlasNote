@@ -22,7 +22,7 @@
 | Go 型 | PascalCase | `NoteRepository`, `SyncService` |
 | Go インターフェース | 振る舞いを表す名前 | `NoteStore`, `KeyProvider` |
 | DB テーブル | snake_case | `notes`, `note_tags`, `sync_states` |
-| Markdown ファイル | 安定 ID または slug を使う方針。詳細は未確定 | `note-id.md` |
+| Markdown ファイル | 安定 ID を使う | `note-id.md` |
 
 ## 実装
 
@@ -32,7 +32,7 @@
 - SQLite 操作は Repository に閉じ込め、UI やサービス層に SQL 詳細を漏らさない。
 - Markdown Storage は本文保存の責務を持ち、メタデータ管理は SQLite 側に寄せる。
 - AI API Key は平文ログや例外メッセージに出さない。
-- WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを明示してから実装する。
+- WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを [`docs/development/webdav-sync.md`](../development/webdav-sync.md) に従って実装する。
 
 ## UI
 
@@ -59,8 +59,8 @@
 
 ```bash
 npm run build
-npm run typecheck
-npm run lint
+npm run frontend:typecheck
+npm run frontend:lint
 go test ./...
 wails build
 ```

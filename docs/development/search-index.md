@@ -32,9 +32,9 @@ SQLite FTS5とtokenizerの仕様は[SQLite FTS5 Extension](https://www.sqlite.or
 
 external-contentとcontentlessの制約は[FTS5 External Content and Contentless Tables](https://www.sqlite.org/fts5.html#external_content_and_contentless_tables)を参照する。
 
-## 予定スキーマ
+## 実装スキーマ
 
-次の専用仮想テーブルをmigrationで追加する。名称とオプションは実装前テストで最終確定する。
+schema version 4 migrationで専用仮想テーブルと索引状態テーブルを追加済みである。schema version 5 migrationでは索引状態へ `content_mtime_ns` を追加済みである。
 
 ```sql
 CREATE VIRTUAL TABLE note_search USING fts5(
@@ -48,14 +48,14 @@ CREATE VIRTUAL TABLE note_search USING fts5(
 - `note_id` は `notes.id` と結合する識別子で、検索tokenにしない。
 - `title` はSQLiteの `notes.title` から複製する派生値である。
 - `body` はMarkdown正本から複製する派生値である。
-- タイトルと本文のランキング重みは検索API設計時に決定する。
+- タイトルと本文のランキング重みは検索APIの実装仕様に従う。
 - FTS5の内部shadow tableをRepositoryから直接操作しない。
 
 ## タイトルと本文の責務境界
 
 - 通常の検索ボックスはFTS5の `title` と `body` を対象にする。
 - 「タイトルのみ」の明示フィルターは `notes.title` のparameterized `LIKE` を使用し、Markdownを読まない。
-- 全文検索の候補note IDは `notes` にjoinし、trash、notebook、tag、日付などのフィルターを通常テーブル側で適用する。
+- 全文検索の候補note IDは `notes` にjoinし、trashとnotebookのフィルターを通常テーブル側で適用する。タグと日付の条件は全文検索では扱わず、通常一覧APIで適用する。
 - 本文は保存済みMarkdown文字列をそのまま索引化する。初期実装でMarkdown ASTやHTMLへ変換せず、code fence、URL、タスク文字列も検索対象に保つ。
 - 将来、表示テキストだけの検索が必要にった場合は、索引バージョンを上げて全件再構築する。
 
@@ -100,13 +100,14 @@ FTS5の特別コマンドは[FTS5 Special INSERT Commands](https://www.sqlite.or
 
 ## migrationとrollback
 
-- 新しいschema versionでFTS5仮想テーブルと索引状態テーブルを追加する。
-- 既存の検索状態には`content_mtime_ns = 0`を設定し、初回復旧でhash照合とmtime保存を行う。
+- schema version 4 migrationでFTS5仮想テーブルと索引状態テーブルを追加済みである。
+- schema version 5 migrationで既存の索引状態へ `content_mtime_ns = 0` を追加済みである。
+- 初回復旧でhash照合とmtime保存を行う。
 - migrationで既存のMarkdown、`notes`行、revision、日時を変更しない。
 - migration失敗時はトランザクションをrollbackし、`PRAGMA user_version` を進めない。
 - 現在はdown migration基盤がないため、旧アプリへ戻す場合はmigration前DBバックアップの復元をrollback手順とする。
 
-## 実装前の必須テスト
+## 実装・回帰テスト
 
 - FTS5とtrigram tokenizerをアプリのSQLite driverで作成できる。
 - 日本語、ASCII、絵文字、記号、改行、Markdown記法を検索できる。
