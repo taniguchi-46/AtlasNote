@@ -1,14 +1,14 @@
 # プロジェクト状況
 
-最終更新: 2026-07-15
+最終更新: 2026-07-19
 
 ## 現在のフェーズ
 
 MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機能は実装済みです。Phase 2のCI受け入れは [GitHub ActionsのCI run #29383600495](https://github.com/taniguchi-46/AtlasNote/actions/runs/29383600495) で成功しています。残課題とPhase 3への持ち越し条件は下記に分けて記録します。関連メモはPhase 4へ完全移管しています。
 
-Phase 3「同期」は、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な再アップロード/再ダウンロード復旧とローカル自動検証まで完了しています。実WebDAVサーバー相互運用、手動UI受け入れ、Phase 3差分のCI確認は残課題です。
+Phase 3「同期」は、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な再アップロード/再ダウンロード復旧、ローカル自動検証、非本番の実WebDAV受け入れ、手動UI受け入れ、CI最終確認まで完了しています（2026-07-19）。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗チェックは `docs/todo/todo-phese3.md` を正とします。
+要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗・受け入れ記録は `docs/todo/todo-phese3.md` を正とします。Phase 4実装前の課題とスコープは `docs/todo/todo-phese4.md` と `docs/development/scopes/scope-phese4.md` で管理します。
 
 ## 実装済み
 
@@ -94,28 +94,32 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 
 - 2026-07-15の`dev-Phase2`、commit `5dc5df4`に対するCI run #29383600495が成功した。
 - Wails build、Go tests、Frontend typecheck、serializer、autosave、note selection/delete、notebook hierarchy、note operation queue、batch、notifications、tags、operation logger、note links、note list view、table copy、Markdown safetyの全ステップが成功した。
-- CI成功commit以降はPhase 3の実装・テスト・ドキュメント更新を追加しており、Phase 3分のCI受け入れ結果は未確認である。
+- Phase 2 CIの結果はPhase 2の完了記録であり、Phase 3の受け入れ判定は下記のPhase 3 CI結果と実WebDAV受け入れ記録を根拠とする。
+
+## Phase 3 CI受け入れ結果
+
+- `dev-phese3` の受け入れ対象HEAD（commit `a84203673a09bea1d45a021da0d1e7745236a5d0`）に対する [GitHub Actions CI run #29658225886](https://github.com/taniguchi-46/AtlasNote/actions/runs/29658225886) が成功した（2026-07-18）。
+- Wails build、Go tests、Frontend typecheck、同期を含むFrontendテストの全ステップが成功した。
 
 ## 継続課題
 
-- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知、5,000件基準値の記録まで完了。継続比較はPhase 3の大量同期・一覧更新受け入れ時に行う）
-- 競合解決UIのコンポーネントテスト（Phase 3の手動UI受け入れ時に追加確認する）
+- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知、5,000件基準値の記録まで完了。Phase 3受け入れ後も同期・一覧更新の比較を継続する）
+- 競合解決UIのコンポーネントテスト（Phase 3受け入れ後もUI変更時に追加確認する）
 - Rich機能を追加する際のserializer round-tripテスト（Rich serializer変更時のみ対応し、Phase 3同期の開始条件にはしない）
 
-## Phase 3着手条件
+## Phase 3受け入れ・Phase 4準備条件
 
 - WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
-- Phase 2のCI受け入れ条件は確認済みです。上記の残課題は、記載した条件でPhase 3へ持ち越します。
-- 同期実装は `docs/development/webdav-sync.md` の契約を変更せずに開始します。
+- Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
+- 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
+- Phase 4の実装は、AI認証・保存・同期境界などの未確定事項を `docs/development/scopes/scope-phese4.md` と `docs/todo/todo-phese4.md` で解消してから開始します。
 
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
-- Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗を `docs/todo/todo-phese3.md` で管理する。
-- Phase 3の同期実装（schema v10、HTTPS/Basicを既定としたWebDAV、明示的HTTP/TLS/proxy設定、OS CredentialStore + session fallback、outbox、tombstone、3-way conflict、Joplin方式UI、フェイルセーフ、安全な復旧）は実装済み。実サーバー相互運用と手動UI確認を継続する。
-- API Keyの保存方式と暗号化方針
-- AIプロバイダー、モデル選択、課金表示
+- Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
+- Phase 4のAI認証・保存・同期境界、プロバイダー・モデル契約、生成結果の永続化方針、テスト方針は未確定であり、`docs/development/scopes/scope-phese4.md` と `docs/todo/todo-phese4.md` を実装前の課題として扱う。
 
 ## 主要コマンド
 
@@ -152,9 +156,11 @@ wails build
 | `README.md` | プロジェクト概要 |
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
 | `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
+| `docs/development/scopes/scope-phese4.md` | Phase 4の実装前詳細スコープ |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
+| `docs/todo/todo-phese4.md` | Phase 4の実装前課題・受け入れTODO |
 | `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |

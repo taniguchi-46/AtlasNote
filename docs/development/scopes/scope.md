@@ -159,7 +159,7 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 作業チェック: `docs/todo/todo-phese3.md`
 
-現状: コア実装・ローカル自動検証完了。実WebDAVサーバー相互運用と手動UI受け入れ確認中
+現状: Phase 3受け入れ完了（2026-07-19、非本番の実WebDAVで動作OKを確認）。実サーバーまたは同期実装の更新時は回帰確認を継続する。
 
 ## WebDAV
 
@@ -179,6 +179,12 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 ---
 
 # Phase 4：AI
+
+詳細スコープ: `docs/development/scopes/scope-phese4.md`
+
+作業チェック: `docs/todo/todo-phese4.md`
+
+現状: 実装前。AI認証・保存・同期境界などの前提を確定するまでPhase 4実装は開始しない。
 
 ## AI設定
 
