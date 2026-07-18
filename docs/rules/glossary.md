@@ -11,7 +11,7 @@
 | Tiptap | ProseMirror ベースのリッチテキストエディタ |
 | Markdown textarea | Markdown原文を直接編集する入力欄 |
 | Squirrel | Go 向け SQL クエリビルダー |
-| WebDAV | Phase 3の同期方式。設計確定・実装前 |
+| WebDAV | Phase 3の同期方式。コア実装・自動検証済みで、実サーバー受け入れ確認中 |
 | revision | SQLiteに保存するノート単位の同一端末内CASトークン。端末間の新旧比較には使わない |
 | expectedRevision | 更新・完全削除時に要求側が指定するローカルrevision。現在値と一致した場合だけ適用する |
 | CAS | Compare-And-Swap。期待値が現在値と一致する場合だけ更新する方式 |

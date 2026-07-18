@@ -51,6 +51,9 @@ func (s *Service) ListNoteTags(ctx context.Context, noteID string) (NoteTagsResu
 }
 
 func (s *Service) CreateTag(ctx context.Context, input TagCreateInput) (TagMutationResult, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := TagMutationResult{}
@@ -84,7 +87,11 @@ func (s *Service) CreateTag(ctx context.Context, input TagCreateInput) (TagMutat
 		},
 		NormalizedName: normalizedName,
 	}
-	if err := s.repository.CreateTag(ctx, record); err != nil {
+	change, err := NewTagSyncChange(id, record)
+	if err != nil {
+		return result, err
+	}
+	if err := s.repository.CreateTagWithSync(ctx, record, []SyncChange{change}); err != nil {
 		return result, fmt.Errorf("create tag: %w", err)
 	}
 
@@ -93,6 +100,9 @@ func (s *Service) CreateTag(ctx context.Context, input TagCreateInput) (TagMutat
 }
 
 func (s *Service) UpdateTag(ctx context.Context, id string, input TagUpdateInput) (TagMutationResult, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := TagMutationResult{}
@@ -126,7 +136,15 @@ func (s *Service) UpdateTag(ctx context.Context, id string, input TagUpdateInput
 	record.Name = name
 	record.NormalizedName = normalizedName
 	record.UpdatedAt = time.Now().UTC()
-	if err := s.repository.UpdateTag(ctx, record); err != nil {
+	changeSetID, err := newID()
+	if err != nil {
+		return result, err
+	}
+	change, err := NewTagSyncChange(changeSetID, record)
+	if err != nil {
+		return result, err
+	}
+	if err := s.repository.UpdateTagWithSync(ctx, record, []SyncChange{change}); err != nil {
 		return result, fmt.Errorf("update tag: %w", err)
 	}
 
@@ -135,6 +153,9 @@ func (s *Service) UpdateTag(ctx context.Context, id string, input TagUpdateInput
 }
 
 func (s *Service) DeleteTag(ctx context.Context, id string) (TagDeleteResult, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := TagDeleteResult{}
@@ -142,7 +163,33 @@ func (s *Service) DeleteTag(ctx context.Context, id string) (TagDeleteResult, er
 		return result, err
 	}
 
-	if err := s.repository.DeleteTag(ctx, id); err != nil {
+	noteIDs, err := s.repository.ListNoteIDsForTag(ctx, id)
+	if err != nil {
+		return result, err
+	}
+	changeSetID, err := newID()
+	if err != nil {
+		return result, err
+	}
+	changes := []SyncChange{NewTagTombstoneChange(changeSetID, id)}
+	for _, noteID := range noteIDs {
+		tagIDs, listErr := s.repository.ListNoteTagIDs(ctx, noteID)
+		if listErr != nil {
+			return result, listErr
+		}
+		remainingTagIDs := make([]string, 0, len(tagIDs))
+		for _, tagID := range tagIDs {
+			if tagID != id {
+				remainingTagIDs = append(remainingTagIDs, tagID)
+			}
+		}
+		relationChange, changeErr := NewNoteTagsSyncChange(changeSetID, noteID, remainingTagIDs)
+		if changeErr != nil {
+			return result, changeErr
+		}
+		changes = append(changes, relationChange)
+	}
+	if err := s.repository.DeleteTagWithSync(ctx, id, changes); err != nil {
 		if errors.Is(err, ErrTagNotFound) {
 			result.Error = tagError(TagErrorNotFound, "タグが見つかりません。", "tagId")
 			return result, nil
@@ -155,6 +202,9 @@ func (s *Service) DeleteTag(ctx context.Context, id string) (TagDeleteResult, er
 }
 
 func (s *Service) SetNoteTags(ctx context.Context, noteID string, input SetNoteTagsInput) (NoteTagsResult, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := NoteTagsResult{Tags: make([]Tag, 0)}
@@ -163,7 +213,15 @@ func (s *Service) SetNoteTags(ctx context.Context, noteID string, input SetNoteT
 	}
 
 	tagIDs := deduplicateTagIDs(input.TagIDs)
-	if err := s.repository.ReplaceNoteTags(ctx, noteID, tagIDs); err != nil {
+	changeSetID, err := newID()
+	if err != nil {
+		return result, err
+	}
+	change, err := NewNoteTagsSyncChange(changeSetID, noteID, tagIDs)
+	if err != nil {
+		return result, err
+	}
+	if err := s.repository.ReplaceNoteTagsWithSync(ctx, noteID, tagIDs, []SyncChange{change}); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
 			result.Error = tagError(TagErrorNoteNotFound, "ノートが見つかりません。", "noteId")

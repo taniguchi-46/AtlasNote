@@ -12,30 +12,34 @@ import (
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
+	syncservice "atlasnote/internal/sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
-	ctx            context.Context
-	db             *sql.DB
-	dataLock       *datalock.Lock
-	notes          *note.Service
-	dataDir        string
-	startupErr     error
-	recoveryReport note.RecoveryReport
-	statusMu       sync.RWMutex
-	closeMu        sync.Mutex
-	closeRequested bool
-	allowClose     bool
+	ctx                context.Context
+	db                 *sql.DB
+	dataLock           *datalock.Lock
+	notes              *note.Service
+	syncService        *syncservice.Service
+	dataDir            string
+	startupErr         error
+	recoveryReport     note.RecoveryReport
+	syncRecoveryBackup string
+	statusMu           sync.RWMutex
+	closeMu            sync.Mutex
+	closeRequested     bool
+	allowClose         bool
 }
 
 type StartupStatus struct {
-	Ready        bool                    `json:"ready"`
-	Degraded     bool                    `json:"degraded"`
-	Message      string                  `json:"message,omitempty"`
-	DataDir      string                  `json:"dataDir,omitempty"`
-	MissingNotes []MissingNoteDiagnostic `json:"missingNotes"`
+	Ready              bool                    `json:"ready"`
+	Degraded           bool                    `json:"degraded"`
+	Message            string                  `json:"message,omitempty"`
+	DataDir            string                  `json:"dataDir,omitempty"`
+	MissingNotes       []MissingNoteDiagnostic `json:"missingNotes"`
+	SyncRecoveryBackup string                  `json:"syncRecoveryBackup,omitempty"`
 }
 
 type MissingNoteDiagnostic struct {
@@ -271,6 +275,75 @@ func (a *App) SetNoteTags(noteID string, input note.SetNoteTagsInput) (note.Note
 	return a.notes.SetNoteTags(a.ctx, noteID, input)
 }
 
+func (a *App) GetSyncStatus() (syncservice.StatusResult, error) {
+	if a.syncService == nil {
+		return syncservice.StatusResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.GetStatus(a.ctx)
+}
+
+func (a *App) ConfigureSync(input syncservice.ConnectionInput) (syncservice.StatusResult, error) {
+	if a.syncService == nil {
+		return syncservice.StatusResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.Configure(a.ctx, input)
+}
+
+func (a *App) TestSyncConfiguration(input syncservice.ConnectionInput) (syncservice.ConfigurationTestResult, error) {
+	if a.syncService == nil {
+		return syncservice.ConfigurationTestResult{}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.TestConfiguration(a.ctx, input)
+}
+
+func (a *App) SyncNow(input syncservice.SyncNowInput) (syncservice.SyncResult, error) {
+	if a.syncService == nil {
+		return syncservice.SyncResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.SyncNow(a.ctx, input)
+}
+
+func (a *App) ResolveSyncConflict(input syncservice.ConflictResolutionInput) error {
+	if a.syncService == nil {
+		return errors.New("sync service is not initialized")
+	}
+	return a.syncService.ResolveConflict(a.ctx, input)
+}
+
+func (a *App) ListSyncConflicts() ([]syncservice.ConflictSummary, error) {
+	if a.syncService == nil {
+		return []syncservice.ConflictSummary{}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.ListConflicts(a.ctx)
+}
+
+func (a *App) DisconnectSync() error {
+	if a.syncService == nil {
+		return errors.New("sync service is not initialized")
+	}
+	return a.syncService.Disconnect(a.ctx)
+}
+
+func (a *App) PrepareSyncRecovery(action string) (syncservice.RecoveryPreview, error) {
+	if a.syncService == nil {
+		return syncservice.RecoveryPreview{}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.PrepareRecovery(a.ctx, action)
+}
+
+func (a *App) ExecuteSyncRecovery(input syncservice.RecoveryExecutionInput) (syncservice.RecoveryResult, error) {
+	if a.syncService == nil {
+		return syncservice.RecoveryResult{}, errors.New("sync service is not initialized")
+	}
+	return a.syncService.ExecuteRecovery(a.ctx, input)
+}
+
+func (a *App) QuitForSyncRecovery() {
+	if a.ctx != nil {
+		runtime.Quit(a.ctx)
+	}
+}
+
 func (a *App) GetStartupStatus() StartupStatus {
 	a.statusMu.RLock()
 	defer a.statusMu.RUnlock()
@@ -293,10 +366,11 @@ func (a *App) GetStartupStatus() StartupStatus {
 		})
 	}
 	return StartupStatus{
-		Ready:        true,
-		Degraded:     len(missingNotes) > 0,
-		DataDir:      a.dataDir,
-		MissingNotes: missingNotes,
+		Ready:              true,
+		Degraded:           len(missingNotes) > 0,
+		DataDir:            a.dataDir,
+		MissingNotes:       missingNotes,
+		SyncRecoveryBackup: a.syncRecoveryBackup,
 	}
 }
 
@@ -313,6 +387,16 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 	a.dataLock = dataLock
+	backupPath, err := syncservice.ApplyPendingRecovery(syncservice.RecoveryPaths{
+		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
+	})
+	if err != nil {
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.startupErr = err
+		return
+	}
+	a.syncRecoveryBackup = backupPath
 
 	db, err := database.Open(ctx, paths.DatabasePath)
 	if err != nil {
@@ -331,7 +415,13 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 
-	service := note.NewService(note.NewRepository(db), store)
+	noteRepository := note.NewRepository(db)
+	syncRepository := syncservice.NewRepository(db)
+	noteRepository.SetSyncChangeRecorder(syncRepository)
+	service := note.NewService(noteRepository, store)
+	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
+	syncService := syncservice.NewService(syncRepository, service, credentialManager)
+	syncService.SetRecoveryDataDir(paths.DataDir)
 	recoveryReport, err := service.Recover(ctx)
 	if err != nil {
 		_ = db.Close()
@@ -343,6 +433,7 @@ func (a *App) initialize(ctx context.Context) {
 
 	a.db = db
 	a.notes = service
+	a.syncService = syncService
 	a.recoveryReport = recoveryReport
 }
 

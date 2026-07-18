@@ -1,12 +1,12 @@
 # ノートrevision・競合検出・保存キュー仕様
 
-最終更新: 2026-07-13
+最終更新: 2026-07-15
 
 ## 目的
 
 クラウド同期、履歴、AIストリーミングを開始する前に、staleな更新が新しい内容を上書きしないためのrevision、競合検出、ローカル保存キューの契約を確定する。
 
-この文書はrevision / CAS、競合UI、ローカル保存キューの実装契約を定義する。将来の同期outboxは未実装である。
+この文書はrevision / CAS、競合UI、ローカル保存キューの実装契約を定義する。Phase 3の同期outboxとWebDAV同期は実装済みであり、詳細は [`webdav-sync.md`](webdav-sync.md) を正とする。
 
 ## 用語と責務
 
@@ -15,7 +15,7 @@
 | 永続revision | SQLiteに保存するノート単位のCASトークン | SQLite |
 | draft version | フロントエンドで入力snapshotの新旧を判定する世代番号 | メモリのみ |
 | operation ID | SQLite / Markdown操作ジャーナルとログを関連付ける識別子 | 操作完了までSQLite |
-| sync version | WebDAVのETag、同期元hash、last-synced baseなど端末間同期に使う情報 | Phase 3設計で定義・実装前 |
+| sync version | WebDAVのETag、同期元hash、last-synced baseなど端末間同期に使う情報 | Phase 3で定義・コア実装済み |
 
 - フロントエンドの入力snapshot世代は `draftVersion` として扱い、永続revisionとは分離する。
 - 永続revisionは端末内で更新順序を判定する値であり、端末間の新旧比較には使用しない。
@@ -154,10 +154,10 @@ WHERE id = ? AND revision = ?;
 - アプリ終了時は現在の終了前flush、再試行、破棄確認を維持する。
 - fire-and-forgetで開始する保存Promiseにも必ず失敗処理を接続し、未処理Promiseを発生させない。
 
-### 将来の同期キューとの分離
+### 同期outboxとの分離
 
 - ローカル保存キューはメモリ上でよい。
-- WebDAVへ送信する変更は、クラッシュ後も再開できるSQLite上のdurable outboxとして別途設計する。
+- WebDAVへ送信する変更は、クラッシュ後も再開できるSQLite上のdurable outboxへ記録する。
 - ローカル保存成功とクラウド送信成功を同じ `isSaving` で表現しない。
 - 同期状態は `pending / syncing / synced / conflict / failed` など別の状態として管理する。
 
@@ -186,7 +186,7 @@ WHERE id = ? AND revision = ?;
 | Service | 入力検証、外部変更確認、保存手順、補償処理の制御 |
 | Repository | revisionを含む原子的CAS、not foundと競合の区別 |
 | Markdown Storage | 一時ファイル、確定、rollback。revisionの判定は行わない |
-| 将来のSync Service | ETag、last-synced base、durable outbox、端末間競合 |
+| Sync Service | ETag、last-synced base、durable outbox、端末間競合。比較開始から受信適用・同期状態commitまでNote Serviceの同期専用ゲートを保持する |
 
 ## migrationとrollback
 
@@ -224,7 +224,7 @@ WHERE id = ? AND revision = ?;
 
 ## 実装順序（完了記録）
 
-以下はPhase 2で実装した順序の記録です。Phase 3の同期outboxは [`webdav-sync.md`](webdav-sync.md) と [`implementation-plan.md`](implementation-plan.md) に従って別途実装します。
+以下はPhase 2で実装した順序の記録です。Phase 3の同期outboxは [`webdav-sync.md`](webdav-sync.md) と [`implementation-plan.md`](implementation-plan.md) に従って実装済みです。
 
 1. revision migration、モデル、RepositoryのCASを実装済み。
 2. Serviceの更新・削除・補償・復旧へrevisionを接続済み。

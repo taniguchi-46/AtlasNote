@@ -16,7 +16,7 @@ Atlas Note で現在採用している技術をまとめます。バージョン
 | Editor | Markdown textarea + Tiptap |
 | Storage | Markdown |
 | Data Access | Repository + Squirrel |
-| Sync | WebDAV（Phase 3設計確定、実装前） |
+| Sync | WebDAV（Phase 3コア実装・自動検証済み、実サーバー受け入れ確認中） |
 | AI | ユーザー自身の API Key を利用する方針 |
 
 ## 未確定事項

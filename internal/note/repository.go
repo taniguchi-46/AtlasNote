@@ -26,7 +26,8 @@ type sqlQueryExecutor interface {
 }
 
 type Repository struct {
-	db *sql.DB
+	db           *sql.DB
+	syncRecorder SyncChangeRecorder
 }
 
 func NewRepository(db *sql.DB) *Repository {
@@ -272,6 +273,29 @@ func (r *Repository) Update(ctx context.Context, record Record) error {
 }
 
 func (r *Repository) UpdateCAS(ctx context.Context, record Record, expectedRevision int64) (int64, error) {
+	return r.UpdateCASWithSync(ctx, record, expectedRevision, nil)
+}
+
+func (r *Repository) SetNoteSyncTimes(ctx context.Context, id string, createdAt time.Time, updatedAt time.Time) error {
+	result, err := r.db.ExecContext(ctx, `
+UPDATE notes
+SET created_at = ?, updated_at = ?
+WHERE id = ?
+`, formatTime(createdAt), formatTime(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("set synced note timestamps: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read synced note timestamp result: %w", err)
+	}
+	if affected != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) UpdateCASWithSync(ctx context.Context, record Record, expectedRevision int64, changes []SyncChange) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin note CAS update tx: %w", err)
@@ -280,6 +304,9 @@ func (r *Repository) UpdateCAS(ctx context.Context, record Record, expectedRevis
 
 	nextRevision, err := updateRecordCAS(ctx, tx, record, expectedRevision)
 	if err != nil {
+		return 0, err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -354,7 +381,30 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	return deleteRecord(ctx, r.db, id)
 }
 
+func (r *Repository) DeleteWithSync(ctx context.Context, id string, changes []SyncChange) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin note delete tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := deleteRecord(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit note delete tx: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) DeleteCAS(ctx context.Context, id string, expectedRevision int64) error {
+	return r.DeleteCASWithSync(ctx, id, expectedRevision, nil)
+}
+
+func (r *Repository) DeleteCASWithSync(ctx context.Context, id string, expectedRevision int64, changes []SyncChange) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin note CAS delete tx: %w", err)
@@ -362,6 +412,9 @@ func (r *Repository) DeleteCAS(ctx context.Context, id string, expectedRevision 
 	defer tx.Rollback()
 
 	if err := deleteRecordCAS(ctx, tx, id, expectedRevision); err != nil {
+		return err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -417,6 +470,10 @@ func deleteRecordCAS(ctx context.Context, executor sqlQueryExecutor, id string, 
 }
 
 func (r *Repository) CreateWithStorageOperation(ctx context.Context, record Record, operation StorageOperation) error {
+	return r.CreateWithStorageOperationAndSync(ctx, record, operation, nil)
+}
+
+func (r *Repository) CreateWithStorageOperationAndSync(ctx context.Context, record Record, operation StorageOperation, changes []SyncChange) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin note create tx: %w", err)
@@ -429,6 +486,9 @@ func (r *Repository) CreateWithStorageOperation(ctx context.Context, record Reco
 	if err := insertStorageOperation(ctx, tx, operation); err != nil {
 		return err
 	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit note create tx: %w", err)
@@ -438,6 +498,10 @@ func (r *Repository) CreateWithStorageOperation(ctx context.Context, record Reco
 }
 
 func (r *Repository) UpdateWithStorageOperation(ctx context.Context, record Record, operation StorageOperation) error {
+	return r.UpdateWithStorageOperationAndSync(ctx, record, operation, nil)
+}
+
+func (r *Repository) UpdateWithStorageOperationAndSync(ctx context.Context, record Record, operation StorageOperation, changes []SyncChange) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin note update tx: %w", err)
@@ -448,6 +512,9 @@ func (r *Repository) UpdateWithStorageOperation(ctx context.Context, record Reco
 		return err
 	}
 	if err := insertStorageOperation(ctx, tx, operation); err != nil {
+		return err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return err
 	}
 
@@ -464,6 +531,16 @@ func (r *Repository) UpdateWithStorageOperationCAS(
 	operation StorageOperation,
 	expectedRevision int64,
 ) (int64, error) {
+	return r.UpdateWithStorageOperationCASAndSync(ctx, record, operation, expectedRevision, nil)
+}
+
+func (r *Repository) UpdateWithStorageOperationCASAndSync(
+	ctx context.Context,
+	record Record,
+	operation StorageOperation,
+	expectedRevision int64,
+	changes []SyncChange,
+) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin note CAS update tx: %w", err)
@@ -475,6 +552,9 @@ func (r *Repository) UpdateWithStorageOperationCAS(
 		return 0, err
 	}
 	if err := insertStorageOperation(ctx, tx, operation); err != nil {
+		return 0, err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return 0, err
 	}
 
@@ -502,6 +582,9 @@ func (r *Repository) RollbackCreatedNote(ctx context.Context, noteID string, ope
 	if err := deleteStorageOperation(ctx, tx, operationID); err != nil {
 		return err
 	}
+	if err := r.discardUnsyncedChanges(ctx, tx, []string{SyncEntityKey(SyncEntityNote, noteID)}); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit note create rollback tx: %w", err)
@@ -510,7 +593,7 @@ func (r *Repository) RollbackCreatedNote(ctx context.Context, noteID string, ope
 	return nil
 }
 
-func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, operationID string) error {
+func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, operationID string, changes []SyncChange) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin note update rollback tx: %w", err)
@@ -521,6 +604,9 @@ func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, o
 		return err
 	}
 	if err := deleteStorageOperation(ctx, tx, operationID); err != nil {
+		return err
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return err
 	}
 

@@ -314,6 +314,156 @@ VALUES (
 	}
 }
 
+func TestOpenMigratesVersionEightDatabaseWithHTTPPolicyDefault(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:8] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 8"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version eight: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO sync_connections (
+	id, endpoint, remote_root, username, vault_id, credential_ref, created_at, updated_at
+)
+VALUES (
+	1, 'https://dav.example.test', '/', 'alice', 'vault-1', 'credential-ref',
+	'2026-07-15T00:00:00Z', '2026-07-15T00:00:00Z'
+)
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy sync connection: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate version eight database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	var allowInsecureHTTP bool
+	if err := db.QueryRowContext(t.Context(), "SELECT allow_insecure_http FROM sync_connections WHERE id = 1").Scan(&allowInsecureHTTP); err != nil {
+		t.Fatalf("read migrated HTTP policy: %v", err)
+	}
+	if allowInsecureHTTP {
+		t.Fatal("HTTP policy must default to disabled when migrating")
+	}
+}
+
+func TestOpenMigratesVersionNineSyncSettingsToVersionTen(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:9] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 9"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version nine: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO sync_connections (
+	id, endpoint, remote_root, username, vault_id, status, auto_sync,
+	allow_insecure_http, credential_ref, created_at, updated_at
+)
+VALUES (
+	1, 'https://dav.example.test', '/atlasnote', 'alice', 'vault-1', 'idle', 1,
+	1, 'credential-ref', '2026-07-15T00:00:00Z', '2026-07-15T00:00:00Z'
+)
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert version nine sync connection: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate version nine database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	var interval, proxyTimeout int
+	var failSafe, allowHTTP, ignoreTLS, proxyEnabled bool
+	var certificates, proxyURL string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT sync_interval_seconds, fail_safe, allow_insecure_http,
+       custom_tls_certificates, ignore_tls_errors, proxy_enabled,
+       proxy_url, proxy_timeout_seconds
+FROM sync_connections WHERE id = 1
+`).Scan(&interval, &failSafe, &allowHTTP, &certificates, &ignoreTLS, &proxyEnabled, &proxyURL, &proxyTimeout); err != nil {
+		t.Fatalf("read migrated sync settings: %v", err)
+	}
+	if interval != 300 || !failSafe || !allowHTTP || certificates != "" || ignoreTLS || proxyEnabled || proxyURL != "" || proxyTimeout != 1 {
+		t.Fatalf("unexpected migrated sync settings: interval=%d failSafe=%v allowHTTP=%v certificates=%q ignoreTLS=%v proxy=%v proxyURL=%q timeout=%d",
+			interval, failSafe, allowHTTP, certificates, ignoreTLS, proxyEnabled, proxyURL, proxyTimeout)
+	}
+	if _, err := db.ExecContext(t.Context(), "UPDATE sync_connections SET sync_interval_seconds = 42 WHERE id = 1"); err == nil {
+		t.Fatal("invalid sync interval was accepted")
+	}
+	if _, err := db.ExecContext(t.Context(), "UPDATE sync_connections SET proxy_timeout_seconds = 0 WHERE id = 1"); err == nil {
+		t.Fatal("invalid proxy timeout was accepted")
+	}
+}
+
+func TestVersionTenMigrationKeepsDisabledSyncIntervalDisabled(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open fixture database: %v", err)
+	}
+	defer db.Close()
+	for index, migration := range migrations[:9] {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("apply fixture migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := db.Exec(`
+INSERT INTO sync_connections (
+	id, endpoint, remote_root, username, vault_id, auto_sync,
+	credential_ref, created_at, updated_at
+)
+VALUES (1, 'https://dav.example.test', '/', 'alice', 'vault', 0, 'ref', 'now', 'now')
+`); err != nil {
+		t.Fatalf("insert disabled sync fixture: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 9"); err != nil {
+		t.Fatalf("set fixture version: %v", err)
+	}
+	if err := migrate(t.Context(), db, migrations); err != nil {
+		t.Fatalf("migrate disabled sync fixture: %v", err)
+	}
+	var interval int
+	if err := db.QueryRow("SELECT sync_interval_seconds FROM sync_connections WHERE id = 1").Scan(&interval); err != nil {
+		t.Fatalf("read disabled interval: %v", err)
+	}
+	if interval != 0 {
+		t.Fatalf("disabled interval = %d, want 0", interval)
+	}
+}
+
 func TestOpenMigratesVersionSixDatabaseWithEmptyNoteLinkIndex(t *testing.T) {
 	t.Parallel()
 

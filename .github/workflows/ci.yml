@@ -6,6 +6,7 @@ on:
       - main
       - dev-MVP
       - dev-Phase2
+      - dev-phese3
   pull_request:
   workflow_dispatch:
 
@@ -80,6 +81,9 @@ jobs:
 
       - name: Run notification store tests
         run: npm --prefix frontend run test:notifications
+
+      - name: Run sync store tests
+        run: npm --prefix frontend run test:sync
 
       - name: Run tag store tests
         run: npm --prefix frontend run test:tags

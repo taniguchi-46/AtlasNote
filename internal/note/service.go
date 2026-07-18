@@ -29,6 +29,7 @@ type Service struct {
 	repository          *Repository
 	store               markdownStore
 	mu                  sync.Mutex
+	syncGate            sync.RWMutex
 	searchIndexFailed   bool
 	noteLinkIndexFailed bool
 }
@@ -122,6 +123,9 @@ func (s *Service) refreshNoteLinkIndexStateLocked(ctx context.Context, record Re
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	// 複数リクエストやバックグラウンドのリカバリ処理が同時にデータを書き換えるのを防ぐため、排他ロックを取得する
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,6 +172,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		ContentHash: storage.HashContent(content),
 		CreatedAt:   now,
 	}
+	noteChange, err := NewNoteSyncChange(operationID, record, content)
+	if err != nil {
+		return Note{}, err
+	}
 
 	// 保存処理の途中でアプリが強制終了されてもデータが破損しないよう、
 	// ファイルとDBの2フェーズコミットに近い手順で書き込みを行う。
@@ -178,14 +186,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	}
 
 	// 2. DBにノート本体のレコードと「保存中(upsert)」を示す StorageOperation レコードを同一トランザクションで書き込む
-	if err := s.repository.CreateWithStorageOperation(ctx, record, operation); err != nil {
+	if err := s.repository.CreateWithStorageOperationAndSync(ctx, record, operation, []SyncChange{noteChange}); err != nil {
 		_ = s.store.RollbackTemp(context.Background(), id, operationID)
 		return Note{}, fmt.Errorf("create note record: %w", err)
 	}
 
 	// 3. 一時ファイルを正規のファイル名（.md）にリネームして確定する
 	if err := s.store.CommitTemp(ctx, id, operationID); err != nil {
-		rollbackErr := s.repository.RollbackCreatedNote(context.Background(), id, operationID)
+		rollbackErr := s.repository.RollbackCreatedNote(context.WithoutCancel(ctx), id, operationID)
 		if rollbackErr == nil {
 			_ = s.store.RollbackTemp(context.Background(), id, operationID)
 			return Note{}, fmt.Errorf("commit markdown: %w", err)
@@ -301,6 +309,9 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 }
 
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Note, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -325,6 +336,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	if err != nil {
 		return Note{}, err
 	}
+	previousContent := content
 
 	if input.Title != nil {
 		record.Title = *input.Title
@@ -366,20 +378,28 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			ContentHash: storage.HashContent(content),
 			CreatedAt:   time.Now().UTC(),
 		}
+		noteChange, err := NewNoteSyncChange(operationID, record, content)
+		if err != nil {
+			return Note{}, err
+		}
 
 		// Update処理でもCreate時と同様に、一時ファイル作成 -> DB更新 -> ファイル名確定 の順序を踏む。
 		// この順序により、ファイル書き込み中のクラッシュによって既存データが消失する事故を防ぐ。
 		if err := s.store.WriteTemp(ctx, record.ID, operationID, content); err != nil {
 			return Note{}, err
 		}
-		nextRevision, err := s.repository.UpdateWithStorageOperationCAS(ctx, record, operation, expectedRevision)
+		nextRevision, err := s.repository.UpdateWithStorageOperationCASAndSync(ctx, record, operation, expectedRevision, []SyncChange{noteChange})
 		if err != nil {
 			_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
 		record.Revision = nextRevision
 		if err := s.store.CommitTemp(ctx, record.ID, operationID); err != nil {
-			rollbackErr := s.repository.RollbackUpdatedNote(context.Background(), previous, operationID)
+			rollbackChange, changeErr := NewNoteSyncChange(operationID, previous, previousContent)
+			if changeErr != nil {
+				return Note{}, fmt.Errorf("commit markdown update: %w; build sync rollback: %v", err, changeErr)
+			}
+			rollbackErr := s.repository.RollbackUpdatedNote(context.WithoutCancel(ctx), previous, operationID, []SyncChange{rollbackChange})
 			if rollbackErr == nil {
 				_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
 				return Note{}, fmt.Errorf("commit markdown update: %w", err)
@@ -390,7 +410,15 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		s.updateNoteLinkIndexLocked(ctx, record, content)
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 	} else {
-		nextRevision, err := s.repository.UpdateCAS(ctx, record, expectedRevision)
+		changeSetID, err := newID()
+		if err != nil {
+			return Note{}, err
+		}
+		noteChange, err := NewNoteSyncChange(changeSetID, record, content)
+		if err != nil {
+			return Note{}, err
+		}
+		nextRevision, err := s.repository.UpdateCASWithSync(ctx, record, expectedRevision, []SyncChange{noteChange})
 		if err != nil {
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
@@ -418,6 +446,9 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 }
 
 func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) error {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -456,7 +487,11 @@ func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) erro
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 		return err
 	}
-	if err := s.repository.DeleteCAS(ctx, id, input.ExpectedRevision); err != nil {
+	changes := []SyncChange{
+		NewNoteTombstoneChange(operationID, record.ID),
+		NewNoteTagsTombstoneChange(operationID, record.ID),
+	}
+	if err := s.repository.DeleteCASWithSync(ctx, id, input.ExpectedRevision, changes); err != nil {
 		restoreErr := s.store.RestoreDelete(context.Background(), record.ID, operationID)
 		if restoreErr == nil {
 			_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
@@ -492,6 +527,9 @@ func revisionConflict(noteID string, expectedRevision int64, actualRevision int6
 }
 
 func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -602,7 +640,15 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		// advancing revision in that case would create a false conflict.
 		if found && state.IndexedRevision == record.Revision && state.ContentHash != contentHash {
 			record.UpdatedAt = time.Now().UTC()
-			nextRevision, updateErr := s.repository.UpdateCAS(ctx, record, record.Revision)
+			changeSetID, changeSetErr := newID()
+			if changeSetErr != nil {
+				return RecoveryReport{}, changeSetErr
+			}
+			noteChange, changeErr := NewNoteSyncChange(changeSetID, record, content)
+			if changeErr != nil {
+				return RecoveryReport{}, changeErr
+			}
+			nextRevision, updateErr := s.repository.UpdateCASWithSync(ctx, record, record.Revision, []SyncChange{noteChange})
 			if updateErr != nil {
 				return RecoveryReport{}, fmt.Errorf("reconcile external markdown for %s: %w", record.ID, updateErr)
 			}
@@ -638,6 +684,9 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 }
 
 func (s *Service) DeleteMissing(ctx context.Context, id string) error {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -666,7 +715,14 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 		return fmt.Errorf("%w for note %s", ErrContentAvailable, record.ID)
 	}
 
-	if err := s.repository.Delete(ctx, record.ID); err != nil {
+	changeSetID, err := newID()
+	if err != nil {
+		return err
+	}
+	if err := s.repository.DeleteWithSync(ctx, record.ID, []SyncChange{
+		NewNoteTombstoneChange(changeSetID, record.ID),
+		NewNoteTagsTombstoneChange(changeSetID, record.ID),
+	}); err != nil {
 		return err
 	}
 	s.deleteSearchIndexLocked(ctx, record.ID)

@@ -159,7 +159,7 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 作業チェック: `docs/todo/todo-phese3.md`
 
-現状: 設計レビュー完了・実装前
+現状: コア実装・ローカル自動検証完了。実WebDAVサーバー相互運用と手動UI受け入れ確認中
 
 ## WebDAV
 

@@ -16,6 +16,7 @@ export type StartupStatus = {
   message?: string
   dataDir?: string
   missingNotes: MissingNoteDiagnostic[]
+  syncRecoveryBackup?: string
 }
 
 export function getStartupStatus(): Promise<StartupStatus> {

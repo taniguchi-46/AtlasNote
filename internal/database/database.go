@@ -175,8 +175,115 @@ CREATE TABLE IF NOT EXISTS note_link_state (
 	content_hash TEXT NOT NULL,
 	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
 	indexed_at TEXT NOT NULL,
-	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
 );
+	`,
+	`
+CREATE TABLE IF NOT EXISTS sync_connections (
+	id INTEGER PRIMARY KEY CHECK(id = 1),
+	endpoint TEXT NOT NULL,
+	remote_root TEXT NOT NULL,
+	username TEXT NOT NULL DEFAULT '',
+	vault_id TEXT NOT NULL,
+	head_manifest_hash TEXT NOT NULL DEFAULT '',
+	head_etag TEXT NOT NULL DEFAULT '',
+	last_sync_at TEXT,
+	status TEXT NOT NULL DEFAULT 'disabled',
+	auto_sync BOOLEAN NOT NULL DEFAULT 0,
+	credential_ref TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_item_states (
+	entity_key TEXT PRIMARY KEY,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL DEFAULT '',
+	base_object_hash TEXT NOT NULL DEFAULT '',
+	remote_object_hash TEXT NOT NULL DEFAULT '',
+	body_hash TEXT NOT NULL DEFAULT '',
+	metadata_hash TEXT NOT NULL DEFAULT '',
+	resolution_state TEXT NOT NULL DEFAULT 'synced',
+	snapshot_json TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+	change_set_id TEXT NOT NULL,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	base_manifest_hash TEXT NOT NULL DEFAULT '',
+	base_head_etag TEXT NOT NULL DEFAULT '',
+	object_json TEXT NOT NULL DEFAULT '',
+	deleted BOOLEAN NOT NULL DEFAULT 0,
+	attempt_count INTEGER NOT NULL DEFAULT 0,
+	next_retry_at TEXT NOT NULL,
+	failed_class TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	UNIQUE(change_set_id, entity_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending
+	ON sync_outbox(next_retry_at, sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_entity
+	ON sync_outbox(entity_key, sequence);
+
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+	conflict_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL,
+	base_object_hash TEXT NOT NULL,
+	remote_object_hash TEXT NOT NULL,
+	local_snapshot_json TEXT NOT NULL DEFAULT '',
+	base_snapshot_json TEXT NOT NULL DEFAULT '',
+	remote_snapshot_json TEXT NOT NULL DEFAULT '',
+	conflict_type TEXT NOT NULL,
+	resolution_status TEXT NOT NULL DEFAULT 'open',
+	created_at TEXT NOT NULL,
+	resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status
+	ON sync_conflicts(resolution_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sync_snapshots (
+	snapshot_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	object_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_snapshots_entity
+	ON sync_snapshots(entity_key, created_at);
+	`,
+	`
+ALTER TABLE sync_connections
+	ADD COLUMN allow_insecure_http BOOLEAN NOT NULL DEFAULT 0;
+	`,
+	`
+ALTER TABLE sync_connections
+	ADD COLUMN sync_interval_seconds INTEGER NOT NULL DEFAULT 0
+	CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400));
+UPDATE sync_connections
+	SET sync_interval_seconds = CASE WHEN auto_sync THEN 300 ELSE 0 END;
+ALTER TABLE sync_connections
+	ADD COLUMN fail_safe BOOLEAN NOT NULL DEFAULT 1;
+ALTER TABLE sync_connections
+	ADD COLUMN custom_tls_certificates TEXT NOT NULL DEFAULT '';
+ALTER TABLE sync_connections
+	ADD COLUMN ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_enabled BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1
+	CHECK(proxy_timeout_seconds BETWEEN 1 AND 60);
 	`,
 }
 
@@ -355,6 +462,144 @@ CREATE TABLE IF NOT EXISTS note_link_state (
 );
 `); err != nil {
 		return fmt.Errorf("ensure indexes: %w", err)
+	}
+
+	if err := ensureSyncSchema(ctx, db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureSyncSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS sync_connections (
+	id INTEGER PRIMARY KEY CHECK(id = 1),
+	endpoint TEXT NOT NULL,
+	remote_root TEXT NOT NULL,
+	username TEXT NOT NULL DEFAULT '',
+	vault_id TEXT NOT NULL,
+	head_manifest_hash TEXT NOT NULL DEFAULT '',
+	head_etag TEXT NOT NULL DEFAULT '',
+	last_sync_at TEXT,
+	status TEXT NOT NULL DEFAULT 'disabled',
+	auto_sync BOOLEAN NOT NULL DEFAULT 0,
+	allow_insecure_http BOOLEAN NOT NULL DEFAULT 0,
+	sync_interval_seconds INTEGER NOT NULL DEFAULT 0
+		CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400)),
+	fail_safe BOOLEAN NOT NULL DEFAULT 1,
+	custom_tls_certificates TEXT NOT NULL DEFAULT '',
+	ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0,
+	proxy_enabled BOOLEAN NOT NULL DEFAULT 0,
+	proxy_url TEXT NOT NULL DEFAULT '',
+	proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1
+		CHECK(proxy_timeout_seconds BETWEEN 1 AND 60),
+	credential_ref TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_item_states (
+	entity_key TEXT PRIMARY KEY,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL DEFAULT '',
+	base_object_hash TEXT NOT NULL DEFAULT '',
+	remote_object_hash TEXT NOT NULL DEFAULT '',
+	body_hash TEXT NOT NULL DEFAULT '',
+	metadata_hash TEXT NOT NULL DEFAULT '',
+	resolution_state TEXT NOT NULL DEFAULT 'synced',
+	snapshot_json TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+	change_set_id TEXT NOT NULL,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	base_manifest_hash TEXT NOT NULL DEFAULT '',
+	base_head_etag TEXT NOT NULL DEFAULT '',
+	object_json TEXT NOT NULL DEFAULT '',
+	deleted BOOLEAN NOT NULL DEFAULT 0,
+	attempt_count INTEGER NOT NULL DEFAULT 0,
+	next_retry_at TEXT NOT NULL,
+	failed_class TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	UNIQUE(change_set_id, entity_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending
+	ON sync_outbox(next_retry_at, sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_entity
+	ON sync_outbox(entity_key, sequence);
+
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+	conflict_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL,
+	base_object_hash TEXT NOT NULL,
+	remote_object_hash TEXT NOT NULL,
+	local_snapshot_json TEXT NOT NULL DEFAULT '',
+	base_snapshot_json TEXT NOT NULL DEFAULT '',
+	remote_snapshot_json TEXT NOT NULL DEFAULT '',
+	conflict_type TEXT NOT NULL,
+	resolution_status TEXT NOT NULL DEFAULT 'open',
+	created_at TEXT NOT NULL,
+	resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status
+	ON sync_conflicts(resolution_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sync_snapshots (
+	snapshot_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	object_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_snapshots_entity
+	ON sync_snapshots(entity_key, created_at);
+`); err != nil {
+		return fmt.Errorf("ensure sync schema: %w", err)
+	}
+	columns, err := tableColumns(ctx, db, "sync_connections")
+	if err != nil {
+		return err
+	}
+	if !columns["username"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sync_connections ADD COLUMN username TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add sync connection username column: %w", err)
+		}
+	}
+	if !columns["allow_insecure_http"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sync_connections ADD COLUMN allow_insecure_http BOOLEAN NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add sync connection http policy column: %w", err)
+		}
+	}
+	additions := []struct {
+		column string
+		query  string
+	}{
+		{"sync_interval_seconds", "ALTER TABLE sync_connections ADD COLUMN sync_interval_seconds INTEGER NOT NULL DEFAULT 0 CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400))"},
+		{"fail_safe", "ALTER TABLE sync_connections ADD COLUMN fail_safe BOOLEAN NOT NULL DEFAULT 1"},
+		{"custom_tls_certificates", "ALTER TABLE sync_connections ADD COLUMN custom_tls_certificates TEXT NOT NULL DEFAULT ''"},
+		{"ignore_tls_errors", "ALTER TABLE sync_connections ADD COLUMN ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0"},
+		{"proxy_enabled", "ALTER TABLE sync_connections ADD COLUMN proxy_enabled BOOLEAN NOT NULL DEFAULT 0"},
+		{"proxy_url", "ALTER TABLE sync_connections ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''"},
+		{"proxy_timeout_seconds", "ALTER TABLE sync_connections ADD COLUMN proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1 CHECK(proxy_timeout_seconds BETWEEN 1 AND 60)"},
+	}
+	for _, addition := range additions {
+		if columns[addition.column] {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, addition.query); err != nil {
+			return fmt.Errorf("add sync connection %s column: %w", addition.column, err)
+		}
 	}
 
 	return nil

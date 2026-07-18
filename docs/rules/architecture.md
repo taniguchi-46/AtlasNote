@@ -46,7 +46,7 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
-| WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3確定設計に従う同期処理。実装前 |
+| WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援 |
 
 ## データ / 状態管理
@@ -69,11 +69,14 @@ Go Backend
 - SQLite に対応しない Markdown や一時ファイルは削除せず、`notes/recovery/` へ退避する。
 - SQLite レコードに対応する Markdown を復旧できない場合は、SQLite レコードを自動削除せず起動エラーとする。
 - 同一プロセス内のノート・ノートブック操作は Service で直列化し、重複する自動保存による世代ずれを防ぐ。
+- Sync Serviceはremote比較から受信適用・同期状態commitまでNote Serviceの同期専用ゲートを保持する。同期中に開始されたローカル変更は完了後に実行してoutboxへ残し、remote適用や復旧commitとの競合で消失させない。
 - アプリ起動時はSQLiteやMarkdownへアクセスする前に、データディレクトリ直下の `atlasnote.lock` をOSレベルで排他取得する。同じデータディレクトリを使用する2つ目のプロセスはwriterとして初期化しない。
 - ロックはアプリ終了時にSQLite接続を閉じてから解放する。ロックファイルの存在自体ではなくOSロックの取得結果で判定し、異常終了後にファイルが残っても次回起動を妨げない。
 - 単一writer保証とは別に、整数 `revision` と `expectedRevision` による同一端末内のCASを管理する。端末間の比較には同期用のhead、manifest、object、baseを使用する。
 - revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/note-concurrency.md` を正とする。
-- ローカル保存キューと将来の同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
+- ローカル保存キューと同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
+- 空の同期先を検出した場合は既定ONのフェイルセーフでlocal正本へのremote適用を止める。再アップロードはheadの`If-Match`成功後だけlocal同期状態を更新する。
+- remote正本からの全再取得は実行中のDB・notesへ直接適用せず、`.sync-recovery/staging/`の別vaultでhash・payload・SQLite integrityを検証する。次回起動時にデータロック取得後かつSQLite open前に現行vaultを`.sync-recovery/backups/`へ退避してswapし、失敗時はrollbackする。
 
 ### Markdown全文検索
 
@@ -105,9 +108,9 @@ Go Backend
 
 | 連携 | 方針 |
 | --- | --- |
-| WebDAV | Phase 3で採用する同期方式。設計は確定済み・実装前で、`head`/manifest/object配置、HTTPS/Basic認証、outbox、競合解決は `docs/development/webdav-sync.md` を正とする |
+| WebDAV | Phase 3で採用する同期方式。コア実装済み・実サーバー受け入れ確認中で、`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧は `docs/development/webdav-sync.md` を正とする |
 | AI API | ユーザー自身の API Key を利用する。保存方式、対応プロバイダ、モデル選択は未確定 |
-| OS Keychain | API Key 保存先の候補。採用可否は未確定 |
+| OS Keychain | WebDAVパスワードはCredential Manager / Keychain / Secret Serviceへ保存し、利用不可時はsession限定。AI API Keyの保存方式は未確定 |
 
 ### 外部Markdownのraw HTML
 

@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
+export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360
@@ -30,6 +31,7 @@ function readStringOption<T extends readonly string[]>(key: string, fallback: T[
 
 export const useSettingsStore = defineStore('settings', () => {
   const isSettingsOpen = ref(false)
+  const requestedTab = ref<SettingsTab>('theme')
 
   // Layout Settings
   const sidebarWidth = ref(
@@ -102,7 +104,8 @@ export const useSettingsStore = defineStore('settings', () => {
     localStorage.setItem('atlas-default-notebook-icon', icon)
   }, { immediate: true })
   
-  function openSettings() {
+  function openSettings(tab?: SettingsTab) {
+    if (tab) requestedTab.value = tab
     isSettingsOpen.value = true
   }
   
@@ -120,6 +123,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     isSettingsOpen,
+    requestedTab,
     sidebarWidth,
     noteListWidth,
     fontFamily,

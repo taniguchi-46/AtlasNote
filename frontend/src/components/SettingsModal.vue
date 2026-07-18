@@ -141,6 +141,10 @@
             </section>
           </TabsContent>
 
+          <TabsContent value="sync" as-child>
+            <SyncSettingsPanel />
+          </TabsContent>
+
         </main>
       </TabsRoot>
       </DialogContent>
@@ -149,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { XIcon } from '@lucide/vue'
 import {
   DialogClose,
@@ -167,18 +171,33 @@ import {
 } from 'reka-ui'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useAppStore } from '../stores/useAppStore'
+import type { SettingsTab } from '../stores/useSettingsStore'
+import { useSyncStore } from '../stores/useSyncStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
+import SyncSettingsPanel from './SyncSettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()
+const syncStore = useSyncStore()
 
 const tabs = [
   { id: 'theme', name: 'テーマ' },
   { id: 'general', name: '一般' },
   { id: 'editor', name: 'エディター' },
 ]
-const activeTab = ref('theme')
+tabs.push({ id: 'sync', name: '同期' })
+const activeTab = ref<SettingsTab>('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
+
+watch(
+  [() => settingsStore.isSettingsOpen, () => settingsStore.requestedTab],
+  ([open, requestedTab]) => {
+    if (open) {
+      activeTab.value = requestedTab
+      syncStore.resetDraft()
+    }
+  },
+)
 
 function handleOpenChange(open: boolean) {
   if (open) {
@@ -186,6 +205,7 @@ function handleOpenChange(open: boolean) {
     return
   }
 
+  syncStore.discardDraft()
   settingsStore.closeSettings()
 }
 </script>
@@ -357,4 +377,5 @@ input[type='range'] {
   background-color: var(--bg-hover);
   color: var(--text-primary);
 }
+
 </style>

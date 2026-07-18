@@ -19,6 +19,161 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+func TestSyncExclusiveGateBlocksLocalMutations(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+	service := note.NewService(note.NewRepository(db), store)
+
+	syncCtx, unlockSync := service.BeginSyncExclusive(ctx)
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			unlockSync()
+		}
+	}()
+	if _, err := service.Create(syncCtx, note.CreateInput{Title: "Remote", Content: "applied by sync"}); err != nil {
+		t.Fatalf("sync-owned mutation: %v", err)
+	}
+
+	started := make(chan struct{})
+	mutationDone := make(chan error, 1)
+	go func() {
+		close(started)
+		_, createErr := service.Create(ctx, note.CreateInput{Title: "Local", Content: "wait for sync"})
+		mutationDone <- createErr
+	}()
+	<-started
+	select {
+	case mutationErr := <-mutationDone:
+		t.Fatalf("local mutation completed while sync gate was held: %v", mutationErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	unlockSync()
+	unlocked = true
+	select {
+	case mutationErr := <-mutationDone:
+		if mutationErr != nil {
+			t.Fatalf("local mutation after sync gate release: %v", mutationErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("local mutation did not resume after sync gate release")
+	}
+}
+
+func TestApplySyncTagRejectsMismatchedNormalizedName(t *testing.T) {
+	service := note.NewService(nil, nil)
+	err := service.ApplySyncTag(context.Background(), note.SyncTagPayload{
+		ID: strings.Repeat("a", 32), Name: "Tag", NormalizedName: "not-the-normalized-name",
+	})
+	if !errors.Is(err, note.ErrValidation) {
+		t.Fatalf("mismatched normalized tag error = %v", err)
+	}
+}
+
+func TestApplySyncUpdatesPreserveRemoteTimestamps(t *testing.T) {
+	ctx, repository, _, service, _ := newRecoveryTestService(t)
+	createdAt := time.Date(2024, time.January, 2, 3, 4, 5, 6, time.UTC)
+	updatedAt := time.Date(2025, time.February, 3, 4, 5, 6, 7, time.UTC)
+
+	createdNote, err := service.Create(ctx, note.CreateInput{Title: "Local", Content: "local"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := service.ApplySyncNote(ctx, note.SyncNotePayload{
+		ID: createdNote.ID, Title: "Remote", Content: "remote",
+		CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: updatedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("apply synced note: %v", err)
+	}
+	syncedNote, err := service.Get(ctx, createdNote.ID)
+	if err != nil {
+		t.Fatalf("get synced note: %v", err)
+	}
+	if !syncedNote.CreatedAt.Equal(createdAt) || !syncedNote.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("synced note timestamps = %s / %s", syncedNote.CreatedAt, syncedNote.UpdatedAt)
+	}
+
+	createdNotebook, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Local notebook"})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+	if err := service.ApplySyncNotebook(ctx, note.SyncNotebookPayload{
+		ID: createdNotebook.ID, Name: "Remote notebook", Icon: createdNotebook.Icon,
+		CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: updatedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("apply synced notebook: %v", err)
+	}
+	syncedNotebook, err := repository.GetNotebook(ctx, createdNotebook.ID)
+	if err != nil {
+		t.Fatalf("get synced notebook: %v", err)
+	}
+	if !syncedNotebook.CreatedAt.Equal(createdAt) || !syncedNotebook.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("synced notebook timestamps = %s / %s", syncedNotebook.CreatedAt, syncedNotebook.UpdatedAt)
+	}
+
+	createdTag, err := service.CreateTag(ctx, note.TagCreateInput{Name: "Local tag"})
+	if err != nil || createdTag.Tag == nil {
+		t.Fatalf("create tag: result=%#v err=%v", createdTag, err)
+	}
+	if err := service.ApplySyncTag(ctx, note.SyncTagPayload{
+		ID: createdTag.Tag.ID, Name: "Remote tag", NormalizedName: "remote tag",
+		CreatedAt: createdAt.Format(time.RFC3339Nano), UpdatedAt: updatedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("apply synced tag: %v", err)
+	}
+	tags, err := service.ListTags(ctx)
+	if err != nil {
+		t.Fatalf("list synced tags: %v", err)
+	}
+	for _, tag := range tags {
+		if tag.ID == createdTag.Tag.ID {
+			if !tag.CreatedAt.Equal(createdAt) || !tag.UpdatedAt.Equal(updatedAt) {
+				t.Fatalf("synced tag timestamps = %s / %s", tag.CreatedAt, tag.UpdatedAt)
+			}
+			return
+		}
+	}
+	t.Fatal("synced tag was not found")
+}
+
+func TestApplySyncTagReturnsNameConflictInsteadOfMarkingItApplied(t *testing.T) {
+	ctx, _, _, service, _ := newRecoveryTestService(t)
+	first, err := service.CreateTag(ctx, note.TagCreateInput{Name: "Alpha"})
+	if err != nil || first.Tag == nil {
+		t.Fatalf("create first tag: result=%#v err=%v", first, err)
+	}
+	second, err := service.CreateTag(ctx, note.TagCreateInput{Name: "Beta"})
+	if err != nil || second.Tag == nil {
+		t.Fatalf("create second tag: result=%#v err=%v", second, err)
+	}
+	err = service.ApplySyncTag(ctx, note.SyncTagPayload{
+		ID: second.Tag.ID, Name: "Alpha", NormalizedName: "alpha",
+		CreatedAt: second.Tag.CreatedAt.Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err == nil {
+		t.Fatal("synced tag name conflict was silently accepted")
+	}
+	tags, listErr := service.ListTags(ctx)
+	if listErr != nil {
+		t.Fatalf("list tags: %v", listErr)
+	}
+	for _, tag := range tags {
+		if tag.ID == second.Tag.ID && tag.Name != "Beta" {
+			t.Fatalf("conflicting synced tag was applied: %#v", tag)
+		}
+	}
+}
+
 func TestServiceCreateGetUpdateDelete(t *testing.T) {
 	t.Parallel()
 

@@ -123,6 +123,8 @@ import { useAppStore } from './stores/useAppStore'
 import { useNotebookStore } from './stores/useNotebookStore'
 import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
 import { useTagStore } from './stores/useTagStore'
+import { useSyncStore } from './stores/useSyncStore'
+import { useNotificationStore } from './stores/useNotificationStore'
 import { logOperationFailure } from './utils/operationLogger'
 import {
   EDITOR_WIDTH_MIN,
@@ -140,7 +142,10 @@ const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const tagStore = useTagStore()
+const syncStore = useSyncStore()
+const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
+syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
 const startupStatus = ref<StartupStatus | null>(null)
 const isRecoveryBusy = ref(false)
 const recoveryError = ref('')
@@ -164,7 +169,22 @@ const searchFilters = computed<SearchFilters>(() => ({
 }))
 
 // TopBar actions
-function handleSync() {
+async function handleSync() {
+  try {
+    const result = await syncStore.refresh()
+    if (!result.connection || result.status === 'disabled') {
+      settingsStore.openSettings('sync')
+      return
+    }
+    await syncStore.runSync({ forceRetry: true })
+  } catch (_) {
+    notificationStore.notify('同期を開始できませんでした', {
+      kind: 'error',
+      source: 'sync',
+      code: 'SYNC_START_FAILED',
+      retryable: true,
+    })
+  }
 }
 
 function handleSearch(query: string) {
@@ -203,6 +223,7 @@ watch(
 
 watch(() => noteStore.saveFeedbackVersion, () => {
   if (searchStore.isActive) void searchStore.refresh()
+  syncStore.scheduleAutoSync()
 })
 
 function missingNoteIds(status: StartupStatus | null) {
@@ -404,6 +425,11 @@ onMounted(async () => {
     if (startupStatus.value.ready) {
       await noteStore.fetchNotes(missingNoteIds(startupStatus.value))
       await tagStore.fetchTags()
+      if (startupStatus.value.syncRecoveryBackup) {
+        notificationStore.notify('同期先からの復旧が完了し、以前のローカルデータをバックアップしました', {
+          kind: 'success', source: 'sync', code: 'SYNC_RECOVERY_REDOWNLOAD_COMPLETED',
+        })
+      }
     }
   } catch (_) {
     // Network or Wails not available (dev browser mode)
@@ -412,6 +438,8 @@ onMounted(async () => {
       tagStore.fetchTags().catch(() => {}),
     ])
   }
+
+  await syncStore.initialize().catch(() => {})
 
   // Apply initial always-on-top status
   try {
@@ -425,6 +453,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
+  syncStore.dispose()
   document.body.classList.remove('is-pane-resizing')
 })
 </script>

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 )
@@ -22,6 +23,16 @@ type tagScanner interface {
 }
 
 func (r *Repository) CreateTag(ctx context.Context, record tagRecord) error {
+	return r.CreateTagWithSync(ctx, record, nil)
+}
+
+func (r *Repository) CreateTagWithSync(ctx context.Context, record tagRecord, changes []SyncChange) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tag insert tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	query, args, err := psql.Insert(tagsTable).
 		Columns("id", "name", "normalized_name", "created_at", "updated_at").
 		Values(record.ID, record.Name, record.NormalizedName, formatTime(record.CreatedAt), formatTime(record.UpdatedAt)).
@@ -29,8 +40,14 @@ func (r *Repository) CreateTag(ctx context.Context, record tagRecord) error {
 	if err != nil {
 		return fmt.Errorf("build tag insert: %w", err)
 	}
-	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert tag: %w", err)
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tag insert tx: %w", err)
 	}
 
 	return nil
@@ -96,6 +113,33 @@ func (r *Repository) ListTags(ctx context.Context) ([]Tag, error) {
 	return scanTags(rows)
 }
 
+func (r *Repository) ListTagRecords(ctx context.Context) ([]tagRecord, error) {
+	query, args, err := psql.Select("id", "name", "normalized_name", "created_at", "updated_at").
+		From(tagsTable).
+		OrderBy("normalized_name ASC", "id ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build tag record list: %w", err)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list tag records: %w", err)
+	}
+	defer rows.Close()
+	records := make([]tagRecord, 0)
+	for rows.Next() {
+		record, err := scanTag(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tag records: %w", err)
+	}
+	return records, nil
+}
+
 func (r *Repository) ListNoteTags(ctx context.Context, noteID string) ([]Tag, error) {
 	query, args, err := psql.Select(
 		"tags.id",
@@ -122,7 +166,61 @@ func (r *Repository) ListNoteTags(ctx context.Context, noteID string) ([]Tag, er
 	return scanTags(rows)
 }
 
+func (r *Repository) ListNoteTagIDs(ctx context.Context, noteID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT tag_id
+FROM note_tags
+WHERE note_id = ?
+ORDER BY tag_id
+`, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("list note tag ids: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan note tag id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate note tag ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *Repository) UpdateTag(ctx context.Context, record tagRecord) error {
+	return r.UpdateTagWithSync(ctx, record, nil)
+}
+
+func (r *Repository) SetTagSyncTimes(ctx context.Context, id string, createdAt time.Time, updatedAt time.Time) error {
+	result, err := r.db.ExecContext(ctx, `
+UPDATE tags
+SET created_at = ?, updated_at = ?
+WHERE id = ?
+`, formatTime(createdAt), formatTime(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("set synced tag timestamps: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read synced tag timestamp result: %w", err)
+	}
+	if affected != 1 {
+		return ErrTagNotFound
+	}
+	return nil
+}
+
+func (r *Repository) UpdateTagWithSync(ctx context.Context, record tagRecord, changes []SyncChange) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tag update tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	query, args, err := psql.Update(tagsTable).
 		Set("name", record.Name).
 		Set("normalized_name", record.NormalizedName).
@@ -133,7 +231,7 @@ func (r *Repository) UpdateTag(ctx context.Context, record tagRecord) error {
 		return fmt.Errorf("build tag update: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update tag: %w", err)
 	}
@@ -144,17 +242,33 @@ func (r *Repository) UpdateTag(ctx context.Context, record tagRecord) error {
 	if updated == 0 {
 		return ErrTagNotFound
 	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tag update tx: %w", err)
+	}
 
 	return nil
 }
 
 func (r *Repository) DeleteTag(ctx context.Context, id string) error {
+	return r.DeleteTagWithSync(ctx, id, nil)
+}
+
+func (r *Repository) DeleteTagWithSync(ctx context.Context, id string, changes []SyncChange) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tag delete tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	query, args, err := psql.Delete(tagsTable).Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build tag delete: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", err)
 	}
@@ -165,11 +279,21 @@ func (r *Repository) DeleteTag(ctx context.Context, id string) error {
 	if deleted == 0 {
 		return ErrTagNotFound
 	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tag delete tx: %w", err)
+	}
 
 	return nil
 }
 
 func (r *Repository) ReplaceNoteTags(ctx context.Context, noteID string, tagIDs []string) error {
+	return r.ReplaceNoteTagsWithSync(ctx, noteID, tagIDs, nil)
+}
+
+func (r *Repository) ReplaceNoteTagsWithSync(ctx context.Context, noteID string, tagIDs []string, changes []SyncChange) error {
 	tagIDs = deduplicateTagIDs(tagIDs)
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -207,12 +331,41 @@ func (r *Repository) ReplaceNoteTags(ctx context.Context, noteID string, tagIDs 
 			return fmt.Errorf("insert note tag: %w", err)
 		}
 	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit note tag replace tx: %w", err)
 	}
 
 	return nil
+}
+
+func (r *Repository) ListNoteIDsForTag(ctx context.Context, tagID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT note_id
+FROM note_tags
+WHERE tag_id = ?
+ORDER BY note_id
+`, tagID)
+	if err != nil {
+		return nil, fmt.Errorf("list notes for tag: %w", err)
+	}
+	defer rows.Close()
+
+	noteIDs := make([]string, 0)
+	for rows.Next() {
+		var noteID string
+		if err := rows.Scan(&noteID); err != nil {
+			return nil, fmt.Errorf("scan note for tag: %w", err)
+		}
+		noteIDs = append(noteIDs, noteID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notes for tag: %w", err)
+	}
+	return noteIDs, nil
 }
 
 func ensureNoteExists(ctx context.Context, executor sqlQueryExecutor, noteID string) error {
