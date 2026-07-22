@@ -173,23 +173,20 @@ Wasm は初期段階では採用しない。
 - WebDAV 認証情報
 - AI API 認証情報
 
-`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。
+`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
 
 キー名だけを記載した `.env.example` を使用する。
 
 例:
 
 ```bash
-AI_PROVIDER=
-AI_API_KEY=
-AI_MODEL=
 WEBDAV_ENDPOINT=
 WEBDAV_USERNAME=
 WEBDAV_PASSWORD=
 ATLAS_NOTE_DATA_DIR=
 ```
 
-実値はローカル環境または OS の安全な保存先で管理する。AI API Key の保存方法は、将来的に OS Keychain の利用可否を確認して決める。
+AI設定はアプリの設定画面で管理する。AI API KeyはWebDAVとは分離したAI用OS CredentialStoreへ保存し、利用できない場合だけsession-onlyとする。実キーを`.env`、環境変数、SQLite、Markdown、`localStorage`へ保存しない。
 
 ## 今後決めること
 

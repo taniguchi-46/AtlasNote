@@ -184,18 +184,21 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 作業チェック: `docs/todo/todo-phese4.md`
 
-現状: 実装前。AI認証・保存・同期境界などの前提を確定するまでPhase 4実装は開始しない。
+現状: D-01〜D-07の実装前設計は承認済み（2026-07-22）。Phase 4のコード実装と、D-07で定めた自動テスト・受け入れは未着手である。詳細な正本は`scope-phese4.md`、`ai-integration.md`、`todo-phese4.md`とする。
 
 ## AI設定
 
 - API Key管理
 - プロバイダー切り替え
 
-対応
+v1初期対応
 
 - Gemini
-- Groq
 - OpenRouter
+
+後続候補
+
+- Groq
 - OpenAI
 - Ollama
 - LM Studio
@@ -204,7 +207,12 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 ## AI司書
 
-- メモ要約
+v1初期対応
+
+- メモ要約（接続確認後の単発テキスト生成、画面上の一時結果のみ）
+
+後続候補
+
 - タイトル生成
 - タグ生成
 - 自動分類

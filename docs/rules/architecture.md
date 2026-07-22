@@ -47,7 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援 |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援。v1のメモ要約は画面上だけの一時結果であり、Markdown・SQLite・同期データには保存しない。AI設定と資格情報も端末ローカルとする |
 
 ## データ / 状態管理
 
@@ -109,8 +109,8 @@ Go Backend
 | 連携 | 方針 |
 | --- | --- |
 | WebDAV | Phase 3で採用する同期方式。コア実装済み・実サーバー受け入れ確認中で、`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧は `docs/development/webdav-sync.md` を正とする |
-| AI API | ユーザー自身の API Key を利用する。保存方式、対応プロバイダ、モデル選択は未確定 |
-| OS Keychain | WebDAVパスワードはCredential Manager / Keychain / Secret Serviceへ保存し、利用不可時はsession限定。AI API Keyの保存方式は未確定 |
+| AI API | ユーザー自身の API Key を利用する。v1の初期プロバイダーはOpenRouterとGemini API、機能範囲はAI設定とメモ要約、モデル一覧はプロバイダーから取得する。要約は画面上だけの一時結果とし、ノート本文、SQLite、索引、操作journal、WebDAV outboxへ保存・自動反映しない。AI設定のプロバイダーID・モデルID・credential referenceとAPI Keyも端末ローカルであり、WebDAV同期しない。接続先は固定HTTPSのみで、proxy・redirect・自動retryは提供しない。Go側Provider adapterは接続確認・モデル一覧・単発要約だけを公開し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する。本文入力は12 KiB、出力は512 tokens、要約生成のdeadlineは60秒とする。AI設定は下書き・接続確認・明示適用で更新し、要約は保存済み本文のsnapshotを毎回確認して送信する |
+| OS Keychain | WebDAVパスワードとAI API KeyはCredential Manager / Keychain / Secret Serviceへ別のservice namespaceで保存し、利用不可時はsession限定とする。AI API Keyを`.env`、SQLite、Markdown、`localStorage`へ保存しない |
 
 ### 外部Markdownのraw HTML
 

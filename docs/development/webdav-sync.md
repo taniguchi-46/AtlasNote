@@ -39,7 +39,7 @@ Markdownだけを送受信すると、SQLiteに保存しているタイトル、
 
 ノートブック削除など複数entityに影響する操作は、削除コマンドとして送らない。ローカル操作後の結果として変更された全entityをひとつの同期change setへ記録する。これにより、子ノートブックの削除、ノートのtrash・切り離しなどの副作用を別端末でも同じ結果として適用できる。
 
-同期対象に添付ファイル、履歴、関連メモ、AI生成結果は含めない。これらは別Phaseまたは別設計とする。
+同期対象に添付ファイル、履歴、関連メモ、AI生成結果、v1のAI設定（プロバイダーID・モデルID・credential reference）、AI資格情報は含めない。AI関連の同期境界はPhase 4のD-04を正とし、これらは別Phaseまたは別設計とする。
 
 ## 3. リモート配置と識別子
 
@@ -224,7 +224,7 @@ wails build
 ## 11. 対象外
 
 - Google Drive、OneDrive、Dropbox、Git Repositoryとの同期
-- 添付ファイル、履歴、関連メモ、AI生成結果の同期
+- 添付ファイル、履歴、関連メモ、AI生成結果、v1のAI設定・AI資格情報の同期
 - SQLite DB、FTS5内部shadow table、ノートリンク索引の直接同期
 - 自動merge、無確認の強制上書き、無期限のバックグラウンドretry
 - WebDAV認証情報を平文ログ、`localStorage`、SQLite、`.env`へ保存すること

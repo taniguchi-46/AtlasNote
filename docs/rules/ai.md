@@ -57,5 +57,6 @@
 | Phase 3実装計画 | `docs/development/implementation-plan.md` | Phase 3の実装順序 |
 | Phase 3 TODO | `docs/todo/todo-phese3.md` | Phase 3の進捗と受け入れ確認 |
 | Phase 4詳細スコープ | `docs/development/scopes/scope-phese4.md` | Phase 4の実装前要求範囲と境界 |
+| Phase 4 AI決定記録 | `docs/development/ai-integration.md` | D-01〜D-07の承認内容と開始ゲート |
 | Phase 4実装前TODO | `docs/todo/todo-phese4.md` | AI認証・保存・同期境界などの未確定課題 |
 | Agent skill | `.agents/skills/skill.md` | 作業時に参照する汎用手順 |

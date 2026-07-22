@@ -20,6 +20,7 @@ Atlas Note のドキュメント入口です。現在の状況、要求範囲、
 | Phase 3実装順序 | [implementation-plan.md](development/implementation-plan.md) | 設計に従った実装ステップ |
 | Phase 3進捗 | [todo-phese3.md](todo/todo-phese3.md) | 実装・検証チェックリスト |
 | Phase 4詳細スコープ | [scope-phese4.md](development/scopes/scope-phese4.md) | AI機能の実装前要求範囲と境界 |
+| Phase 4 AI決定記録 | [ai-integration.md](development/ai-integration.md) | D-01〜D-07の承認内容とPhase 4開始ゲート |
 | Phase 4実装前TODO | [todo-phese4.md](todo/todo-phese4.md) | AI認証・保存・同期境界などの未確定課題 |
 | 横断ルール | [docs/rules/](rules/) | Agent、アーキテクチャ、命名、Git、用語 |
 
