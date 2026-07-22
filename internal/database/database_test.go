@@ -58,7 +58,7 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 		t.Fatalf("search index state table name = %q", tableName)
 	}
 
-	for _, expectedTable := range []string{"tags", "note_tags"} {
+	for _, expectedTable := range []string{"tags", "note_tags", "ai_provider_settings"} {
 		if err := db.QueryRowContext(
 			t.Context(),
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -79,6 +79,19 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	}
 	if tableName != "idx_note_tags_tag_id_note_id" {
 		t.Fatalf("note tag reverse index = %q", tableName)
+	}
+
+	aiColumns, err := tableColumns(t.Context(), db, "ai_provider_settings")
+	if err != nil {
+		t.Fatalf("read AI provider settings columns: %v", err)
+	}
+	for _, requiredColumn := range []string{"provider_id", "model_id", "credential_ref", "credential_storage"} {
+		if !aiColumns[requiredColumn] {
+			t.Fatalf("AI provider settings missing %s", requiredColumn)
+		}
+	}
+	if aiColumns["api_key"] || aiColumns["secret"] {
+		t.Fatal("AI provider settings schema contains a secret column")
 	}
 }
 
@@ -461,6 +474,52 @@ VALUES (1, 'https://dav.example.test', '/', 'alice', 'vault', 0, 'ref', 'now', '
 	}
 	if interval != 0 {
 		t.Fatalf("disabled interval = %d, want 0", interval)
+	}
+}
+
+func TestOpenMigratesVersionTenDatabaseWithAIProviderSettingsSchema(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open version ten database: %v", err)
+	}
+	for index, migration := range migrations[:10] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply version ten migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 10"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set version ten: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close version ten database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate version ten database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	var userVersion int
+	if err := db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&userVersion); err != nil {
+		t.Fatalf("read migrated user version: %v", err)
+	}
+	if userVersion != len(migrations) {
+		t.Fatalf("migrated user version = %d, want %d", userVersion, len(migrations))
+	}
+	var tableName string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ai_provider_settings'
+`).Scan(&tableName); err != nil {
+		t.Fatalf("read AI provider settings table: %v", err)
+	}
+	if tableName != "ai_provider_settings" {
+		t.Fatalf("AI provider settings table = %q", tableName)
 	}
 }
 

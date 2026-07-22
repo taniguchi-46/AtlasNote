@@ -2,15 +2,27 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	aiservice "atlasnote/internal/ai"
+	"atlasnote/internal/credential"
+	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
 )
+
+type appTestAIConnectionChecker struct {
+	err error
+}
+
+func (c *appTestAIConnectionChecker) Check(context.Context, aiservice.ProviderID, string) error {
+	return c.err
+}
 
 func TestGetStartupStatusReady(t *testing.T) {
 	app := &App{dataDir: "C:\\AtlasNote"}
@@ -25,6 +37,53 @@ func TestGetStartupStatusReady(t *testing.T) {
 	}
 	if status.DataDir != "C:\\AtlasNote" {
 		t.Fatalf("data dir = %q", status.DataDir)
+	}
+}
+
+func TestAppAIAPIsDoNotExposeCredentialsOrPersistFailedConnectionChecks(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	checker := &appTestAIConnectionChecker{}
+	aiService := aiservice.NewService(
+		aiservice.NewRepository(db),
+		credential.NewManager(credential.NewSessionStore()),
+		checker,
+	)
+	app := &App{ctx: t.Context(), aiService: aiService}
+	secretMarker := "wails-api-secret-marker"
+
+	settings, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     secretMarker,
+		ModelID:    "openrouter/model",
+	})
+	if err != nil {
+		t.Fatalf("configure AI provider: %v", err)
+	}
+	serialized, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("serialize safe settings: %v", err)
+	}
+	if strings.Contains(string(serialized), secretMarker) {
+		t.Fatal("Wails AI settings response exposed an API key")
+	}
+
+	checker.err = errors.New("raw provider failure " + secretMarker)
+	if _, err := app.TestAIConnection(aiservice.TestConnectionInput{ProviderID: aiservice.ProviderGemini, APIKey: secretMarker}); !errors.Is(err, aiservice.ErrProviderUnavailable) {
+		t.Fatalf("test AI connection error = %v", err)
+	} else if strings.Contains(err.Error(), secretMarker) {
+		t.Fatal("Wails AI connection error exposed an API key")
+	}
+	var configured int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_provider_settings WHERE provider_id = ?", aiservice.ProviderGemini).Scan(&configured); err != nil {
+		t.Fatalf("count Gemini settings: %v", err)
+	}
+	if configured != 0 {
+		t.Fatalf("failed connection test persisted %d Gemini settings", configured)
 	}
 }
 

@@ -285,6 +285,16 @@ ALTER TABLE sync_connections
 	ADD COLUMN proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1
 	CHECK(proxy_timeout_seconds BETWEEN 1 AND 60);
 	`,
+	`
+CREATE TABLE IF NOT EXISTS ai_provider_settings (
+	provider_id TEXT PRIMARY KEY CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL DEFAULT '',
+	credential_ref TEXT NOT NULL,
+	credential_storage TEXT NOT NULL CHECK(credential_storage IN ('persistent', 'session-only')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -467,7 +477,26 @@ CREATE TABLE IF NOT EXISTS note_link_state (
 	if err := ensureSyncSchema(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureAIProviderSettingsSchema(ctx, db); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func ensureAIProviderSettingsSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS ai_provider_settings (
+	provider_id TEXT PRIMARY KEY CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL DEFAULT '',
+	credential_ref TEXT NOT NULL,
+	credential_storage TEXT NOT NULL CHECK(credential_storage IN ('persistent', 'session-only')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+`); err != nil {
+		return fmt.Errorf("ensure AI provider settings schema: %w", err)
+	}
 	return nil
 }
 

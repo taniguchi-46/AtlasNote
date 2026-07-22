@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"sync"
 
+	aiservice "atlasnote/internal/ai"
 	"atlasnote/internal/config"
+	"atlasnote/internal/credential"
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
@@ -23,6 +25,7 @@ type App struct {
 	dataLock           *datalock.Lock
 	notes              *note.Service
 	syncService        *syncservice.Service
+	aiService          *aiservice.Service
 	dataDir            string
 	startupErr         error
 	recoveryReport     note.RecoveryReport
@@ -324,6 +327,41 @@ func (a *App) DisconnectSync() error {
 	return a.syncService.Disconnect(a.ctx)
 }
 
+func (a *App) GetAISettings() ([]aiservice.ProviderSettings, error) {
+	if a.aiService == nil {
+		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.GetSettings(a.ctx)
+}
+
+func (a *App) ConfigureAIProvider(input aiservice.ConfigureProviderInput) ([]aiservice.ProviderSettings, error) {
+	if a.aiService == nil {
+		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.Configure(a.ctx, input)
+}
+
+func (a *App) TestAIConnection(input aiservice.TestConnectionInput) (aiservice.ConnectionTestResult, error) {
+	if a.aiService == nil {
+		return aiservice.ConnectionTestResult{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.TestConnection(a.ctx, input)
+}
+
+func (a *App) DeleteAIProviderCredential(providerID string) ([]aiservice.ProviderSettings, error) {
+	if a.aiService == nil {
+		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.DeleteProvider(a.ctx, aiservice.ProviderID(providerID))
+}
+
+func (a *App) DeleteAllAICredentials() ([]aiservice.ProviderSettings, error) {
+	if a.aiService == nil {
+		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.DeleteAll(a.ctx)
+}
+
 func (a *App) PrepareSyncRecovery(action string) (syncservice.RecoveryPreview, error) {
 	if a.syncService == nil {
 		return syncservice.RecoveryPreview{}, errors.New("sync service is not initialized")
@@ -417,10 +455,13 @@ func (a *App) initialize(ctx context.Context) {
 
 	noteRepository := note.NewRepository(db)
 	syncRepository := syncservice.NewRepository(db)
+	aiRepository := aiservice.NewRepository(db)
 	noteRepository.SetSyncChangeRecorder(syncRepository)
 	service := note.NewService(noteRepository, store)
 	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
 	syncService := syncservice.NewService(syncRepository, service, credentialManager)
+	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
+	aiService := aiservice.NewService(aiRepository, aiCredentialManager, aiservice.NewHTTPConnectionChecker())
 	syncService.SetRecoveryDataDir(paths.DataDir)
 	recoveryReport, err := service.Recover(ctx)
 	if err != nil {
@@ -434,6 +475,7 @@ func (a *App) initialize(ctx context.Context) {
 	a.db = db
 	a.notes = service
 	a.syncService = syncService
+	a.aiService = aiService
 	a.recoveryReport = recoveryReport
 }
 
