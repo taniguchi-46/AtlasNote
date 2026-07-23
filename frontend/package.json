@@ -15,6 +15,7 @@
     "test:note-delete": "node scripts/test-note-delete.mjs",
     "test:notifications": "node scripts/test-notification-store.mjs",
     "test:sync": "node scripts/test-sync-store.mjs",
+    "test:ai-store": "node scripts/test-ai-store.mjs",
     "test:tags": "node scripts/test-tag-store.mjs",
     "test:operation-logger": "node scripts/test-operation-logger.mjs",
     "test:note-links": "node scripts/test-note-links.mjs",

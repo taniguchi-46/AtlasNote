@@ -24,6 +24,31 @@ func (c *appTestAIConnectionChecker) Check(context.Context, aiservice.ProviderID
 	return c.err
 }
 
+type appTestAIProviderAdapter struct {
+	listResult    aiservice.ModelListResult
+	listErr       error
+	summaryResult aiservice.SummaryResult
+	summaryErr    error
+}
+
+func (a *appTestAIProviderAdapter) CheckConnection(context.Context, aiservice.ProviderID, string) error {
+	return nil
+}
+
+func (a *appTestAIProviderAdapter) ListModels(context.Context, aiservice.ProviderID, string) (aiservice.ModelListResult, error) {
+	if a.listErr != nil {
+		return aiservice.ModelListResult{}, a.listErr
+	}
+	return a.listResult, nil
+}
+
+func (a *appTestAIProviderAdapter) GenerateSummary(context.Context, aiservice.ProviderID, string, aiservice.GenerateSummaryInput) (aiservice.SummaryResult, error) {
+	if a.summaryErr != nil {
+		return aiservice.SummaryResult{}, a.summaryErr
+	}
+	return a.summaryResult, nil
+}
+
 func TestGetStartupStatusReady(t *testing.T) {
 	app := &App{dataDir: "C:\\AtlasNote"}
 
@@ -84,6 +109,60 @@ func TestAppAIAPIsDoNotExposeCredentialsOrPersistFailedConnectionChecks(t *testi
 	}
 	if configured != 0 {
 		t.Fatalf("failed connection test persisted %d Gemini settings", configured)
+	}
+}
+
+func TestAppAIExecutionAPIsReturnOnlySafeResponses(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	adapter := &appTestAIProviderAdapter{}
+	aiService := aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+	app := &App{ctx: t.Context(), aiService: aiService}
+	secretMarker := "wails-execution-secret-marker"
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     secretMarker,
+		ModelID:    "openai/gpt-test",
+	}); err != nil {
+		t.Fatalf("configure AI provider: %v", err)
+	}
+
+	adapter.listErr = errors.New("raw list provider error " + secretMarker)
+	models := app.ListAIModels(aiservice.ListModelsInput{ProviderID: aiservice.ProviderOpenRouter, APIKey: secretMarker})
+	if models.Error == nil || models.Error.Code != aiservice.ErrorCodeProviderUnavailable || len(models.Models) != 0 {
+		t.Fatalf("safe model list response = %#v", models)
+	}
+	serializedModels, err := json.Marshal(models)
+	if err != nil {
+		t.Fatalf("serialize model response: %v", err)
+	}
+	if strings.Contains(string(serializedModels), secretMarker) {
+		t.Fatal("Wails model-list response exposed an API key or provider message")
+	}
+
+	adapter.summaryErr = errors.New("raw summary provider error " + secretMarker)
+	summary := app.GenerateAISummary(aiservice.GenerateSummaryInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/gpt-test",
+		Content:    "note-body-marker",
+	})
+	if summary.Error == nil || summary.Error.Code != aiservice.ErrorCodeProviderUnavailable || summary.Text != "" {
+		t.Fatalf("safe summary response = %#v", summary)
+	}
+	serializedSummary, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("serialize summary response: %v", err)
+	}
+	if strings.Contains(string(serializedSummary), secretMarker) {
+		t.Fatal("Wails summary response exposed an API key or provider message")
 	}
 }
 

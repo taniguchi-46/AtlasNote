@@ -145,6 +145,10 @@
             <SyncSettingsPanel />
           </TabsContent>
 
+          <TabsContent value="ai" as-child>
+            <AISettingsPanel />
+          </TabsContent>
+
         </main>
       </TabsRoot>
       </DialogContent>
@@ -173,12 +177,15 @@ import { useSettingsStore } from '../stores/useSettingsStore'
 import { useAppStore } from '../stores/useAppStore'
 import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
+import { useAIStore } from '../stores/useAIStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
+import AISettingsPanel from './AISettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()
 const syncStore = useSyncStore()
+const aiStore = useAIStore()
 
 const tabs = [
   { id: 'theme', name: 'テーマ' },
@@ -186,6 +193,7 @@ const tabs = [
   { id: 'editor', name: 'エディター' },
 ]
 tabs.push({ id: 'sync', name: '同期' })
+tabs.push({ id: 'ai', name: 'AI' })
 const activeTab = ref<SettingsTab>('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
 
@@ -195,6 +203,7 @@ watch(
     if (open) {
       activeTab.value = requestedTab
       syncStore.resetDraft()
+      aiStore.resetDraft()
     }
   },
 )
@@ -206,6 +215,7 @@ function handleOpenChange(open: boolean) {
   }
 
   syncStore.discardDraft()
+  aiStore.discardDraft()
   settingsStore.closeSettings()
 }
 </script>

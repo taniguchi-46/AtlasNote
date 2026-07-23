@@ -62,6 +62,9 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.aiService != nil {
+		a.aiService.Shutdown()
+	}
 	if a.db != nil {
 		_ = a.db.Close()
 		a.db = nil
@@ -348,6 +351,39 @@ func (a *App) TestAIConnection(input aiservice.TestConnectionInput) (aiservice.C
 	return a.aiService.TestConnection(a.ctx, input)
 }
 
+// ListAIModels returns only normalized model metadata and a typed safe error.
+// The draft API key is consumed by the Go service and never appears in this
+// response or in a Wails error string.
+func (a *App) ListAIModels(input aiservice.ListModelsInput) aiservice.ModelListResponse {
+	if a.aiService == nil {
+		return aiservice.ModelListResponse{
+			Models: []aiservice.ModelInfo{},
+			Error:  aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable),
+		}
+	}
+	result, err := a.aiService.ListModels(a.ctx, input)
+	if err != nil {
+		return aiservice.ModelListResponse{
+			Models: []aiservice.ModelInfo{},
+			Error:  aiservice.SafeErrorFrom(err),
+		}
+	}
+	return aiservice.ModelListResponse{Models: result.Models, RetrievedAt: result.RetrievedAt}
+}
+
+// GenerateAISummary resolves the selected provider credential internally and
+// returns no raw provider error to the Wails boundary.
+func (a *App) GenerateAISummary(input aiservice.GenerateSummaryInput) aiservice.SummaryResponse {
+	if a.aiService == nil {
+		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	result, err := a.aiService.GenerateSummary(a.ctx, input)
+	if err != nil {
+		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.SummaryResponse{Text: result.Text}
+}
+
 func (a *App) DeleteAIProviderCredential(providerID string) ([]aiservice.ProviderSettings, error) {
 	if a.aiService == nil {
 		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
@@ -461,7 +497,7 @@ func (a *App) initialize(ctx context.Context) {
 	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
 	syncService := syncservice.NewService(syncRepository, service, credentialManager)
 	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
-	aiService := aiservice.NewService(aiRepository, aiCredentialManager, aiservice.NewHTTPConnectionChecker())
+	aiService := aiservice.NewServiceWithAdapter(aiRepository, aiCredentialManager, aiservice.NewHTTPProviderAdapter())
 	syncService.SetRecoveryDataDir(paths.DataDir)
 	recoveryReport, err := service.Recover(ctx)
 	if err != nil {

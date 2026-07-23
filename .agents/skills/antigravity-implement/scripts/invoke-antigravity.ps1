@@ -71,10 +71,10 @@ $contract
 "@
 
 $arguments = [System.Collections.Generic.List[string]]::new()
-[void]$arguments.Add('--print')
 [void]$arguments.Add('--sandbox')
 [void]$arguments.Add('--print-timeout')
 [void]$arguments.Add($PrintTimeout)
+[void]$arguments.Add('--print')
 [void]$arguments.Add($prompt)
 
 if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
@@ -86,7 +86,7 @@ $preview = [ordered]@{
     Executable = $agyExecutable
     WorkingDirectory = $resolvedWorkingDirectory
     TaskContractPath = $resolvedTaskContractPath
-    Arguments = @('--print', '--sandbox', '--print-timeout', $PrintTimeout, '<task-contract-prompt-redacted>')
+    Arguments = @('--sandbox', '--print-timeout', $PrintTimeout, '--print', '<task-contract-prompt-redacted>')
     LogDirectory = $LogDirectory
 }
 

@@ -124,6 +124,7 @@ import { useNotebookStore } from './stores/useNotebookStore'
 import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
 import { useTagStore } from './stores/useTagStore'
 import { useSyncStore } from './stores/useSyncStore'
+import { useAIStore } from './stores/useAIStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import { logOperationFailure } from './utils/operationLogger'
 import {
@@ -143,6 +144,7 @@ const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const tagStore = useTagStore()
 const syncStore = useSyncStore()
+const aiStore = useAIStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
@@ -440,6 +442,7 @@ onMounted(async () => {
   }
 
   await syncStore.initialize().catch(() => {})
+  await aiStore.initialize().catch(() => {})
 
   // Apply initial always-on-top status
   try {
@@ -454,6 +457,7 @@ onBeforeUnmount(() => {
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
   syncStore.dispose()
+  aiStore.discardSummary()
   document.body.classList.remove('is-pane-resizing')
 })
 </script>

@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
-export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync'
+export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360

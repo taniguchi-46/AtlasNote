@@ -14,19 +14,53 @@ type Service struct {
 	repository       *Repository
 	credentials      *credential.Manager
 	checker          ConnectionChecker
+	adapter          ProviderAdapter
 	newCredentialRef func() (string, error)
 	mu               sync.Mutex
+	generationMu     sync.Mutex
+	generating       bool
+	shutdownCtx      context.Context
+	shutdownCancel   context.CancelFunc
 }
 
 func NewService(repository *Repository, credentials *credential.Manager, checker ConnectionChecker) *Service {
 	if checker == nil {
-		checker = NewHTTPConnectionChecker()
+		checker = NewHTTPProviderAdapter()
 	}
+	adapter, ok := checker.(ProviderAdapter)
+	if !ok {
+		adapter = NewHTTPProviderAdapter()
+	}
+	return newService(repository, credentials, checker, adapter)
+}
+
+// NewServiceWithAdapter is the D-05 constructor used by the application. The
+// legacy NewService constructor remains for D-02 compatibility tests.
+func NewServiceWithAdapter(repository *Repository, credentials *credential.Manager, adapter ProviderAdapter) *Service {
+	if adapter == nil {
+		adapter = NewHTTPProviderAdapter()
+	}
+	return newService(repository, credentials, adapterConnectionChecker{adapter: adapter}, adapter)
+}
+
+type adapterConnectionChecker struct {
+	adapter ProviderAdapter
+}
+
+func (c adapterConnectionChecker) Check(ctx context.Context, providerID ProviderID, apiKey string) error {
+	return c.adapter.CheckConnection(ctx, providerID, apiKey)
+}
+
+func newService(repository *Repository, credentials *credential.Manager, checker ConnectionChecker, adapter ProviderAdapter) *Service {
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	return &Service{
 		repository:       repository,
 		credentials:      credentials,
 		checker:          checker,
+		adapter:          adapter,
 		newCredentialRef: newCredentialReference,
+		shutdownCtx:      shutdownCtx,
+		shutdownCancel:   shutdownCancel,
 	}
 }
 
@@ -146,10 +180,56 @@ func (s *Service) TestConnection(ctx context.Context, input TestConnectionInput)
 	if err := validateAPIKey(input.APIKey); err != nil {
 		return ConnectionTestResult{}, err
 	}
-	if err := s.checker.Check(ctx, providerID, input.APIKey); err != nil {
+	operationCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	if err := s.checker.Check(operationCtx, providerID, input.APIKey); err != nil {
 		return ConnectionTestResult{}, toSafeError(err)
 	}
 	return ConnectionTestResult{Success: true}, nil
+}
+
+// ListModels verifies and uses a draft API key without persisting either the
+// key or the returned model metadata.
+func (s *Service) ListModels(ctx context.Context, input ListModelsInput) (ModelListResult, error) {
+	providerID, err := normalizeProviderID(input.ProviderID)
+	if err != nil {
+		return ModelListResult{}, err
+	}
+	if err := validateAPIKey(input.APIKey); err != nil {
+		return ModelListResult{}, err
+	}
+	operationCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	result, err := s.adapter.ListModels(operationCtx, providerID, input.APIKey)
+	if err != nil {
+		return ModelListResult{}, toSafeError(err)
+	}
+	return result, nil
+}
+
+// GenerateSummary resolves a saved credential internally and deliberately
+// keeps the generated result outside Markdown, SQLite, and sync state.
+func (s *Service) GenerateSummary(ctx context.Context, input GenerateSummaryInput) (SummaryResult, error) {
+	normalized, err := normalizeSummaryInput(input)
+	if err != nil {
+		return SummaryResult{}, err
+	}
+	if !s.tryStartGeneration() {
+		return SummaryResult{}, ErrBusy
+	}
+	defer s.finishGeneration()
+
+	apiKey, err := s.credentialForSummary(ctx, normalized.ProviderID, normalized.ModelID)
+	if err != nil {
+		return SummaryResult{}, err
+	}
+	operationCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	result, err := s.adapter.GenerateSummary(operationCtx, normalized.ProviderID, apiKey, normalized)
+	if err != nil {
+		return SummaryResult{}, toSafeError(err)
+	}
+	return result, nil
 }
 
 func (s *Service) GetCredential(ctx context.Context, providerID ProviderID) (string, error) {
@@ -166,6 +246,28 @@ func (s *Service) GetCredential(ctx context.Context, providerID ProviderID) (str
 	}
 	if record == nil {
 		return "", ErrReauthenticationRequired
+	}
+	apiKey, err := s.credentials.Get(record.CredentialRef)
+	if err != nil {
+		return "", ErrReauthenticationRequired
+	}
+	return apiKey, nil
+}
+
+func (s *Service) credentialForSummary(ctx context.Context, providerID ProviderID, modelID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, err := s.repository.get(ctx, providerID)
+	if err != nil {
+		return "", ErrConfigurationUnavailable
+	}
+	if record == nil {
+		return "", ErrReauthenticationRequired
+	}
+	configuredModelID, err := normalizeSummaryModelID(providerID, record.ModelID)
+	if err != nil || configuredModelID != modelID {
+		return "", ErrModelUnavailable
 	}
 	apiKey, err := s.credentials.Get(record.CredentialRef)
 	if err != nil {
@@ -231,6 +333,42 @@ func (s *Service) deleteCredential(record providerRecord) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Service) tryStartGeneration() bool {
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	if s.generating {
+		return false
+	}
+	s.generating = true
+	return true
+}
+
+func (s *Service) finishGeneration() {
+	s.generationMu.Lock()
+	s.generating = false
+	s.generationMu.Unlock()
+}
+
+func (s *Service) operationContext(ctx context.Context) (context.Context, func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	operationCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.shutdownCtx, cancel)
+	return operationCtx, func() {
+		stop()
+		cancel()
+	}
+}
+
+// Shutdown is called only during application shutdown. v1 has no
+// user-initiated cancellation, but this stops any in-flight provider request.
+func (s *Service) Shutdown() {
+	if s.shutdownCancel != nil {
+		s.shutdownCancel()
+	}
 }
 
 func toSafeError(err error) error {

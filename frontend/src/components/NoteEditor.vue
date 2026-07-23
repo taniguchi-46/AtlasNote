@@ -101,6 +101,17 @@
           </div>
 
           <button
+            class="ai-summary-button"
+            type="button"
+            :disabled="aiStore.isGenerating"
+            title="AIで要約"
+            @click="handleAISummary"
+          >
+            <SparklesIcon :size="16" />
+            <span>AIで要約</span>
+          </button>
+
+          <button
             class="icon-btn"
             type="button"
             :title="noteStore.activeNote.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加'"
@@ -319,6 +330,38 @@
         </template>
       </div>
 
+      <section
+        v-if="isAISummaryVisible"
+        class="ai-summary-panel"
+        aria-live="polite"
+        aria-label="AI要約"
+      >
+        <div class="ai-summary-heading">
+          <strong>AI要約</strong>
+          <span v-if="aiStore.summaryState === 'generating'">生成中…</span>
+        </div>
+        <p v-if="aiStore.summaryState === 'confirming'" class="ai-summary-status">
+          要約の送信を確認しています。
+        </p>
+        <p v-else-if="aiStore.summaryError" class="ai-summary-error" role="alert">
+          {{ aiStore.summaryError.message }}
+        </p>
+        <template v-else-if="visibleAISummary">
+          <p v-if="isAISummaryStale" class="ai-summary-warning" role="status">
+            ノートが更新されたため、この要約は現在の本文より古い可能性があります。コピーはできます。
+          </p>
+          <pre class="ai-summary-result">{{ visibleAISummary.text }}</pre>
+          <div class="ai-summary-actions">
+            <button type="button" @click="handleCopyAISummary">コピー</button>
+            <button type="button" @click="aiStore.discardSummary">破棄</button>
+          </div>
+        </template>
+        <div v-else-if="aiStore.summaryState === 'error'" class="ai-summary-actions">
+          <button type="button" @click="handleAISummary">再試行</button>
+          <button type="button" @click="aiStore.discardSummary">閉じる</button>
+        </div>
+      </section>
+
       <div class="editor-body">
         <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
         <textarea
@@ -373,6 +416,7 @@ import {
   PinIcon,
   QuoteIcon,
   Rows3Icon,
+  SparklesIcon,
   SquareMIcon,
   SquarePenIcon,
   StarIcon,
@@ -402,9 +446,10 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
-import { useNoteStore } from '../stores/useNoteStore'
+import { useNoteStore, type NoteDraft } from '../stores/useNoteStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import { useAIStore } from '../stores/useAIStore'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
@@ -436,6 +481,7 @@ const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
+const aiStore = useAIStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
@@ -540,6 +586,7 @@ watch(
     if (!note) {
       activeNoteId = null
       savedRichSelection = null
+      aiStore.discardSummaryForActiveNote(null)
       return
     }
 
@@ -553,6 +600,7 @@ watch(
         : note.title)
 
     if (noteChanged) {
+      aiStore.discardSummaryForActiveNote(note.id)
       savedRichSelection = null
       resetSaveFeedback()
       localMarkdown.value = editableContent
@@ -589,6 +637,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  aiStore.discardSummaryForActiveNote(null)
   void noteStore.flushPendingDraft()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
@@ -599,6 +648,23 @@ onBeforeUnmount(() => {
 const charCount = computed(() => {
   return localMarkdown.value.length
 })
+
+const visibleAISummary = computed(() => {
+  const note = noteStore.activeNote
+  const result = aiStore.summary
+  if (!note || !result || result.noteID !== note.id) return null
+  return result
+})
+
+const isAISummaryVisible = computed(() => (
+  aiStore.summaryState !== 'idle'
+  && aiStore.summaryTargetNoteID === noteStore.activeNote?.id
+))
+
+const isAISummaryStale = computed(() => (
+  Boolean(visibleAISummary.value && noteStore.activeNote)
+  && visibleAISummary.value!.baseRevision !== noteStore.activeNote!.revision
+))
 
 const isTableActive = computed(() => {
   editorStateVersion.value
@@ -637,6 +703,99 @@ function handleTitleSave() {
 function handleTitleInput() {
   disableAutoTitleFromContent()
   scheduleAutoSave(localMarkdown.value)
+}
+
+async function handleAISummary() {
+  const selectedNote = noteStore.activeNote
+  if (!selectedNote) return
+
+  if (!aiStore.isSummaryReady) {
+    aiStore.setSummaryPreconditionError('AI_SUMMARY_NOT_READY', selectedNote.id)
+    settingsStore.openSettings('ai')
+    return
+  }
+  if (selectedNote.isTrashed) {
+    aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', selectedNote.id)
+    return
+  }
+  if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
+    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', selectedNote.id)
+    return
+  }
+
+  const noteID = selectedNote.id
+  let saved = false
+  try {
+    saved = await noteStore.flushPendingDraft()
+  } catch {
+    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
+    return
+  }
+  const currentNote = noteStore.activeNote
+  const currentDraft = noteStore.activeDraft
+  if (!saved || !currentNote || currentNote.id !== noteID || currentDraft) {
+    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
+    return
+  }
+  if (currentNote.isTrashed) {
+    aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', noteID)
+    return
+  }
+
+  if (!aiStore.beginSummary({
+    noteID,
+    content: currentNote.content,
+    baseRevision: currentNote.revision,
+  })) {
+    if (!aiStore.isSummaryReady) settingsStore.openSettings('ai')
+    return
+  }
+
+  const snapshot = aiStore.pendingSummary
+  if (!snapshot) return
+  const confirmed = window.confirm(
+    `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n指示: 次のメモを、事実を補わずに簡潔に要約してください。\n\n生成結果はノートに保存・同期されません。`,
+  )
+  if (!confirmed) {
+    aiStore.cancelSummaryConfirmation()
+    return
+  }
+
+  const confirmationNote = noteStore.activeNote
+  const confirmationDraft = noteStore.activeDraft as NoteDraft | null
+  await aiStore.confirmSummary({
+    noteID: confirmationNote?.id ?? null,
+    content: confirmationDraft?.content ?? confirmationNote?.content ?? null,
+    revision: confirmationNote?.revision ?? null,
+    hasPendingDraft: Boolean(confirmationDraft),
+  })
+}
+
+async function handleCopyAISummary() {
+  const result = visibleAISummary.value
+  if (!result) return
+
+  try {
+    await writeTableClipboard(createTableClipboardPayload(result.text))
+    notificationStore.notify('要約をクリップボードにコピーしました。', {
+      kind: 'success',
+      source: 'ai',
+      code: 'AI_SUMMARY_COPIED',
+      dedupeKey: 'ai:summary-copied',
+    })
+  } catch (error) {
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.ai-summary-copy',
+      errorCategory: getClipboardErrorCategory(error),
+    })
+    notificationStore.notify('要約をコピーできませんでした。', {
+      kind: 'error',
+      source: 'ai',
+      code: 'AI_SUMMARY_COPY_FAILED',
+      dedupeKey: 'ai:summary-copy-failed',
+    })
+  }
 }
 
 async function handleRetrySave() {
@@ -1526,6 +1685,86 @@ function formatDate(iso: string): string {
 .mode-segment-btn.is-active {
   background-color: var(--text-secondary);
   color: var(--bg-editor);
+}
+
+.ai-summary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ai-summary-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ai-summary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.ai-summary-panel {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  margin: 10px 20px 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-sidebar);
+  font-size: 13px;
+}
+
+.ai-summary-heading,
+.ai-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-summary-heading span,
+.ai-summary-status {
+  color: var(--text-secondary);
+}
+
+.ai-summary-error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.ai-summary-warning {
+  margin: 0;
+  color: var(--color-warning);
+}
+
+.ai-summary-result {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.6;
+}
+
+.ai-summary-actions {
+  justify-content: flex-start;
+}
+
+.ai-summary-actions button {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
 .prose-editor :deep(.ProseMirror) {

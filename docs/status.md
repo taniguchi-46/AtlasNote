@@ -8,7 +8,7 @@ MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機
 
 Phase 3「同期」は、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な再アップロード/再ダウンロード復旧、ローカル自動検証、非本番の実WebDAV受け入れ、手動UI受け入れ、CI最終確認まで完了しています（2026-07-19）。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗・受け入れ記録は `docs/todo/todo-phese3.md` を正とします。Phase 4実装前の課題とスコープは `docs/todo/todo-phese4.md` と `docs/development/scopes/scope-phese4.md` で管理します。
+要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗・受け入れ記録は `docs/todo/todo-phese3.md` を正とします。Phase 4の進捗・スコープは `docs/todo/todo-phese4.md` と `docs/development/scopes/scope-phese4.md` で管理します。
 
 ## 実装済み
 
@@ -112,14 +112,14 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
 - Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
 - 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
-- Phase 4はD-01〜D-07の設計承認を完了しています。v1をAI設定とメモ要約、初期プロバイダーをOpenRouterとGemini API、対応レベルを接続確認と単発テキスト生成に限定し、AIキーはAI用OS CredentialStoreへ保存します。要約は画面上だけの一時結果とし、ノート本文、SQLite、索引、WebDAV outboxへ保存しません。AI設定と資格情報も端末ローカルであり、WebDAV同期対象を増やしません。Provider adapterは接続確認・モデル一覧・単発要約に限定し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行します。AI設定は下書き・接続確認・明示適用とし、要約は毎回確認して保存済み本文のsnapshotだけを送信します。D-07により、実キー・実endpointを使わないテスト・CI・受け入れ条件も確定しています。Phase 4コード実装は未着手です。
+- Phase 4はD-01〜D-07の設計承認を完了しています。D-02のAI認証・秘密情報境界、D-05のProvider adapter・実行制御、D-06のAI設定UI・送信前確認・一時要約操作は実装済みです。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Gemini APIは保存を伴わない`generateContent`を使い、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行します。本文は12 KiB、出力は512 tokens、接続確認・モデル一覧は10秒、要約は60秒、アプリ全体の同時要約は1件に制限します。キー・本文・プロンプト・生成結果・raw provider errorはWails APIやログへ返さず、生成結果はMarkdown・SQLite・索引・WebDAV outboxへ保存しません。mock Wails APIを使う`test:ai-store`は追加済みで、D-07の保存/同期境界の受け入れとCI拡張は未完了です。
 
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
 - Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
-- Phase 4はD-01（v1対象範囲・初期プロバイダー・モデル選択/能力表示方針）、D-02（AI認証・秘密情報）、D-03（v1の要約は一時表示のみで保存・自動反映を行わない）、D-04（AI生成結果・AI設定・資格情報をWebDAV同期せず既存同期契約を維持する）、D-05（Provider adapter、privacy設定、実行上限・deadline・エラー正規化）、D-06（設定下書き・送信前確認・一時要約・UI状態）、D-07（実キーなしのテスト・CI・受け入れ条件）を承認済みとする。チャット履歴の永続化はv2以降の別設計とする。Phase 4コード実装とD-07で定めたテストの実装・受け入れは未完了であり、`docs/development/ai-integration.md`、`docs/development/scopes/scope-phese4.md`、`docs/todo/todo-phese4.md` を実装時の正本として扱う。
+- Phase 4はD-01（v1対象範囲・初期プロバイダー・モデル選択/能力表示方針）、D-02（AI認証・秘密情報）、D-03（v1の要約は一時表示のみで保存・自動反映を行わない）、D-04（AI生成結果・AI設定・資格情報をWebDAV同期せず既存同期契約を維持する）、D-05（Provider adapter、privacy設定、実行上限・deadline・エラー正規化）、D-06（設定下書き・送信前確認・一時要約・UI状態）、D-07（実キーなしのテスト・CI・受け入れ条件）を承認済みとする。D-02・D-05のGo実装と関連テスト、D-06のfrontend実装とmock Wails APIを使う`test:ai-store`は完了し、D-07の保存/同期境界の受け入れ・CI拡張が残る。チャット履歴の永続化はv2以降の別設計とする。`docs/development/ai-integration.md`、`docs/development/scopes/scope-phese4.md`、`docs/todo/todo-phese4.md` を実装時の正本として扱う。
 
 ## 主要コマンド
 
