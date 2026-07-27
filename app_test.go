@@ -230,6 +230,39 @@ ORDER BY name`)
 	return false
 }
 
+func appTestFindMarkerInDataFiles(t *testing.T, dataDir string, marker string) string {
+	t.Helper()
+
+	var found string
+	err := filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == "atlasnote.lock" {
+			return nil
+		}
+		if strings.Contains(path, marker) {
+			found = path
+			return nil
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read AI secret scan file %q: %w", path, err)
+		}
+		if bytes.Contains(contents, []byte(marker)) {
+			found = path
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan application data files for AI secret marker: %v", err)
+	}
+	return found
+}
+
 func TestGetStartupStatusReady(t *testing.T) {
 	app := &App{dataDir: "C:\\AtlasNote"}
 
@@ -477,6 +510,9 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 	for _, marker := range []string{credentialMarker, summaryMarker, providerErrorMarker} {
 		if appTestDatabaseContainsMarker(t, app.db, marker) {
 			t.Fatal("AI marker was persisted in the database")
+		}
+		if path := appTestFindMarkerInDataFiles(t, dataDir, marker); path != "" {
+			t.Fatalf("AI marker was persisted in an application data file: %s", path)
 		}
 	}
 	currentSettings, err := app.GetAISettings()

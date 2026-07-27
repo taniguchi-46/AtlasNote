@@ -11,6 +11,26 @@ const panelPath = path.join(rootDir, 'src', 'components', 'AISettingsPanel.vue')
 const editorPath = path.join(rootDir, 'src', 'components', 'NoteEditor.vue')
 const outDir = path.join(rootDir, '.tmp', 'ai-store-test')
 const outFile = path.join(outDir, 'useAIStore.mjs')
+const localStorageAccesses = []
+
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem(key) {
+      localStorageAccesses.push({ operation: 'get', key })
+      return null
+    },
+    setItem(key, value) {
+      localStorageAccesses.push({ operation: 'set', key, value })
+    },
+    removeItem(key) {
+      localStorageAccesses.push({ operation: 'remove', key })
+    },
+    clear() {
+      localStorageAccesses.push({ operation: 'clear' })
+    },
+  },
+})
 
 await mkdir(outDir, { recursive: true })
 const source = (await readFile(sourcePath, 'utf8'))
@@ -244,6 +264,7 @@ try {
   assert.deepEqual(mockAI.calls.deleteProvider, ['openrouter'])
   assert.equal(await store.deleteAllProviders(), true)
   assert.equal(mockAI.calls.deleteAll, 1)
+  assert.deepEqual(localStorageAccesses, [], 'AI state must never read or write localStorage')
   console.log('AI store tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })

@@ -34,7 +34,7 @@ v1の実装開始前に、以下の必須項目を完了・レビュー承認す
 
 - [x] D-02として、v1のAPIキー種別と入力検証を定義する。OpenRouterとGemini APIのキーだけを受け付け、空文字・改行・制御文字を拒否する（2026-07-22）。
 - [x] D-02として、AI用OS CredentialStoreを優先し、利用不可時だけsession-only保持、再起動後の再入力を要求する（2026-07-22）。
-- [ ] 平文SQLite、Markdown、`localStorage`、設定ファイル、クラッシュダンプへの秘密情報保存を防ぐテストを追加する。
+- [x] D-07で、アプリデータディレクトリの全ファイル（SQLite本体・WAL/SHM、Markdown、設定・復旧ファイル、クラッシュ成果物が生成された場合を含む）にAPI Key・本文・生成結果・raw provider errorが残らないことを`app_test.go`で検証し、frontend `test:ai-store`でもAI Storeの`localStorage`アクセスがないことを検証した（2026-07-27）。
 - [x] D-02として、ログ、エラー、通知、診断情報でAPI Key、Authorization、`x-goog-api-key`、本文、プロンプト、生成結果、raw provider error bodyを非露出にする（2026-07-22）。
 - [x] D-02として、固定HTTPS接続先のみを許可し、local endpoint、proxy、redirect、HTTP、TLS無効化をv1対象外とする。自動retry・アプリ内の金額上限も提供しない。timeout、出力上限、rate limitの実行契約はD-05で決定する（2026-07-22）。
 - [x] D-02として、プロバイダー別の資格情報分離、更新・削除、再認証、secure store unavailable時の挙動を決定する（2026-07-22）。
@@ -93,6 +93,15 @@ v1の実装開始前に、以下の必須項目を完了・レビュー承認す
 - `git diff --check`: 成功。
 - 手動確認（既報・範囲限定）: Wails実行環境でAIタブと要約パネルの基本動作、OpenRouterのモデル詳細アコーディオンの開閉を確認。実キー、実endpoint、実プロバイダー応答は確認していない。
 - GitHub Actions: [CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977) が成功（対象commit `73f737912f3177d8e6fe7c34b31452cf5c568f08`、2026-07-27）。
+
+## v1残作業完了記録（2026-07-27）
+
+- `app_test.go`で、AI操作後のアプリデータディレクトリを再帰走査し、SQLite本体・WAL/SHM、Markdown、設定・復旧ファイル、クラッシュ成果物を含むファイルへ合成秘密情報が残らないことを検証した（保持中の`atlasnote.lock`は検査対象外）。
+- `npm --prefix frontend run test:ai-store`で、AI Storeが`localStorage`を読み書きしないことを動的に検証した。
+- `go test ./...`: 成功。
+- `npm --prefix frontend run test:ai-store`: 成功。
+- `npm run frontend:typecheck`: 成功。
+- `git diff --check`: 成功。
 
 ## 完了条件
 
