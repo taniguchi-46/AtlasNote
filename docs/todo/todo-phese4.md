@@ -1,10 +1,10 @@
-# Phase 4 TODO
+# Phase 4 TODO：v1
 
 ## TODOの目的
 
-Phase 4「AI」の実装前に、AI認証・秘密情報、生成結果の保存、Phase 3 WebDAV同期との境界、プロバイダー共通契約、受け入れ条件を確定する。未確定事項を実装で先に固定しない。
+Phase 4 v1「AI設定・単発要約」の実装前に、AI認証・秘密情報、生成結果の保存、Phase 3 WebDAV同期との境界、プロバイダー共通契約、受け入れ条件を確定する。v2・v3の詳細TODOは別文書で管理し、未確定事項を実装で先に固定しない。
 
-詳細スコープは [`scope-phese4.md`](../development/scopes/scope-phese4.md)、現在状況は [`../status.md`](../status.md)、既存のローカル保存・競合契約は [`../development/note-concurrency.md`](../development/note-concurrency.md)、Phase 3同期契約は [`../development/webdav-sync.md`](../development/webdav-sync.md) を正とする。
+詳細スコープは [`scope-phese4.md`](../development/scopes/scope-phese4.md)、v2は [`scope-phese4-v2.md`](../development/scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](todo-phese4-v3.md)、現在状況は [`../status.md`](../status.md) を正とする。Phase 4はv3完了をもって完了する。
 
 ## 現状・前提
 
@@ -13,14 +13,14 @@ Phase 4「AI」の実装前に、AI認証・秘密情報、生成結果の保存
 - D-04は承認済みである。v1ではPhase 3のWebDAV同期対象を増やさず、要約、AI設定、credential reference、AI資格情報を同期対象外として維持する。AI設定と資格情報は端末ごとに設定する。
 - D-01は承認済みである。v1はAI設定とメモ要約、初期プロバイダーはOpenRouterとGemini API、対応レベルは接続確認と単発テキスト生成、モデル一覧はプロバイダーから利用者の明示操作で取得する。利用者によるキャンセルと構造化出力はv2で対応する。
 - D-02は承認済みである。AIキーはプロバイダーごとに分離してAI用OS CredentialStoreへ保存し、利用不可時だけsession-onlyとする。固定HTTPS接続先のみを使い、proxy・redirect・自動retry・アプリ内の金額上限はv1で提供しない。
-- D-03は承認済みである。v1のメモ要約は現在表示中の画面だけで保持する一時結果とし、Markdown本文、SQLite、検索索引、操作journal、WebDAV outboxへ保存しない。チャット履歴の永続化はv2以降で別途設計する。
+- D-03は承認済みである。v1のメモ要約は現在表示中の画面だけで保持する一時結果とし、Markdown本文、SQLite、検索索引、操作journal、WebDAV outboxへ保存しない。チャット履歴の永続化はv3で別途設計する。
 - D-05は承認済みである。Go側Provider adapterで接続確認・モデル一覧・単発要約を提供し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する。本文入力は12 KiB、出力は512 tokens、要約生成のdeadlineは60秒とする。
 - D-06は承認済みである。AI設定は下書き・接続確認・明示適用で更新し、要約は送信前の毎回確認、正常保存済み本文のsnapshot、画面だけのコピー・破棄に限定する。
 - D-07は承認済みである。実キー・実endpointなしのProvider fake/HTTP transport、CredentialStore fake、mock Wails APIで契約・UI状態・秘密情報非露出・データ保全を検証し、CIと受け入れ記録に秘密情報を残さない。
 
-## Phase 4開始条件
+## v1開始条件
 
-Phase 4の実装開始前に、以下の必須項目を完了・レビュー承認する。
+v1の実装開始前に、以下の必須項目を完了・レビュー承認する。
 
 - [x] D-01として、`scope-phese4.md` のv1対象範囲、対象外、優先順位、初期プロバイダー、モデル選択・能力表示方針を承認する（2026-07-22）。
 - [x] D-02として、AI認証・秘密情報の保存先、session-only fallback、削除・更新・再認証、接続先制御、ログ非露出方針を承認する（2026-07-22）。
@@ -45,7 +45,8 @@ Phase 4の実装開始前に、以下の必須項目を完了・レビュー承�
 - [x] D-03として、v1の要約をノート本文へ自動適用しない。revision不一致時は古い内容からの要約として表示し、利用者が必要な結果だけを明示的にコピーする（2026-07-22）。
 - [x] D-03として、v1では保存処理がないため`revision` / CAS、操作journal、ノート単位lane、MarkdownとSQLiteの更新を呼び出さない（2026-07-22）。
 - [x] D-03として、v1ではDB schema、migration、既存データ、rollbackへの変更がないことを確認する（2026-07-22）。
-- [ ] v2以降でタイトル、タグ、分類、関連候補、Q&A、執筆結果またはチャット履歴を保存する場合は、正本、スキーマ、生成元モデル、生成日時、入力版、保持期間、削除・再生成、migration、rollbackを実装前に決定する。
+- [x] v2のタイトル、タグ、分類、関連候補、関連メモ、重複候補の実行契約は [`todo-phese4-v2.md`](todo-phese4-v2.md) へ移管した（2026-07-27）。v2ではAI結果を永続化しない。
+- [x] v3のQ&A、執筆結果、チャット履歴の保存データモデルは [`todo-phese4-v3.md`](todo-phese4-v3.md) へ移管した（2026-07-27）。
 
 ## 3. WebDAV・同期境界
 
@@ -53,7 +54,7 @@ Phase 4の実装開始前に、以下の必須項目を完了・レビュー承�
 - [x] D-04として、AI設定のプロバイダーID・モデルID・credential referenceとAI API Keyも端末ローカルとし、同期しない（2026-07-22）。
 - [x] D-04として、v1ではAI用entity、manifest/object、change set、outbox、conflict、CAS、schema、migrationを追加せず、既存の `webdav-sync.md` 契約を維持する（2026-07-22）。
 - [x] D-07で、AI設定の変更と要約成功・失敗がsync outbox/state/snapshot/conflictと同期ステータスを更新せず、AI entityが既存のremote形式で拒否されることを検証した（2026-07-27）。
-- [ ] v2以降でAI履歴その他を永続化する場合は、D-03でデータモデルを決めた後に、同期entity、保持・削除、outbox、競合、migration、rollback、端末間再生成の契約をD-04追補として承認する。
+- [x] v3のAI履歴・生成成果物の同期境界（WebDAV非同期）、保持・削除、migration、rollbackは [`todo-phese4-v3.md`](todo-phese4-v3.md) へ移管した（2026-07-27）。
 
 ## 4. プロバイダー共通契約
 
@@ -98,7 +99,7 @@ Phase 4の実装開始前に、以下の必須項目を完了・レビュー承�
 - 必須の設計・セキュリティ・保存・同期境界がレビュー承認済みである。
 - 実キーや秘密情報をテスト・ログ・成果物へ持ち込まずに、provider契約とUI状態を検証できる。
 - 生成結果の保存・破棄・再生成・競合の扱いが明文化され、既存のrevision/CAS・操作journal・同期契約と矛盾しない。
-- Phase 4の実装・テスト・受け入れ結果を本TODOと `docs/status.md` に記録する。
+- v1の実装・テスト・受け入れ結果を本TODOと `docs/status.md` に記録し、v2・v3の完了結果は各TODOへ記録する。
 
 ## 絶対遵守事項
 

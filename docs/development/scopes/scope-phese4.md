@@ -1,18 +1,22 @@
-# Phase 4詳細スコープ：AI
+# Phase 4詳細スコープ v1：AI設定・単発要約
 
 最終更新: 2026-07-27
 
 ## 位置付け
 
-この文書は、Phase 4「AI」の要求範囲と実装前に合意すべき境界を定義する。実装順序と未完了の確認事項は [`todo-phese4.md`](../../todo/todo-phese4.md) を参照する。
+この文書は、Phase 4 v1「AI設定・単発要約」の要求範囲と境界を定義する。v1の実装順序と未完了の確認事項は [`todo-phese4.md`](../../todo/todo-phese4.md) を参照する。Phase 4全体はv3完了をもって完了とし、v2・v3の詳細は下記のversion mapを正とする。
 
-Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完了している。Phase 4はD-01〜D-07の実装前設計を承認済みであり、D-02（AI認証・秘密情報）とD-05（Provider adapter・実行制御）のGo実装および関連Goテスト、D-06（AI設定UI・要約操作）とmock Wails APIを使う`test:ai-store`を完了している。D-07のCI拡張・保存/同期境界のローカル受け入れとGitHub Actions CI受け入れも完了した（2026-07-27、[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)成功）。
+Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完了している。Phase 4 v1はD-01〜D-07の実装前設計を承認済みであり、D-02（AI認証・秘密情報）とD-05（Provider adapter・実行制御）のGo実装および関連Goテスト、D-06（AI設定UI・要約操作）とmock Wails APIを使う`test:ai-store`を完了している。D-07のCI拡張・保存/同期境界のローカル受け入れとGitHub Actions CI受け入れも完了した（2026-07-27、[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)成功）。
 
 ## 参照する正本
 
 - 要求範囲: [`scope.md`](scope.md)
 - 現在状況: [`../../status.md`](../../status.md)
-- Phase 4実装前TODO: [`../../todo/todo-phese4.md`](../../todo/todo-phese4.md)
+- Phase 4 v1 TODO: [`../../todo/todo-phese4.md`](../../todo/todo-phese4.md)
+- Phase 4 v2詳細スコープ: [`scope-phese4-v2.md`](scope-phese4-v2.md)
+- Phase 4 v2 TODO: [`../../todo/todo-phese4-v2.md`](../../todo/todo-phese4-v2.md)
+- Phase 4 v3詳細スコープ: [`scope-phese4-v3.md`](scope-phese4-v3.md)
+- Phase 4 v3 TODO: [`../../todo/todo-phese4-v3.md`](../../todo/todo-phese4-v3.md)
 - 既存のローカル保存・競合契約: [`../note-concurrency.md`](../note-concurrency.md)
 - Phase 3同期契約: [`../webdav-sync.md`](../webdav-sync.md)
 - アーキテクチャ・データ境界: [`../../rules/architecture.md`](../../rules/architecture.md)
@@ -20,6 +24,13 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 ## 目的
 
 ユーザー自身が選択したAIプロバイダーを利用し、ローカルファーストのノートを要約・整理・検索・執筆支援に活用できるようにする。AIを利用できない場合も、既存のローカル保存・編集・検索・同期を継続できることを前提とする。
+
+## Phase 4 version map
+
+- v1: AI設定、OpenRouter／Geminiの接続確認・モデル一覧、単発要約。実装・受け入れ済み。
+- v2: AI司書、ストリーミング、部分応答、キャンセル、構造化出力。生成結果は永続化しない。
+- v3: AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物。AIデータはWebDAV同期しない。
+- Phase 4完了条件: v1・v2・v3の完了条件をすべて満たすこと。
 
 ## 対象範囲
 
@@ -37,7 +48,7 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 - メモ要約（接続確認後の単発テキスト生成）
 - 要約は現在表示中の画面だけで保持する一時結果とし、ノート本文への追記、Markdown・SQLite・検索索引・WebDAV outboxへの保存は行わない。必要な内容は利用者が明示的にコピーする。
 
-### AI司書（後続候補）
+### AI司書（v2へ移管）
 
 - タイトル生成
 - タグ生成
@@ -45,7 +56,7 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 - 関連メモ提案
 - 重複メモ検出
 
-### AIアシスタント／ライティング（v1対象外・後続候補）
+### AIアシスタント／ライティング（v1対象外・v3へ移管）
 
 - メモQ&A、RAG検索、アイデア壁打ち、ブレインストーミング
 - プロンプト生成・改善
@@ -53,8 +64,8 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 
 ### v1対象外・後続範囲
 
-- ストリーミング、部分応答、RAG検索、バッチ処理
-- 利用者によるキャンセルと構造化出力はv2で対応する。
+- ストリーミング、部分応答、利用者によるキャンセル、構造化出力はv2へ移管する。
+- RAG検索、AIアシスタント、AIライティングはv3へ移管する。全ノートを対象にした自動バッチ処理はPhase 4の対象外とする。
 
 ## 実装前に確定する境界
 
@@ -82,14 +93,14 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 - D-03として、v1のメモ要約は現在表示中のノートのUIメモリだけに保持する一時結果とする。Markdown本文、SQLite、検索索引、操作journal、別成果物、WebDAV outboxへは保存しない。
 - 要約開始時の`baseRevision`はメモリだけに保持する。生成中にノートのrevisionが変わった場合は「古い内容から生成された要約」と表示し、自動適用・自動rebase・自動retryは行わない。利用者が必要な結果だけを明示的にコピーする。
 - 画面遷移、ノート切替、再読み込み、アプリ終了で要約結果を破棄する。生成元モデル、生成日時、入力本文、プロンプト、生成結果をv1の履歴・キャッシュとして保持しないため、DB schema、migration、Markdown形式は変更しない。
-- チャット履歴の保持はv1の対象外とし、v2以降で保存先、保持期間、削除、プライバシー表示、端末間同期、migration、競合を別途承認する。
+- チャット履歴の保持はv1の対象外とし、v3で保存先、保持期間、削除、プライバシー表示、端末間同期、migration、競合を別途承認する。
 
 ### 4. WebDAV同期との境界
 
 - D-04として、v1ではPhase 3のWebDAV同期対象をノート、ノートブック、タグ、ノートタグだけに維持する。AI用のentity、manifest/object、change set、outbox、conflict、snapshotは追加しない。
 - 一時要約、入力本文、プロンプト、生成結果、チャット履歴、AI設定のプロバイダーID・モデルID・credential reference、AI API KeyはWebDAV同期対象外とする。AI設定と資格情報は端末ローカルであり、端末ごとに設定・接続確認・モデル選択を行う。
 - D-03によりv1の要約は永続化しないため、要約生成は既存同期のoutboxを作成・更新しない。同期のpull・競合解決・復旧・再アップロード・再ダウンロードもAI関連データを扱わない。
-- WebDAVのformat、manifest、object、entity型、schema version、migration、CAS・競合契約、同期Serviceを変更しない。v2以降でAI履歴その他を永続化する場合は、D-03でデータモデルを承認してから、同期の可否をD-04追補で決定する。
+- WebDAVのformat、manifest、object、entity型、schema version、migration、CAS・競合契約、同期Serviceを変更しない。v3でAI履歴その他を永続化する場合もAIデータは同期せず、D-03／D-04追補でローカル保存と非同期の契約を承認する。
 
 ### 5. UI・データフロー
 
@@ -116,8 +127,8 @@ Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完�
 - 添付ファイル・履歴のAI連携（別スコープで扱う）
 - v1でのチャット履歴の永続化
 
-## Phase 4開始条件
+## v1開始条件
 
-- `todo-phese4.md` の必須設計・セキュリティ・受け入れ項目を完了する。
+- `todo-phese4.md` のv1必須設計・セキュリティ・受け入れ項目を完了する。
 - AI認証、保存、同期境界、プロバイダー共通契約、UI状態、テスト方針をレビューで承認する。
 - 実キーを使わない自動テスト、秘密情報非露出の確認、失敗時にローカル機能を継続できることの受け入れ条件を確定する。

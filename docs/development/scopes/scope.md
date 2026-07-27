@@ -180,11 +180,19 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 # Phase 4：AI
 
-詳細スコープ: `docs/development/scopes/scope-phese4.md`
+詳細スコープ v1: `docs/development/scopes/scope-phese4.md`
 
-作業チェック: `docs/todo/todo-phese4.md`
+作業チェック v1: `docs/todo/todo-phese4.md`
 
-現状: D-01〜D-07の実装前設計は承認済み（2026-07-22）。D-02、D-05、D-06のコード実装と、D-07で定めた自動テスト・CI拡張・ローカル受け入れは完了した（2026-07-27）。詳細な正本は`scope-phese4.md`、`ai-integration.md`、`todo-phese4.md`とする。
+詳細スコープ v2: `docs/development/scopes/scope-phese4-v2.md`
+
+作業チェック v2: `docs/todo/todo-phese4-v2.md`
+
+詳細スコープ v3: `docs/development/scopes/scope-phese4-v3.md`
+
+作業チェック v3: `docs/todo/todo-phese4-v3.md`
+
+現状: v1（AI設定・単発要約）のD-01〜D-07は承認・実装・受け入れ済み（2026-07-27）。Phase 4はv2・v3を順に完了し、v3完了をもって正式完了とする。詳細な正本は上記のversion別scope／TODOと`ai-integration.md`とする。
 
 ## AI設定
 
@@ -196,7 +204,7 @@ v1初期対応
 - Gemini
 - OpenRouter
 
-後続候補
+追加候補（Phase 4完了後）
 
 - Groq
 - OpenAI
@@ -211,7 +219,7 @@ v1初期対応
 
 - メモ要約（接続確認後の単発テキスト生成、画面上の一時結果のみ）
 
-後続候補
+v2へ移管
 
 - タイトル生成
 - タグ生成
@@ -223,16 +231,11 @@ v1初期対応
 
 ## 関連メモ
 
-Phase 2から完全に移管した機能。
-
-- [ ] 関連メモの判定基準を決める。
-- [ ] AI を利用した関連メモの抽出方式を決める。
-- [ ] 関連メモを実装する。
-- [ ] 関連度が低いメモ、候補が存在しない場合、大量ノート時の挙動をテストする。
+Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書スコープへ正式移管した（2026-07-27）。判定基準、AI抽出方式、候補実装、関連度が低い・候補なし・大量ノート時のテストは [`todo-phese4-v2.md`](../../todo/todo-phese4-v2.md) で管理する。
 
 ---
 
-## AIアシスタント
+## AIアシスタント（v3へ移管）
 
 - メモQ&A
 - RAG検索
@@ -241,7 +244,7 @@ Phase 2から完全に移管した機能。
 
 ---
 
-## AIライティング
+## AIライティング（v3へ移管）
 
 - プロンプト生成
 - プロンプト改善

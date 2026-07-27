@@ -6,9 +6,9 @@
 
 ## 1. 位置付け
 
-本書は、Phase 4「AI」の実装前に決定する認証・プロバイダー・生成結果・同期境界・UI・受け入れ条件を記録する設計書です。要求範囲は [`scope-phese4.md`](scopes/scope-phese4.md)、未完了項目は [`todo-phese4.md`](../todo/todo-phese4.md)、現在状況は [`../status.md`](../status.md) を参照します。
+本書は、Phase 4 v1「AI設定・単発要約」の認証・プロバイダー・生成結果・同期境界・UI・受け入れ条件を記録する設計書です。v2は [`scope-phese4-v2.md`](scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](../todo/todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md)、現在状況は [`../status.md`](../status.md) を参照します。Phase 4全体はv3完了をもって完了します。
 
-本書の「決定結果」が`承認済み`になるまで、AI API実装、DB migration、WebDAV契約変更は開始しません。決定内容に応じて、`scope-phese4.md`、`todo-phese4.md`、[`../rules/architecture.md`](../rules/architecture.md)、[`environment.md`](environment.md) の記載を更新します。
+本書のv1「決定結果」が`承認済み`になるまで、AI API実装、DB migration、WebDAV契約変更は開始しません。v2・v3の実装前承認はそれぞれのscope／TODOで管理します。決定内容に応じて、`scope-phese4.md`、version別TODO、[`../rules/architecture.md`](../rules/architecture.md)、[`environment.md`](environment.md) の記載を更新します。
 
 ## 2. 7項目の決定表
 
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- | --- | --- |
 | D-01 | v1対象範囲・プロバイダー | 初回対応するAI司書・アシスタント・ライティング機能、対応プロバイダー、モデル選択・能力表示、優先順位 | v1はAI設定とメモ要約。初期プロバイダーはOpenRouterとGemini API。接続確認・単発テキスト生成までを対応し、モデル一覧はプロバイダーから取得する | 承認済み（2026-07-22） | `scope-phese4.md`、Provider実装、UI |
 | D-02 | AI認証・秘密情報 | API Key、アクセストークン、ローカル接続情報の入力検証、OS CredentialStore、セッション限定fallback、更新・削除・再認証、HTTPS・local endpoint・proxy・redirect・timeout・retry・rate limit・費用上限、ログの非露出 | v1はOpenRouterとGemini APIのキーを個別にOS CredentialStoreへ保存し、利用不可時のみsession-onlyとする。固定HTTPS接続先のみを使い、proxy・redirect・自動retry・アプリ内の金額上限は提供しない | 承認済み（2026-07-22） | CredentialStore、設定UI、Provider transport、ログ・エラー |
-| D-03 | 生成結果の保存・データモデル | 要約、タイトル、タグ、分類、関連候補、Q&A、執筆結果ごとの保存要否、正本、版・モデル・日時、削除・再生成、ユーザー確認、`revision` / CAS / 保存laneとの接続 | v1のメモ要約は現在表示中の画面だけで保持する一時結果とし、Markdown・SQLite・索引・WebDAV outboxへ保存しない。チャット履歴の永続化はv2以降で別途設計する | 承認済み（2026-07-22） | 要約UI、D-07（DB schema・migration・WebDAV契約の変更なし） |
+| D-03 | 生成結果の保存・データモデル | 要約、タイトル、タグ、分類、関連候補、Q&A、執筆結果ごとの保存要否、正本、版・モデル・日時、削除・再生成、ユーザー確認、`revision` / CAS / 保存laneとの接続 | v1のメモ要約は現在表示中の画面だけで保持する一時結果とし、Markdown・SQLite・索引・WebDAV outboxへ保存しない。チャット履歴の永続化はv3で別途設計する | 承認済み（2026-07-22） | 要約UI、D-07（DB schema・migration・WebDAV契約の変更なし） |
 | D-04 | WebDAV同期境界 | AI生成結果を同期対象外のまま維持するか、新しいentity・manifest/object・outbox・conflict・CAS・migrationを追加するか | v1は既存の同期対象だけを維持する。要約、AI設定、credential reference、AI資格情報は端末ローカルとし、WebDAV同期しない | 承認済み（2026-07-22） | `webdav-sync.md`、D-07（schema・同期Service・復旧・競合の変更なし） |
 | D-05 | Provider共通契約・実行制御 | Go側interface、型付きrequest/result/error、認証方式、endpoint差分、streaming、cancel、partial response、context長、入力・出力上限、timeout、retry、quota・rate limit・費用上限 | v1はGo側Provider adapterで接続確認・モデル一覧・単発要約を提供する。Geminiは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する | 承認済み（2026-07-22） | Go Application Service、Wails API、Provider adapter、D-07 |
 | D-06 | UI・データフロー | 未設定、接続確認、生成中、cancel、partial、success、failure、retry、rate limit、offline、送信前確認、機密ノート・長文・大量ノート・空結果の挙動 | v1は設定画面のAIタブとエディターの要約操作を使う。本文を毎回確認して送信し、結果は画面だけに表示してコピー・破棄する | 承認済み（2026-07-22） | Vue Component、Pinia、API client、通知、アクセシビリティ、D-07 |
@@ -105,9 +105,9 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
   - v1のメモ要約は、要約を要求した時点で表示しているノートのUIメモリだけに保持する一時結果とする。Markdown本文への追記、SQLite、検索索引、操作journal、別成果物、WebDAV outboxには保存しない。
   - 要約生成の開始時に`baseRevision`をメモリ上だけで保持する。完了時に現在のrevisionと異なる場合は「古い内容から生成された要約」と表示するが、ノート本文への自動適用、自動rebase、自動retryは行わない。利用者は必要な結果だけを明示的にコピーできる。
   - 画面遷移、ノート切替、再読み込み、アプリ終了で要約結果を破棄する。生成元モデル、生成日時、入力本文、プロンプト、生成結果もv1では履歴・キャッシュとして保持しない。
-  - v1ではチャット履歴を保持しない。v2以降で履歴を永続化する場合は、保存先、保持期間、個別・一括削除、プライバシー表示、端末間同期、migration、競合を実装前に別のD-03追補として承認する。保存方式はこの決定では仮定しない。
+  - v1ではチャット履歴を保持しない。v3で履歴を永続化する場合は、保存先、保持期間、個別・一括削除、プライバシー表示、端末間同期、migration、競合を実装前にD-03追補として承認する。保存方式はこの決定では仮定しない。
   - v1の決定によりDB schema、migration、Markdown形式、WebDAV同期契約の変更は行わない。
-- 選択肢: 要約をMarkdown本文へ追記する案、SQLiteにローカル保存する案、画面上の一時結果だけにする案を比較した。チャット履歴はv1で永続化する案とv2以降へ分離する案を比較した。
+- 選択肢: 要約をMarkdown本文へ追記する案、SQLiteにローカル保存する案、画面上の一時結果だけにする案を比較した。チャット履歴はv1で永続化する案とv3へ分離する案を比較した。
 - 採用理由: v1は要約の生成価値を確認する段階であり、正本・索引・同期・削除・競合の設計を同時に増やさない。一時結果なら既存ノートの整合性を変えず、履歴が持つ本文・プロンプト・応答の保持責任もv1へ持ち込まない。
 - 既存データ・API・UIへの影響: 要約UIは一時状態と`baseRevision`を管理し、本文更新API、Repository、SQLite、検索索引、操作journal、outboxを呼び出さない。D-04ではv1に同期対象がないことを前提に、将来の履歴などを同期対象にするかだけを検討する。
 - セキュリティ・データ保全上のリスクと軽減策: 要約画面を閉じると結果を再利用できないが、ノート本文への意図しない書込み、生成結果の端末残留、同期による漏えい・競合を防ぐ。履歴の永続化を検討する際は、D-02の秘密情報非露出方針に加え、本文・プロンプト・応答の保持と削除の境界を明示する。
@@ -122,7 +122,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
   - v1の一時要約、入力本文、プロンプト、生成結果、チャット履歴、AI設定のプロバイダーID・モデルID・credential reference、AI API KeyはいずれもWebDAV同期対象外とする。AI設定と資格情報は端末ローカルに保持し、端末ごとに設定・接続確認・モデル選択を行う。
   - D-03によりv1の要約は永続化しないため、要約生成では既存同期のoutboxを作成・更新しない。同期のpull・競合解決・復旧・再アップロード・再ダウンロードでもAI用データを扱わない。
   - WebDAVのformat、manifest、object、entity型、schema version、migration、CAS・競合契約、同期Serviceの実装は変更しない。
-  - v2以降でチャット履歴その他のAIデータを永続化する場合は、まずD-03追補でデータモデルを承認し、その後に同期するかをD-04追補で決定する。同期を選ぶ場合は新entity、識別子、payload、保持・削除、outbox、3-way競合、migration、rollback、端末再生成を別途承認する。
+  - v3でチャット履歴その他のAIデータを永続化する場合もWebDAV同期は行わず、まずD-03追補でローカルデータモデルを承認し、その後にD-04追補で非同期境界を確認する。新entity、識別子、payload、保持・削除、migration、rollback、端末再生成を別途承認する。
 - 選択肢: v1からAI要約・設定を新しい同期entityとして追加する案、要約だけを同期する案、AI関連データをすべて同期対象外に維持する案を比較した。
 - 採用理由: v1に永続化されるAI結果がなく、既存同期は4種類のentityだけを検証・適用する契約である。credential referenceを同期しても別端末のOS CredentialStoreには対応するキーがなく、設定だけが到着して誤認や再認証失敗を招くため、AI設定も端末ローカルとする。
 - 既存データ・API・UIへの影響: `webdav-sync.md`のAI関連対象外を明確化するだけで、同期形式・schema・migration・Sync Service・既存の同期受け入れ結果は変更しない。D-06で、AI設定が端末ごとに必要であることを画面上で分かるようにする。
@@ -139,7 +139,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
   - 要約生成は単発・非ストリーミングとし、OpenRouterは`/api/v1/chat/completions`へ`stream: false`、Gemini APIはstable `v1`の`models/{model}:generateContent`へ保存を明示的に無効化した要求を送る。固定の要約指示と現在ノートの本文だけを送信し、会話履歴、ツール、プラグイン、URLコンテキスト、ファイル、画像・音声、構造化出力、Provider debug、利用者指定の任意プロンプトは送らない。
   - OpenRouterでは選択済みの具体的モデルIDだけを使い、`openrouter/auto`、モデル配列によるfallback、別モデルへの自動切替を許可しない。requestのprovider設定は`zdr: true`、`data_collection: "deny"`、`allow_fallbacks: false`を必須とする。条件に合う下流endpointがない場合は要約を実行せず、`AI_MODEL_UNAVAILABLE`として再選択を求める。
   - 本文入力はUTF-8で12 KiBまで、生成出力は最大512 tokensとする。超過時は送信・自動切詰め・分割・バッチ化を行わず`AI_INPUT_TOO_LARGE`を返す。temperature、top-p、seedなどの生成パラメータはv1で指定・UI公開しない。
-  - 接続確認とモデル一覧取得のdeadlineは10秒、要約生成のdeadlineは60秒とする。自動retry、バックグラウンドretry、別モデル・別providerへのretryは行わない。`Retry-After`が得られる場合だけ安全な待機秒数として返し、利用者が明示的に再試行する。アプリ全体で同時に実行できる要約生成は1件とし、実行中は`AI_BUSY`を返す。利用者によるキャンセルはv2対象のままとし、アプリ終了時だけ内部contextを中止できる。
+  - 接続確認とモデル一覧取得のdeadlineは10秒、要約生成のdeadlineは60秒とする。自動retry、バックグラウンドretry、別モデル・別providerへのretryは行わない。`Retry-After`が得られる場合だけ安全な待機秒数として返し、利用者が明示的に再試行する。アプリ全体で同時に実行できる要約生成は1件とし、実行中は`AI_BUSY`を返す。利用者によるキャンセルはv2対象とし、アプリ終了時だけ内部contextを中止できる。
   - 正常な完了状態で空白を除くtext出力だけを要約結果として採用する。途中終了、出力上限到達、空結果、非text出力、不正JSONは結果を破棄してエラーにする。共通エラーは少なくとも`AI_AUTH_FAILED`、`AI_MODEL_UNAVAILABLE`、`AI_INPUT_TOO_LARGE`、`AI_RATE_LIMITED`、`AI_TIMEOUT`、`AI_NETWORK_UNAVAILABLE`、`AI_PROVIDER_UNAVAILABLE`、`AI_BUSY`、`AI_INVALID_RESPONSE`へ正規化し、raw provider messageは含めない。
 - 選択肢: ProviderごとのAPIをUIから直接呼ぶ案、Go adapterで差分を吸収する案を比較した。GeminiのInteractions APIをstatefulに使う案、保存を伴わない単発`generateContent`を使う案を比較した。OpenRouterの既定routingを使う案と、ZDR・データ収集拒否・下流fallback無効を必須にする案を比較した。
 - 採用理由: v1の用途は単発要約だけであり、Provider固有の会話状態・ストリーミング・再試行を持ち込む必要がない。GeminiのInteractions APIは既定でInteractionを保存するため、保存を伴わない単発生成を選ぶ。OpenRouterは下流providerへのroutingを行うため、ZDR・データ収集拒否・fallback無効を要求して、ノート本文の再送と保持範囲を最小化する。
@@ -184,7 +184,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 - 採用理由: 実通信と実キーを使う受け入れは費用・保持・再現性・秘密情報露出のリスクがあり、v1の安全境界そのものを検証できない。既存のGo `httptest`・fake CredentialStore、frontend scriptのmock方式を拡張すれば、依存追加なしにProvider契約とUI状態を再現できる。
 - 既存データ・API・UIへの影響: `internal/ai`相当の新規テスト、`app_test.go`相当のWails APIテスト、frontend AI Store test script、`frontend/package.json`、`.github/workflows/ci.yml`、実装後の`todo-phese4.md`受け入れ記録を更新する。DB schema、migration、WebDAV同期形式をテストのために変更しない。
 - セキュリティ・データ保全上のリスクと軽減策: fixtureやassertionの文字列にも合成値以外を入れず、テスト出力に秘密情報や本文を出さない。test doubleの注入はテスト用constructor/transportに閉じ、実行時のカスタムendpoint・proxy・環境変数fallbackには接続しない。テスト失敗時もfixture DBと一時ディレクトリを破棄し、既存データを触らない。
-- 追加・更新するテストと受け入れ条件: 上記のGo・frontend・CI・手動受け入れを実装し、すべて成功することをPhase 4完了条件とする。実装前の本決定は、D-01〜D-06のすべての安全境界をテスト可能な受け入れ項目へ対応付ける。
+- 追加・更新するテストと受け入れ条件: 上記のGo・frontend・CI・手動受け入れを実装し、すべて成功することをv1の受け入れ条件とする。Phase 4全体の完了条件はv2・v3のscope／TODOで別途定義する。実装前の本決定は、D-01〜D-06のすべての安全境界をテスト可能な受け入れ項目へ対応付ける。
 - 承認日・承認者: 2026-07-22・ユーザー
 
 ### 未承認項目用テンプレート
@@ -204,9 +204,9 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 - 承認日・承認者: 未記入
 ```
 
-## 6. Phase 4開始ゲート
+## 6. v1開始ゲート
 
-次の条件をすべて満たすまで、Phase 4のコード実装を開始しません。
+次の条件をすべて満たすまで、Phase 4 v1のコード実装を開始しません。
 
 - D-01〜D-07が`承認済み`または、対象外とする理由付きで確定している。
 - [`todo-phese4.md`](../todo/todo-phese4.md) の必須設計・セキュリティ・受け入れ項目が完了している。
@@ -214,6 +214,12 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 - AI利用失敗時もローカル保存・編集・検索・既存同期を継続できることをテスト方針で保証している。
 - 実キー、秘密情報、実endpointを使わずにProvider契約とUI状態を検証できる。
 - DB schema、migration、WebDAV契約の変更が必要な場合、その影響・rollback・受け入れ条件が別途承認されている。
+
+## 8. v2・v3への引き継ぎ
+
+- v2は [`scope-phese4-v2.md`](scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](../todo/todo-phese4-v2.md) を正とし、AI司書、ストリーミング、部分応答、キャンセル、構造化出力を扱う。v2ではAI結果を永続化しない。
+- v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物を扱う。AIデータはWebDAV同期しない。
+- Phase 4完了はv3完了とする。
 
 ## 7. 対象外
 

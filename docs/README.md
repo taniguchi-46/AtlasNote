@@ -19,9 +19,13 @@ Atlas Note のドキュメント入口です。現在の状況、要求範囲、
 | Phase 3同期設計 | [webdav-sync.md](development/webdav-sync.md) | 同期対象、リモート形式、競合、認証、outboxの確定契約 |
 | Phase 3実装順序 | [implementation-plan.md](development/implementation-plan.md) | 設計に従った実装ステップ |
 | Phase 3進捗 | [todo-phese3.md](todo/todo-phese3.md) | 実装・検証チェックリスト |
-| Phase 4詳細スコープ | [scope-phese4.md](development/scopes/scope-phese4.md) | AI機能の実装前要求範囲と境界 |
-| Phase 4 AI決定記録 | [ai-integration.md](development/ai-integration.md) | D-01〜D-07の承認内容とPhase 4開始ゲート |
-| Phase 4実装前TODO | [todo-phese4.md](todo/todo-phese4.md) | AI認証・保存・同期境界などの未確定課題 |
+| Phase 4 v1詳細スコープ | [scope-phese4.md](development/scopes/scope-phese4.md) | AI設定・単発要約の要求範囲と境界 |
+| Phase 4 AI決定記録 | [ai-integration.md](development/ai-integration.md) | D-01〜D-07の承認内容とv1開始ゲート |
+| Phase 4 v1 TODO | [todo-phese4.md](todo/todo-phese4.md) | AI認証・保存・同期境界などのv1課題 |
+| Phase 4 v2詳細スコープ | [scope-phese4-v2.md](development/scopes/scope-phese4-v2.md) | AI司書・実行体験の正式範囲 |
+| Phase 4 v2 TODO | [todo-phese4-v2.md](todo/todo-phese4-v2.md) | AI司書・stream/cancel/structured outputの実装TODO |
+| Phase 4 v3詳細スコープ | [scope-phese4-v3.md](development/scopes/scope-phese4-v3.md) | AIアシスタント・ライティング・履歴の正式範囲 |
+| Phase 4 v3 TODO | [todo-phese4-v3.md](todo/todo-phese4-v3.md) | Phase 4完了までのv3実装・検証TODO |
 | 横断ルール | [docs/rules/](rules/) | Agent、アーキテクチャ、命名、Git、用語 |
 
 仕様の決定事項は設計資料、現在の実装状態はコードとテスト、進捗は `docs/status.md` とTODOを根拠にします。文書同士が矛盾する場合は、勝手に解釈を固定せず、正本と未確定事項を確認します。
@@ -45,5 +49,9 @@ Atlas Note のドキュメント入口です。現在の状況、要求範囲、
 
 - [Phase 2詳細スコープ](development/scopes/scope-phese2.md)
 - [Phase 2実績・残課題](todo/todo-phese2.md)
-- [Phase 4詳細スコープ](development/scopes/scope-phese4.md)
-- [Phase 4実装前TODO](todo/todo-phese4.md)
+- [Phase 4 v1詳細スコープ](development/scopes/scope-phese4.md)
+- [Phase 4 v1 TODO](todo/todo-phese4.md)
+- [Phase 4 v2詳細スコープ](development/scopes/scope-phese4-v2.md)
+- [Phase 4 v2 TODO](todo/todo-phese4-v2.md)
+- [Phase 4 v3詳細スコープ](development/scopes/scope-phese4-v3.md)
+- [Phase 4 v3 TODO](todo/todo-phese4-v3.md)
