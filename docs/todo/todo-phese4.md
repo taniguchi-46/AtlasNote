@@ -9,7 +9,7 @@ Phase 4「AI」の実装前に、AI認証・秘密情報、生成結果の保存
 ## 現状・前提
 
 - Phase 3の受け入れは、2026-07-19に非本番の実WebDAVで動作OKを確認して完了している。実サーバーまたは同期実装の更新時は回帰確認を継続する。
-- Phase 4のD-02、D-05、D-06の実装と、D-07の自動テスト・CI拡張・ローカル受け入れは完了している（2026-07-27）。
+- Phase 4のD-02、D-05、D-06の実装と、D-07の自動テスト・CI拡張・ローカル受け入れ・GitHub Actions CI受け入れは完了している（2026-07-27）。
 - D-04は承認済みである。v1ではPhase 3のWebDAV同期対象を増やさず、要約、AI設定、credential reference、AI資格情報を同期対象外として維持する。AI設定と資格情報は端末ごとに設定する。
 - D-01は承認済みである。v1はAI設定とメモ要約、初期プロバイダーはOpenRouterとGemini API、対応レベルは接続確認と単発テキスト生成、モデル一覧はプロバイダーから利用者の明示操作で取得する。利用者によるキャンセルと構造化出力はv2で対応する。
 - D-02は承認済みである。AIキーはプロバイダーごとに分離してAI用OS CredentialStoreへ保存し、利用不可時だけsession-onlyとする。固定HTTPS接続先のみを使い、proxy・redirect・自動retry・アプリ内の金額上限はv1で提供しない。
@@ -81,7 +81,7 @@ Phase 4の実装開始前に、以下の必須項目を完了・レビュー承�
 
 ## D-07 実装・受け入れ記録（2026-07-27）
 
-- 対象: `dev-phese4`、基底HEAD `774b56b`（D-07差分は未コミット）。
+- 対象: `dev-phese4`、D-07受け入れ対象HEAD `73f737912f3177d8e6fe7c34b31452cf5c568f08`（基底HEAD `774b56b`）。
 - 実行環境: Microsoft Windows 11 Home 10.0.26200（Build 26200）。
 - `gofmt -w app_test.go internal/sync/service_test.go`: 成功。
 - `go test ./...`: 成功。
@@ -91,7 +91,7 @@ Phase 4の実装開始前に、以下の必須項目を完了・レビュー承�
 - Wails CLI v2.10.1による`wails build -clean`: 成功。
 - `git diff --check`: 成功。
 - 手動確認（既報・範囲限定）: Wails実行環境でAIタブと要約パネルの基本動作、OpenRouterのモデル詳細アコーディオンの開閉を確認。実キー、実endpoint、実プロバイダー応答は確認していない。
-- GitHub ActionsのCI runは未実行（未コミット・未push）。
+- GitHub Actions: [CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977) が成功（対象commit `73f737912f3177d8e6fe7c34b31452cf5c568f08`、2026-07-27）。
 
 ## 完了条件
 

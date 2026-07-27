@@ -6,7 +6,7 @@
 
 この文書は、Phase 4「AI」の要求範囲と実装前に合意すべき境界を定義する。実装順序と未完了の確認事項は [`todo-phese4.md`](../../todo/todo-phese4.md) を参照する。
 
-Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完了している。Phase 4はD-01〜D-07の実装前設計を承認済みであり、D-02（AI認証・秘密情報）とD-05（Provider adapter・実行制御）のGo実装および関連Goテスト、D-06（AI設定UI・要約操作）とmock Wails APIを使う`test:ai-store`を完了している。D-07のCI拡張・保存/同期境界のローカル受け入れも完了した（2026-07-27、GitHub ActionsのCI runは未実行）。
+Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完了している。Phase 4はD-01〜D-07の実装前設計を承認済みであり、D-02（AI認証・秘密情報）とD-05（Provider adapter・実行制御）のGo実装および関連Goテスト、D-06（AI設定UI・要約操作）とmock Wails APIを使う`test:ai-store`を完了している。D-07のCI拡張・保存/同期境界のローカル受け入れとGitHub Actions CI受け入れも完了した（2026-07-27、[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)成功）。
 
 ## 参照する正本
 

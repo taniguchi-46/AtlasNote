@@ -112,14 +112,14 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
 - Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
 - 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
-- Phase 4はD-01〜D-07の設計承認を完了しています。D-02のAI認証・秘密情報境界、D-05のProvider adapter・実行制御、D-06のAI設定UI・送信前確認・一時要約操作、D-07の保存/同期境界テスト・CI拡張・ローカル受け入れは完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Gemini APIは保存を伴わない`generateContent`を使い、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行します。本文は12 KiB、出力は512 tokens、接続確認・モデル一覧は10秒、要約は60秒、アプリ全体の同時要約は1件に制限します。キー・本文・プロンプト・生成結果・raw provider errorはWails APIやログへ返さず、生成結果はMarkdown・SQLite・索引・WebDAV outboxへ保存しません。GitHub ActionsのD-07 CI runは未実行です。
+- Phase 4はD-01〜D-07の設計承認を完了しています。D-02のAI認証・秘密情報境界、D-05のProvider adapter・実行制御、D-06のAI設定UI・送信前確認・一時要約操作、D-07の保存/同期境界テスト・CI拡張・ローカル受け入れ・GitHub Actions CI受け入れは完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Gemini APIは保存を伴わない`generateContent`を使い、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行します。本文は12 KiB、出力は512 tokens、接続確認・モデル一覧は10秒、要約は60秒、アプリ全体の同時要約は1件に制限します。キー・本文・プロンプト・生成結果・raw provider errorはWails APIやログへ返さず、生成結果はMarkdown・SQLite・索引・WebDAV outboxへ保存しません。GitHub ActionsのD-07 CIは[run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)で成功しています。
 
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
 - Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
-- Phase 4はD-01（v1対象範囲・初期プロバイダー・モデル選択/能力表示方針）、D-02（AI認証・秘密情報）、D-03（v1の要約は一時表示のみで保存・自動反映を行わない）、D-04（AI生成結果・AI設定・資格情報をWebDAV同期せず既存同期契約を維持する）、D-05（Provider adapter、privacy設定、実行上限・deadline・エラー正規化）、D-06（設定下書き・送信前確認・一時要約・UI状態）、D-07（実キーなしのテスト・CI・受け入れ条件）を承認済みとする。D-02・D-05のGo実装と関連テスト、D-06のfrontend実装とmock Wails APIを使う`test:ai-store`、D-07の保存/同期境界の受け入れ・CI拡張は完了している（2026-07-27、GitHub ActionsのCI runは未実行）。チャット履歴の永続化はv2以降の別設計とする。`docs/development/ai-integration.md`、`docs/development/scopes/scope-phese4.md`、`docs/todo/todo-phese4.md` を実装時の正本として扱う。
+- Phase 4はD-01（v1対象範囲・初期プロバイダー・モデル選択/能力表示方針）、D-02（AI認証・秘密情報）、D-03（v1の要約は一時表示のみで保存・自動反映を行わない）、D-04（AI生成結果・AI設定・資格情報をWebDAV同期せず既存同期契約を維持する）、D-05（Provider adapter、privacy設定、実行上限・deadline・エラー正規化）、D-06（設定下書き・送信前確認・一時要約・UI状態）、D-07（実キーなしのテスト・CI・受け入れ条件）を承認済みとする。D-02・D-05のGo実装と関連テスト、D-06のfrontend実装とmock Wails APIを使う`test:ai-store`、D-07の保存/同期境界の受け入れ・CI拡張・GitHub Actions CI受け入れは完了している（2026-07-27、[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)成功）。チャット履歴の永続化はv2以降の別設計とする。`docs/development/ai-integration.md`、`docs/development/scopes/scope-phese4.md`、`docs/todo/todo-phese4.md` を実装時の正本として扱う。
 
 ## 主要コマンド
 

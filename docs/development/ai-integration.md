@@ -1,8 +1,8 @@
 # Phase 4 AI統合設計
 
-最終更新: 2026-07-22
+最終更新: 2026-07-27
 
-ステータス: 設計承認完了。D-02（AI認証・秘密情報）、D-05（Provider adapter・実行制御）、D-06（AI設定UI・要約操作）は実装済み。mock Wails APIを使う`test:ai-store`も追加済みで、D-07のCI拡張・保存/同期境界の受け入れは未完了。
+ステータス: 設計承認・実装・CI受け入れ完了。D-02（AI認証・秘密情報）、D-05（Provider adapter・実行制御）、D-06（AI設定UI・要約操作）は実装済み。mock Wails APIを使う`test:ai-store`も追加済みで、D-07のCI拡張・保存/同期境界の受け入れとGitHub Actions CI受け入れは完了した（2026-07-27）。
 
 ## 1. 位置付け
 
@@ -179,7 +179,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
   - フロントエンドは既存のNodeスクリプト方式に合わせ、mock Wails APIを差し替える`test:ai-store`を追加する。AI設定下書き、接続確認失敗時の非保存、モデル再選択、送信前確認、保存済みsnapshot、単一実行、状態遷移、手動retry、`Retry-After`待機表示、切替後の結果破棄、stale表示、コピーだけ、通知・ログ非露出を検証する。Vueコンポーネント用の新規テスト依存は追加しない。
   - CIでは既存の`wails build -clean`、`go test ./...`、frontend typecheck、既存frontend scriptsを維持し、`npm --prefix frontend run test:ai-store`を追加する。CIはネットワーク資格情報を必要とせず、providerへの実通信をしない。
   - 手動受け入れは実キーなしで、AI設定タブのpassword入力・設定破棄・未設定時の送信阻止・送信確認ダイアログ・安全な状態表示・コピー/破棄導線・キーボード操作を確認する。Provider成功・失敗・競合の全状態はtest doubleを使う自動テストを受け入れ根拠とする。実装完了後は`todo-phese4.md`に実施日、対象HEAD、OS、実行コマンド、test double結果、手動確認結果だけを記録し、秘密情報・endpoint・本文・プロンプト・生成結果・raw errorを記録しない。
-- 実施結果: `todo-phese4.md`の2026-07-27受け入れ記録を正とする。実キー・実endpoint・実プロバイダー応答を使わず、GitHub ActionsのCI runは未実行である。
+- 実施結果: `todo-phese4.md`の2026-07-27受け入れ記録を正とする。実キー・実endpoint・実プロバイダー応答を使わず、GitHub Actionsの[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)が成功している。
 - 選択肢: 実プロバイダーへの統合テスト、テスト用endpointをアプリに持たせる案、HTTP transport/Provider fakeだけをテストで注入する案を比較した。Vueのテスト基盤を追加する案と、既存のNode scriptでStoreをmockする案を比較した。
 - 採用理由: 実通信と実キーを使う受け入れは費用・保持・再現性・秘密情報露出のリスクがあり、v1の安全境界そのものを検証できない。既存のGo `httptest`・fake CredentialStore、frontend scriptのmock方式を拡張すれば、依存追加なしにProvider契約とUI状態を再現できる。
 - 既存データ・API・UIへの影響: `internal/ai`相当の新規テスト、`app_test.go`相当のWails APIテスト、frontend AI Store test script、`frontend/package.json`、`.github/workflows/ci.yml`、実装後の`todo-phese4.md`受け入れ記録を更新する。DB schema、migration、WebDAV同期形式をテストのために変更しない。
