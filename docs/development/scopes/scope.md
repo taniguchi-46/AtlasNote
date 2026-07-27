@@ -184,7 +184,7 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 作業チェック: `docs/todo/todo-phese4.md`
 
-現状: D-01〜D-07の実装前設計は承認済み（2026-07-22）。Phase 4のコード実装と、D-07で定めた自動テスト・受け入れは未着手である。詳細な正本は`scope-phese4.md`、`ai-integration.md`、`todo-phese4.md`とする。
+現状: D-01〜D-07の実装前設計は承認済み（2026-07-22）。D-02、D-05、D-06のコード実装と、D-07で定めた自動テスト・CI拡張・ローカル受け入れは完了した（2026-07-27）。詳細な正本は`scope-phese4.md`、`ai-integration.md`、`todo-phese4.md`とする。
 
 ## AI設定
 

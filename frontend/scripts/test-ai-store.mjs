@@ -119,6 +119,9 @@ try {
   assert.doesNotMatch(panelSource, /<details[^>]*\bopen\b/, 'model metadata must start collapsed')
   assert.match(editorSource, /AIで要約/, 'the editor must expose an AI summary action')
   assert.match(editorSource, /flushPendingDraft/, 'summary must flush a draft before it is sent')
+  assert.match(editorSource, /activeDraft\?\.status === 'conflicted' \|\| noteStore\.activeDraft\?\.status === 'failed'/, 'failed and conflicted drafts must block a summary')
+  assert.match(editorSource, /catch \{\s*aiStore\.setSummaryPreconditionError\('AI_DRAFT_NOT_SAVED', noteID\)/, 'a failed draft flush must block a summary')
+  assert.match(editorSource, /!saved \|\| !currentNote \|\| currentNote\.id !== noteID \|\| currentDraft/, 'a remaining draft after flush must block a summary')
   assert.match(editorSource, /window\.confirm/, 'summary must require explicit confirmation')
   assert.match(editorSource, /事実を補わずに簡潔に要約/, 'confirmation must name the fixed summary instruction')
   assert.doesNotMatch(editorSource, /\$\{snapshot\.content\}/, 'confirmation must not echo the note body into another UI surface')
@@ -176,6 +179,14 @@ try {
   }), false, 'a changed revision must invalidate the pending snapshot')
   assert.equal(store.summaryError.code, 'AI_DRAFT_NOT_SAVED')
   assert.equal(mockAI.calls.generate.length, 0, 'an invalidated snapshot must not call the provider')
+
+  assert.equal(store.beginSummary(sourceNote), true)
+  const generateCallsBeforePendingDraft = mockAI.calls.generate.length
+  assert.equal(await store.confirmSummary({
+    noteID: 'note-1', content: 'source-body-marker', revision: 4, hasPendingDraft: true,
+  }), false, 'a pending draft must block the provider call')
+  assert.equal(store.summaryError.code, 'AI_DRAFT_NOT_SAVED')
+  assert.equal(mockAI.calls.generate.length, generateCallsBeforePendingDraft, 'a pending draft must not call the provider')
 
   assert.equal(store.beginSummary(sourceNote), true)
   store.draft.modelID = 'unknown-limit-model'

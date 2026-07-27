@@ -170,7 +170,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 
 ### D-07: テスト・受け入れ条件
 
-- 状態: `承認済み`
+- 状態: `実装済み・ローカル受け入れ完了（2026-07-27）`
 - 決定内容:
   - 実キー、実endpoint、実ユーザーのノート本文、実プロンプト、実生成結果を自動テスト・手動受け入れ・CI・fixture・ログへ使わない。テスト用endpointを利用者設定、環境変数、`.env`、ビルド設定として公開しない。Provider adapterのHTTP transportまたはProvider interfaceだけをテストで注入し、固定host/pathへの要求を実通信せずに検証する。
   - GoのProvider adapter契約テストで、OpenRouter/Gemini APIの固定host/path/method、認証ヘッダー、接続確認時の本文非送信、モデル一覧のページング・v1候補正規化、Geminiの保存無効・非ストリーミング、OpenRouterの具体的モデル/ZDR/データ収集拒否/fallback無効を検証する。12 KiB入力、512 tokens出力、10秒/60秒deadline、retryなし、`Retry-After`、空・途中・非text・不正JSONの破棄、型付き安全エラーを検証する。
@@ -179,6 +179,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
   - フロントエンドは既存のNodeスクリプト方式に合わせ、mock Wails APIを差し替える`test:ai-store`を追加する。AI設定下書き、接続確認失敗時の非保存、モデル再選択、送信前確認、保存済みsnapshot、単一実行、状態遷移、手動retry、`Retry-After`待機表示、切替後の結果破棄、stale表示、コピーだけ、通知・ログ非露出を検証する。Vueコンポーネント用の新規テスト依存は追加しない。
   - CIでは既存の`wails build -clean`、`go test ./...`、frontend typecheck、既存frontend scriptsを維持し、`npm --prefix frontend run test:ai-store`を追加する。CIはネットワーク資格情報を必要とせず、providerへの実通信をしない。
   - 手動受け入れは実キーなしで、AI設定タブのpassword入力・設定破棄・未設定時の送信阻止・送信確認ダイアログ・安全な状態表示・コピー/破棄導線・キーボード操作を確認する。Provider成功・失敗・競合の全状態はtest doubleを使う自動テストを受け入れ根拠とする。実装完了後は`todo-phese4.md`に実施日、対象HEAD、OS、実行コマンド、test double結果、手動確認結果だけを記録し、秘密情報・endpoint・本文・プロンプト・生成結果・raw errorを記録しない。
+- 実施結果: `todo-phese4.md`の2026-07-27受け入れ記録を正とする。実キー・実endpoint・実プロバイダー応答を使わず、GitHub ActionsのCI runは未実行である。
 - 選択肢: 実プロバイダーへの統合テスト、テスト用endpointをアプリに持たせる案、HTTP transport/Provider fakeだけをテストで注入する案を比較した。Vueのテスト基盤を追加する案と、既存のNode scriptでStoreをmockする案を比較した。
 - 採用理由: 実通信と実キーを使う受け入れは費用・保持・再現性・秘密情報露出のリスクがあり、v1の安全境界そのものを検証できない。既存のGo `httptest`・fake CredentialStore、frontend scriptのmock方式を拡張すれば、依存追加なしにProvider契約とUI状態を再現できる。
 - 既存データ・API・UIへの影響: `internal/ai`相当の新規テスト、`app_test.go`相当のWails APIテスト、frontend AI Store test script、`frontend/package.json`、`.github/workflows/ci.yml`、実装後の`todo-phese4.md`受け入れ記録を更新する。DB schema、migration、WebDAV同期形式をテストのために変更しない。

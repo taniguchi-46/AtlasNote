@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +18,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	syncservice "atlasnote/internal/sync"
 )
 
 type appTestAIConnectionChecker struct {
@@ -47,6 +52,182 @@ func (a *appTestAIProviderAdapter) GenerateSummary(context.Context, aiservice.Pr
 		return aiservice.SummaryResult{}, a.summaryErr
 	}
 	return a.summaryResult, nil
+}
+
+type appTestAIInvariantSnapshot struct {
+	Note              note.Note
+	Markdown          []byte
+	Search            note.SearchResult
+	SyncStatus        syncservice.StatusResult
+	Conflicts         []syncservice.ConflictSummary
+	StorageOperations string
+	SyncConnection    string
+	SyncOutbox        string
+	SyncItemStates    string
+	SyncSnapshots     string
+	SyncConflicts     string
+}
+
+func captureAppTestAIInvariantSnapshot(t *testing.T, app *App, noteID string, markdownPath string) appTestAIInvariantSnapshot {
+	t.Helper()
+
+	storedNote, err := app.GetNote(noteID)
+	if err != nil {
+		t.Fatalf("get note for AI invariant snapshot: %v", err)
+	}
+	markdown, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatalf("read markdown for AI invariant snapshot: %v", err)
+	}
+	search, err := app.SearchNotes(note.SearchInput{Query: "d07"})
+	if err != nil {
+		t.Fatalf("search notes for AI invariant snapshot: %v", err)
+	}
+	if search.Error != nil {
+		t.Fatal("search returned an error for AI invariant snapshot")
+	}
+	status, err := app.GetSyncStatus()
+	if err != nil {
+		t.Fatalf("get sync status for AI invariant snapshot: %v", err)
+	}
+	conflicts, err := app.ListSyncConflicts()
+	if err != nil {
+		t.Fatalf("list sync conflicts for AI invariant snapshot: %v", err)
+	}
+
+	return appTestAIInvariantSnapshot{
+		Note:              storedNote,
+		Markdown:          markdown,
+		Search:            search,
+		SyncStatus:        status,
+		Conflicts:         conflicts,
+		StorageOperations: appTestRowsSnapshot(t, app.db, "SELECT * FROM note_storage_operations ORDER BY created_at, operation_id"),
+		SyncConnection:    appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_connections ORDER BY id"),
+		SyncOutbox:        appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_outbox ORDER BY sequence"),
+		SyncItemStates:    appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_item_states ORDER BY entity_key"),
+		SyncSnapshots:     appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_snapshots ORDER BY snapshot_id"),
+		SyncConflicts:     appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_conflicts ORDER BY conflict_id"),
+	}
+}
+
+func appTestRowsSnapshot(t *testing.T, db *sql.DB, query string) string {
+	t.Helper()
+
+	rows, err := db.QueryContext(t.Context(), query)
+	if err != nil {
+		t.Fatalf("query AI invariant snapshot: %v", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("read AI invariant snapshot columns: %v", err)
+	}
+	result := make([][]string, 0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for index := range values {
+			targets[index] = &values[index]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			t.Fatalf("scan AI invariant snapshot row: %v", err)
+		}
+		row := make([]string, len(values))
+		for index, value := range values {
+			switch typed := value.(type) {
+			case nil:
+				row[index] = "<null>"
+			case []byte:
+				row[index] = string(typed)
+			default:
+				row[index] = fmt.Sprint(typed)
+			}
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate AI invariant snapshot rows: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("encode AI invariant snapshot: %v", err)
+	}
+	return string(encoded)
+}
+
+func appTestDatabaseContainsMarker(t *testing.T, db *sql.DB, marker string) bool {
+	t.Helper()
+
+	tableRows, err := db.QueryContext(t.Context(), `
+SELECT name
+FROM sqlite_master
+WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+ORDER BY name`)
+	if err != nil {
+		t.Fatalf("list database tables for AI marker check: %v", err)
+	}
+	tables := make([]string, 0)
+	for tableRows.Next() {
+		var table string
+		if err := tableRows.Scan(&table); err != nil {
+			tableRows.Close()
+			t.Fatalf("scan database table for AI marker check: %v", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := tableRows.Err(); err != nil {
+		tableRows.Close()
+		t.Fatalf("iterate database tables for AI marker check: %v", err)
+	}
+	if err := tableRows.Close(); err != nil {
+		t.Fatalf("close database table list for AI marker check: %v", err)
+	}
+
+	for _, table := range tables {
+		quotedTable := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+		rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+quotedTable)
+		if err != nil {
+			t.Fatalf("query database table for AI marker check: %v", err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatalf("read database table columns for AI marker check: %v", err)
+		}
+		for rows.Next() {
+			values := make([]any, len(columns))
+			targets := make([]any, len(columns))
+			for index := range values {
+				targets[index] = &values[index]
+			}
+			if err := rows.Scan(targets...); err != nil {
+				rows.Close()
+				t.Fatalf("scan database value for AI marker check: %v", err)
+			}
+			for _, value := range values {
+				var text string
+				switch typed := value.(type) {
+				case []byte:
+					text = string(typed)
+				default:
+					text = fmt.Sprint(typed)
+				}
+				if strings.Contains(text, marker) {
+					rows.Close()
+					return true
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatalf("iterate database values for AI marker check: %v", err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatalf("close database values for AI marker check: %v", err)
+		}
+	}
+	return false
 }
 
 func TestGetStartupStatusReady(t *testing.T) {
@@ -163,6 +344,151 @@ func TestAppAIExecutionAPIsReturnOnlySafeResponses(t *testing.T) {
 	}
 	if strings.Contains(string(serializedSummary), secretMarker) {
 		t.Fatal("Wails summary response exposed an API key or provider message")
+	}
+}
+
+func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	if status := app.GetStartupStatus(); !status.Ready {
+		t.Fatal("test app is not ready")
+	}
+
+	const credentialMarker = "d07-synthetic-credential-marker"
+	const summaryMarker = "d07-synthetic-summary-marker"
+	const providerErrorMarker = "d07-synthetic-provider-error-marker"
+	adapter := &appTestAIProviderAdapter{
+		summaryResult: aiservice.SummaryResult{Text: summaryMarker},
+	}
+	app.aiService.Shutdown()
+	app.aiService = aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(app.db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+
+	syncRepository := syncservice.NewRepository(app.db)
+	if err := syncRepository.SaveConnection(t.Context(), syncservice.Connection{
+		Endpoint:         "https://sync.invalid",
+		RemoteRoot:       "/d07",
+		Username:         "synthetic-user",
+		VaultID:          strings.Repeat("a", 32),
+		HeadManifestHash: strings.Repeat("b", 64),
+		HeadETag:         `"d07-etag"`,
+		Status:           syncservice.StatusSynced,
+		FailSafe:         true,
+		CredentialRef:    "d07-sync-reference",
+	}); err != nil {
+		t.Fatalf("seed sync connection: %v", err)
+	}
+	created, err := app.CreateNote(note.CreateInput{
+		Title:   "D-07 local note",
+		Content: "d07 stable local note content",
+	})
+	if err != nil {
+		t.Fatalf("create local note: %v", err)
+	}
+	tagKey := note.SyncEntityKey(note.SyncEntityTag, strings.Repeat("c", 32))
+	if err := syncRepository.MarkItemRemote(t.Context(), tagKey, note.SyncEntityTag, strings.Repeat("d", 64), `{"tag":"d07"}`); err != nil {
+		t.Fatalf("seed sync snapshot: %v", err)
+	}
+	if err := syncRepository.CreateConflict(t.Context(), syncservice.Conflict{
+		ID:               strings.Repeat("e", 32),
+		EntityKey:        tagKey,
+		EntityType:       note.SyncEntityTag,
+		LocalObjectHash:  strings.Repeat("f", 64),
+		BaseObjectHash:   strings.Repeat("1", 64),
+		RemoteObjectHash: strings.Repeat("2", 64),
+		LocalSnapshot:    `{"tag":"local"}`,
+		BaseSnapshot:     `{"tag":"base"}`,
+		RemoteSnapshot:   `{"tag":"remote"}`,
+		ConflictType:     "both-changed",
+		ResolutionStatus: "open",
+	}); err != nil {
+		t.Fatalf("seed sync conflict: %v", err)
+	}
+
+	markdownPath := filepath.Join(dataDir, "notes", created.ID+".md")
+	before := captureAppTestAIInvariantSnapshot(t, app, created.ID, markdownPath)
+	if before.Note.Content != created.Content || before.Note.Revision != created.Revision || !bytes.Equal(before.Markdown, []byte(created.Content)) {
+		t.Fatal("local note fixture is not stable before AI operations")
+	}
+	if before.SyncStatus.Status != syncservice.StatusConflict || before.SyncStatus.OutboxCount == 0 || before.SyncStatus.ConflictCount != 1 || len(before.Conflicts) != 1 {
+		t.Fatal("sync artifacts were not seeded before AI operations")
+	}
+
+	settings, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     credentialMarker,
+		ModelID:    "openai/d07-summary-model",
+	})
+	if err != nil {
+		t.Fatalf("configure AI provider: %v", err)
+	}
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("serialize configured AI settings: %v", err)
+	}
+	if strings.Contains(string(settingsJSON), credentialMarker) || strings.Contains(string(settingsJSON), summaryMarker) || strings.Contains(string(settingsJSON), providerErrorMarker) {
+		t.Fatal("AI settings response exposed a synthetic marker")
+	}
+
+	success := app.GenerateAISummary(aiservice.GenerateSummaryInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/d07-summary-model",
+		Content:    before.Note.Content,
+	})
+	if success.Error != nil || success.Text != summaryMarker {
+		t.Fatal("successful AI summary was not returned")
+	}
+
+	adapter.summaryErr = errors.New("provider failure " + providerErrorMarker)
+	failure := app.GenerateAISummary(aiservice.GenerateSummaryInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/d07-summary-model",
+		Content:    before.Note.Content,
+	})
+	if failure.Error == nil || failure.Error.Code != aiservice.ErrorCodeProviderUnavailable || failure.Text != "" {
+		t.Fatal("failed AI summary did not return a safe error")
+	}
+	failureJSON, err := json.Marshal(failure)
+	if err != nil {
+		t.Fatalf("serialize failed AI summary: %v", err)
+	}
+	if strings.Contains(string(failureJSON), credentialMarker) || strings.Contains(string(failureJSON), summaryMarker) || strings.Contains(string(failureJSON), providerErrorMarker) {
+		t.Fatal("failed AI summary exposed a synthetic marker")
+	}
+
+	after := captureAppTestAIInvariantSnapshot(t, app, created.ID, markdownPath)
+	if after.Note.Content != before.Note.Content || after.Note.Revision != before.Note.Revision || !bytes.Equal(after.Markdown, before.Markdown) {
+		t.Fatal("AI operations changed the local note or Markdown")
+	}
+	if !reflect.DeepEqual(after.Search, before.Search) || !reflect.DeepEqual(after.SyncStatus, before.SyncStatus) || !reflect.DeepEqual(after.Conflicts, before.Conflicts) {
+		t.Fatal("AI operations changed normal search or sync API results")
+	}
+	if after.StorageOperations != before.StorageOperations || after.SyncConnection != before.SyncConnection || after.SyncOutbox != before.SyncOutbox || after.SyncItemStates != before.SyncItemStates || after.SyncSnapshots != before.SyncSnapshots || after.SyncConflicts != before.SyncConflicts {
+		t.Fatal("AI operations changed operation journal or sync artifacts")
+	}
+
+	for _, marker := range []string{credentialMarker, summaryMarker, providerErrorMarker} {
+		if appTestDatabaseContainsMarker(t, app.db, marker) {
+			t.Fatal("AI marker was persisted in the database")
+		}
+	}
+	currentSettings, err := app.GetAISettings()
+	if err != nil {
+		t.Fatalf("get current AI settings: %v", err)
+	}
+	currentSettingsJSON, err := json.Marshal(currentSettings)
+	if err != nil {
+		t.Fatalf("serialize current AI settings: %v", err)
+	}
+	if strings.Contains(string(currentSettingsJSON), credentialMarker) || strings.Contains(string(currentSettingsJSON), summaryMarker) || strings.Contains(string(currentSettingsJSON), providerErrorMarker) {
+		t.Fatal("persisted AI settings exposed a synthetic marker")
 	}
 }
 

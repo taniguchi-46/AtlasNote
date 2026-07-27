@@ -824,6 +824,7 @@ func TestRemoteDocumentsRejectInvalidEntityContracts(t *testing.T) {
 		{EntityKey: "note:not-hex", EntityType: note.SyncEntityNote, ObjectHash: strings.Repeat("b", 64)},
 		{EntityKey: note.SyncEntityKey(note.SyncEntityTag, strings.Repeat("1", 32)), EntityType: note.SyncEntityNote, ObjectHash: strings.Repeat("b", 64)},
 		{EntityKey: "unknown:" + strings.Repeat("1", 32), EntityType: "unknown", ObjectHash: strings.Repeat("b", 64)},
+		{EntityKey: "ai:" + strings.Repeat("a", 32), EntityType: "ai", ObjectHash: strings.Repeat("b", 64)},
 	} {
 		manifest := ManifestDocument{FormatVersion: FormatVersion, VaultID: format.VaultID, Generation: 1, Entries: []ManifestEntry{entry}}
 		encoded, err := canonicalJSON(manifest)
