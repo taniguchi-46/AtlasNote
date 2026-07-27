@@ -54,7 +54,23 @@ On a new machine, or when the CLI has changed, inspect facts before constructing
 4. Determine working-directory behavior from the actual invocation. If no CLI working-directory option exists, set the process working directory instead.
 5. Do not invent a model, JSON-output, approval, or retry option. Omit model selection unless current help explicitly supports it.
 
-The bundled PowerShell wrapper intentionally uses the observed non-interactive print mode, sandbox mode, and print-timeout flag. It does not use dangerous auto-approval. If current help no longer supports one of those arguments, stop and update the skill rather than silently guessing.
+The bundled PowerShell wrapper intentionally uses the observed non-interactive print mode, sandbox mode, and print-timeout flag for headless delegation. The interactive path uses the separately confirmed `--prompt-interactive` flag. Neither path uses dangerous auto-approval. If current help no longer supports one of those arguments, stop and update the skill rather than silently guessing.
+
+The wrapper detects Antigravity's known headless soft-denial output (where `agy` can exit `0` without doing work) and returns `Status: Blocked` with a non-zero wrapper exit code. Treat that as a failed delegation, not a successful no-op.
+
+## Use interactive approval when the user explicitly requests it
+
+Use the interactive path only when the user has explicitly approved interactive Antigravity use and can control a visible terminal. It keeps `--sandbox`, does not mutate global permission settings, and never enables dangerous auto-approval.
+
+Run it from a user-visible PowerShell 7 terminal, not through a hidden or redirected automation shell:
+
+~~~powershell
+pwsh -NoProfile -File <skill-root>/scripts/invoke-antigravity.ps1 -TaskContractPath <temporary-contract-file> -WorkingDirectory <repository-root> -Interactive
+~~~
+
+The wrapper launches `agy --sandbox --prompt-interactive <bounded-handoff>` in the supplied working directory. The bounded task-contract handoff is supplied as the initial interactive prompt; the user then approves or denies each tool operation in the Antigravity UI. Keep the temporary contract until the interactive session exits; after that, Codex performs the same independent diff and test verification as for headless delegation.
+
+`Status: InteractiveCompleted` means only that the interactive CLI exited with code `0`; it is not evidence that implementation or validation succeeded. Do not run this mode through `shell_command`, and do not attempt to automate user approvals.
 
 ## Perform the preflight
 
@@ -99,11 +115,13 @@ After confirming the preview, run the same command without DryRun. The wrapper:
 - passes each native argument separately instead of building a shell command string;
 - launches agy in the explicitly supplied working directory;
 - uses sandbox mode and never enables dangerous permission bypass;
-- preserves Antigravity's exit code;
+- preserves Antigravity's exit code unless it detects a headless soft-denial, which is normalized to `Blocked` and non-zero while the original exit code is retained as `ProcessExitCode`;
 - writes stdout and stderr to separate UTF-8 files and prints only a JSON summary with their paths;
 - keeps the contract out of its own summary and preview.
 
 Do not run more than one delegate in the same worktree. Do not pass any flag that auto-approves permissions. Do not pass a model option unless current agy help confirms it. Avoid loading full delegate logs into context; read only the lines needed to diagnose a failure or verify a claim.
+
+If the wrapper reports `Blocked`, do not modify global Antigravity permission settings, add broad allow rules, disable sandboxing, or retry with dangerous auto-approval. Stop the delegation, clean up its temporary artifacts, report the blocked permission, and ask the user whether to use a separately approved interactive execution path or improve the CLI integration outside the repository task.
 
 ## Validate independently
 
@@ -115,6 +133,7 @@ Antigravity reporting success is evidence, not proof. After every attempt:
 4. Match each acceptance criterion to the implementation and tests.
 5. Rerun relevant formatter, focused tests, and risk-proportionate lint, type check, build, or package tests from Codex.
 6. Apply the relevant safety gate: data and migration integrity, input validation and authorization, asynchronous state handling, raw HTML and path safety, or external API secret and timeout handling.
+7. When the wrapper reports `Blocked`, confirm that no source change occurred before considering a different user-approved execution path.
 
 Do not claim a test passed when it was only reported by the delegate or could not be rerun. Classify failures as change-caused, pre-existing, environmental, or flaky with evidence.
 
@@ -180,3 +199,6 @@ State the actual CLI version and invocation facts if they were checked. Distingu
 
 - references/task-contract.md: contract template, quality examples, delegate prompt template, and Codex verification checklist.
 - scripts/invoke-antigravity.ps1: PowerShell 7 wrapper for a confirmed bounded invocation. Run with -? for parameter help and with -DryRun before the first real invocation.
+- scripts/test-invoke-antigravity.ps1: local wrapper regression test using a temporary fake CLI; it does not contact Antigravity or change global permission settings.
+
+`-AgyExecutable` exists solely to inject that temporary fake CLI into the wrapper regression test. Production invocations must use the independently checked `agy` command discovered from `PATH`; the override does not bypass Antigravity permissions.
