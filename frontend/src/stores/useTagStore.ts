@@ -8,6 +8,7 @@ import {
 	listNoteTags,
 	listTags,
 	setNoteTags as setNoteTagsRequest,
+	setNoteTagsWithExpectedRevision as setNoteTagsWithExpectedRevisionRequest,
 	updateTag as updateTagRequest,
 } from '../api/tags'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
@@ -190,6 +191,32 @@ export const useTagStore = defineStore('tags', () => {
 		}
 	}
 
+	async function setTagsForNoteWithExpectedRevision(
+		noteId: string,
+		tagIds: string[],
+		expectedRevision: number,
+		expectedTagIds: string[],
+	) {
+		isMutating.value = true
+		error.value = null
+		try {
+			const updatedTags = await setNoteTagsWithExpectedRevisionRequest(noteId, {
+				tagIds,
+				expectedTagIds,
+				expectedRevision,
+			})
+			if (activeNoteId.value === noteId) {
+				applyActiveNoteTags(updatedTags)
+			}
+			return updatedTags
+		} catch (cause) {
+			publishError(cause, 'TAG_STATE_CONFLICT', 'タグが更新されたため、候補を適用できません。')
+			throw cause
+		} finally {
+			isMutating.value = false
+		}
+	}
+
 	async function attachTagToNote(noteId: string, tagId: string) {
 		const currentTags = activeNoteId.value === noteId
 			? activeNoteTags.value
@@ -221,6 +248,7 @@ export const useTagStore = defineStore('tags', () => {
 		renameTag,
 		removeTag,
 		setTagsForNote,
+		setTagsForNoteWithExpectedRevision,
 		attachTagToNote,
 		detachTagFromNote,
 	}

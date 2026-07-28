@@ -10,10 +10,10 @@ v1で確立した安全な単発要約を基盤に、AI司書、ストリーミ�
 
 ## v2開始条件
 
-- [ ] v1の秘密情報保存テストと手動受け入れ記録を完了する。
-- [ ] v1のOpenRouter／Gemini、CredentialStore、safe error、送信前確認の契約を回帰確認する。
-- [ ] v2の構造化出力、部分応答、キャンセル、適用境界をレビュー承認する。
-- [ ] v2ではDB schema、migration、AI用WebDAV entityを追加しないことを確認する。
+- [x] v1の秘密情報保存テストと手動受け入れ記録を完了する。
+- [x] v1のOpenRouter／Gemini、CredentialStore、safe error、送信前確認の契約を回帰確認する。
+- [x] v2の構造化出力、部分応答、キャンセル、適用境界をレビュー承認する。
+- [x] v2ではDB schema、migration、AI用WebDAV entityを追加しないことを確認する。
 
 ## 1. 実行基盤
 

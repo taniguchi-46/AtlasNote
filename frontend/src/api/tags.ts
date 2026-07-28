@@ -10,6 +10,26 @@ import {
 
 export type { note }
 
+type GuardedTagInput = {
+	tagIds: string[]
+	expectedTagIds: string[]
+	expectedRevision: number
+}
+
+type GuardedTagResult = note.NoteTagsResult & {
+	revisionConflict?: note.RevisionConflict
+}
+
+type WailsWindow = Window & typeof globalThis & {
+	go?: {
+		main?: {
+			App?: {
+				SetNoteTagsWithExpectedRevision(noteId: string, input: GuardedTagInput): Promise<GuardedTagResult>
+			}
+		}
+	}
+}
+
 export class TagApiError extends Error {
 	readonly code: string
 	readonly field?: string
@@ -21,6 +41,22 @@ export class TagApiError extends Error {
 		this.code = error.code
 		this.field = error.field
 		this.retryable = error.retryable
+	}
+}
+
+export class TagRevisionConflictError extends Error {
+	readonly code: string
+	readonly noteId: string
+	readonly expectedRevision: number
+	readonly actualRevision: number
+
+	constructor(conflict: note.RevisionConflict) {
+		super('ノートまたはタグが別の更新によって変更されています')
+		this.name = 'TagRevisionConflictError'
+		this.code = conflict.code
+		this.noteId = conflict.noteId
+		this.expectedRevision = conflict.expectedRevision
+		this.actualRevision = conflict.actualRevision
 	}
 }
 
@@ -60,6 +96,18 @@ export async function deleteTag(id: string): Promise<void> {
 
 export async function setNoteTags(noteId: string, input: note.SetNoteTagsInput): Promise<note.Tag[]> {
 	const result = await SetNoteTags(noteId, input)
+	throwIfTagError(result.error)
+	return result.tags ?? []
+}
+
+export async function setNoteTagsWithExpectedRevision(
+	noteId: string,
+	input: GuardedTagInput,
+): Promise<note.Tag[]> {
+	const bridge = (window as WailsWindow).go?.main?.App
+	if (!bridge) throw new Error('TAG_BACKEND_UNAVAILABLE')
+	const result = await bridge.SetNoteTagsWithExpectedRevision(noteId, input)
+	if (result.revisionConflict) throw new TagRevisionConflictError(result.revisionConflict)
 	throwIfTagError(result.error)
 	return result.tags ?? []
 }

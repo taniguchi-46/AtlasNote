@@ -5,6 +5,7 @@ import {
   GetAISettings,
   TestAIConnection,
 } from '../../wailsjs/go/main/App'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export type AIProviderID = 'openrouter' | 'gemini'
 
@@ -68,9 +69,81 @@ export type SummaryResponse = {
   error?: SafeAIError
 }
 
+export type LibrarianOperation = 'title' | 'tags' | 'classification' | 'related' | 'duplicate'
+
+export type LibrarianCandidateContext = {
+  noteID: string
+  title: string
+  snippet?: string
+}
+
+export type LibrarianTagContext = {
+  id: string
+  name: string
+}
+
+export type LibrarianNotebookContext = {
+  id: string
+  name: string
+}
+
+export type LibrarianInput = {
+  providerID: AIProviderID
+  modelID: string
+  operation: LibrarianOperation
+  noteID: string
+  baseRevision: number
+  title: string
+  content: string
+  candidateCount: number
+  candidates?: LibrarianCandidateContext[]
+  existingTags?: LibrarianTagContext[]
+  notebooks?: LibrarianNotebookContext[]
+}
+
+export type LibrarianCandidate = {
+  value?: string
+  name?: string
+  notebookID?: string
+  noteID?: string
+  score: number
+  reason?: string
+  newTag?: boolean
+}
+
+export type LibrarianResult = {
+  operation: LibrarianOperation
+  quality: 'normal' | 'low' | 'empty'
+  candidates: LibrarianCandidate[]
+}
+
+export type LibrarianStartResponse = {
+  requestID?: string
+  error?: SafeAIError
+}
+
+export type LibrarianCancelResponse = {
+  canceled: boolean
+  error?: SafeAIError
+}
+
+export type LibrarianEvent = {
+  requestID: string
+  noteID: string
+  baseRevision: number
+  operation: LibrarianOperation
+  phase: 'partial' | 'completed' | 'failed' | 'canceled'
+  sequence: number
+  partialText?: string
+  result?: LibrarianResult
+  error?: SafeAIError
+}
+
 type AIWailsBridge = {
   ListAIModels(input: ListModelsInput): Promise<ModelListResponse>
   GenerateAISummary(input: GenerateSummaryInput): Promise<SummaryResponse>
+  StartAILibrarian(input: LibrarianInput): Promise<LibrarianStartResponse>
+  CancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse>
 }
 
 type WailsWindow = Window & typeof globalThis & {
@@ -109,6 +182,18 @@ export function listAIModels(input: ListModelsInput): Promise<ModelListResponse>
 
 export function generateAISummary(input: GenerateSummaryInput): Promise<SummaryResponse> {
   return getAIWailsBridge().GenerateAISummary(input)
+}
+
+export function startAILibrarian(input: LibrarianInput): Promise<LibrarianStartResponse> {
+  return getAIWailsBridge().StartAILibrarian(input)
+}
+
+export function cancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse> {
+  return getAIWailsBridge().CancelAILibrarian(requestID)
+}
+
+export function onAILibrarianUpdate(listener: (event: LibrarianEvent) => void): () => void {
+  return EventsOn('ai:librarian:update', (event: LibrarianEvent) => listener(event))
 }
 
 export function deleteAIProviderCredential(providerID: AIProviderID): Promise<ProviderSettings[]> {

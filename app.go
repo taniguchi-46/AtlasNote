@@ -281,6 +281,13 @@ func (a *App) SetNoteTags(noteID string, input note.SetNoteTagsInput) (note.Note
 	return a.notes.SetNoteTags(a.ctx, noteID, input)
 }
 
+func (a *App) SetNoteTagsWithExpectedRevision(noteID string, input note.SetNoteTagsWithExpectedRevisionInput) (note.NoteTagsResult, error) {
+	if a.notes == nil {
+		return note.NoteTagsResult{Tags: make([]note.Tag, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.SetNoteTagsWithExpectedRevision(a.ctx, noteID, input)
+}
+
 func (a *App) GetSyncStatus() (syncservice.StatusResult, error) {
 	if a.syncService == nil {
 		return syncservice.StatusResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
@@ -382,6 +389,30 @@ func (a *App) GenerateAISummary(input aiservice.GenerateSummaryInput) aiservice.
 		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(err)}
 	}
 	return aiservice.SummaryResponse{Text: result.Text}
+}
+
+func (a *App) StartAILibrarian(input aiservice.LibrarianInput) aiservice.LibrarianStartResponse {
+	if a.aiService == nil {
+		return aiservice.LibrarianStartResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	eventContext := a.ctx
+	result, err := a.aiService.StartLibrarian(a.ctx, input, func(event aiservice.LibrarianEvent) {
+		if eventContext != nil {
+			runtime.EventsEmit(eventContext, aiservice.LibrarianEventName, event)
+		}
+	})
+	if err != nil {
+		return aiservice.LibrarianStartResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return result
+}
+
+func (a *App) CancelAILibrarian(requestID string) aiservice.LibrarianCancelResponse {
+	if a.aiService == nil {
+		return aiservice.LibrarianCancelResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	a.aiService.CancelLibrarian(requestID)
+	return aiservice.LibrarianCancelResponse{Canceled: true}
 }
 
 func (a *App) DeleteAIProviderCredential(providerID string) ([]aiservice.ProviderSettings, error) {

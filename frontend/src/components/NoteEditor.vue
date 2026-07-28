@@ -362,6 +362,8 @@
         </div>
       </section>
 
+      <AILibrarianPanel />
+
       <div class="editor-body">
         <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
         <textarea
@@ -450,6 +452,8 @@ import { useNoteStore, type NoteDraft } from '../stores/useNoteStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import { useAIStore } from '../stores/useAIStore'
+import { useAILibrarianStore } from '../stores/useAILibrarianStore'
+import AILibrarianPanel from './AILibrarianPanel.vue'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
@@ -482,6 +486,7 @@ const noteStore = useNoteStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 const aiStore = useAIStore()
+const aiLibrarianStore = useAILibrarianStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
@@ -587,6 +592,7 @@ watch(
       activeNoteId = null
       savedRichSelection = null
       aiStore.discardSummaryForActiveNote(null)
+      aiLibrarianStore.discardForNote(null)
       return
     }
 
@@ -601,6 +607,7 @@ watch(
 
     if (noteChanged) {
       aiStore.discardSummaryForActiveNote(note.id)
+      aiLibrarianStore.discardForNote(note.id)
       savedRichSelection = null
       resetSaveFeedback()
       localMarkdown.value = editableContent
@@ -612,6 +619,8 @@ watch(
       }
       return
     }
+
+    aiLibrarianStore.markStaleForRevision(note.id, note.revision)
 
     if (editMode.value === 'markdown') {
       return
@@ -638,6 +647,7 @@ watch(
 
 onBeforeUnmount(() => {
   aiStore.discardSummaryForActiveNote(null)
+  aiLibrarianStore.discardForNote(null)
   void noteStore.flushPendingDraft()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)

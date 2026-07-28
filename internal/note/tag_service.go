@@ -13,6 +13,7 @@ import (
 )
 
 var ErrTagNotFound = errors.New("tag not found")
+var ErrTagStateConflict = errors.New("tag state conflict")
 
 var tagCaseFolder = cases.Fold()
 
@@ -223,6 +224,66 @@ func (s *Service) SetNoteTags(ctx context.Context, noteID string, input SetNoteT
 	}
 	if err := s.repository.ReplaceNoteTagsWithSync(ctx, noteID, tagIDs, []SyncChange{change}); err != nil {
 		switch {
+		case errors.Is(err, ErrNotFound):
+			result.Error = tagError(TagErrorNoteNotFound, "ノートが見つかりません。", "noteId")
+			return result, nil
+		case errors.Is(err, ErrTagNotFound):
+			result.Error = tagError(TagErrorNotFound, "タグが見つかりません。", "tagIds")
+			return result, nil
+		default:
+			return result, err
+		}
+	}
+
+	tags, err := s.repository.ListNoteTags(ctx, noteID)
+	if err != nil {
+		return result, err
+	}
+	result.Tags = tags
+	return result, nil
+}
+
+func (s *Service) SetNoteTagsWithExpectedRevision(ctx context.Context, noteID string, input SetNoteTagsWithExpectedRevisionInput) (NoteTagsResult, error) {
+	ctx, unlockMutation := s.lockMutation(ctx)
+	defer unlockMutation()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := NoteTagsResult{Tags: make([]Tag, 0)}
+	if err := s.recoverPendingLocked(ctx); err != nil {
+		return result, err
+	}
+	if input.ExpectedRevision < 1 {
+		result.Error = tagError(TagErrorRevisionInvalid, "ノートのrevisionを確認できません。", "expectedRevision")
+		return result, nil
+	}
+
+	tagIDs := deduplicateTagIDs(input.TagIDs)
+	changeSetID, err := newID()
+	if err != nil {
+		return result, err
+	}
+	change, err := NewNoteTagsSyncChange(changeSetID, noteID, tagIDs)
+	if err != nil {
+		return result, err
+	}
+	err = s.repository.ReplaceNoteTagsWithExpectedRevision(
+		ctx,
+		noteID,
+		input.ExpectedRevision,
+		input.ExpectedTagIDs,
+		tagIDs,
+		[]SyncChange{change},
+	)
+	if err != nil {
+		var conflict *RevisionConflict
+		switch {
+		case errors.As(err, &conflict):
+			result.RevisionConflict = conflict
+			return result, nil
+		case errors.Is(err, ErrTagStateConflict):
+			result.Error = tagError(TagErrorStateConflict, "ノートのタグが別の更新によって変更されています。", "tagIds")
+			return result, nil
 		case errors.Is(err, ErrNotFound):
 			result.Error = tagError(TagErrorNoteNotFound, "ノートが見つかりません。", "noteId")
 			return result, nil

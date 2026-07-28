@@ -19,6 +19,8 @@ type Service struct {
 	mu               sync.Mutex
 	generationMu     sync.Mutex
 	generating       bool
+	librarianMu      sync.Mutex
+	activeLibrarian  *librarianRequest
 	shutdownCtx      context.Context
 	shutdownCancel   context.CancelFunc
 }

@@ -123,6 +123,12 @@ type SetNoteTagsInput struct {
 	TagIDs []string `json:"tagIds"`
 }
 
+type SetNoteTagsWithExpectedRevisionInput struct {
+	TagIDs           []string `json:"tagIds"`
+	ExpectedTagIDs   []string `json:"expectedTagIds"`
+	ExpectedRevision int64    `json:"expectedRevision"`
+}
+
 type TagError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -141,17 +147,20 @@ type TagDeleteResult struct {
 }
 
 type NoteTagsResult struct {
-	Tags  []Tag     `json:"tags"`
-	Error *TagError `json:"error,omitempty"`
+	Tags             []Tag             `json:"tags"`
+	Error            *TagError         `json:"error,omitempty"`
+	RevisionConflict *RevisionConflict `json:"revisionConflict,omitempty"`
 }
 
 const (
-	TagErrorNameEmpty    = "TAG_NAME_EMPTY"
-	TagErrorNameTooLong  = "TAG_NAME_TOO_LONG"
-	TagErrorNameInvalid  = "TAG_NAME_INVALID"
-	TagErrorNameConflict = "TAG_NAME_CONFLICT"
-	TagErrorNotFound     = "TAG_NOT_FOUND"
-	TagErrorNoteNotFound = "TAG_NOTE_NOT_FOUND"
+	TagErrorNameEmpty       = "TAG_NAME_EMPTY"
+	TagErrorNameTooLong     = "TAG_NAME_TOO_LONG"
+	TagErrorNameInvalid     = "TAG_NAME_INVALID"
+	TagErrorNameConflict    = "TAG_NAME_CONFLICT"
+	TagErrorNotFound        = "TAG_NOT_FOUND"
+	TagErrorNoteNotFound    = "TAG_NOTE_NOT_FOUND"
+	TagErrorStateConflict   = "TAG_STATE_CONFLICT"
+	TagErrorRevisionInvalid = "TAG_REVISION_INVALID"
 )
 
 const (

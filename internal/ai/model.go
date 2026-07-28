@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -130,6 +132,7 @@ const (
 	ErrorCodeProviderUnavailable      ErrorCode = "AI_PROVIDER_UNAVAILABLE"
 	ErrorCodeBusy                     ErrorCode = "AI_BUSY"
 	ErrorCodeInvalidResponse          ErrorCode = "AI_INVALID_RESPONSE"
+	ErrorCodeCancelled                ErrorCode = "AI_CANCELLED"
 )
 
 // SafeError deliberately contains only stable, user-safe information. It must
@@ -165,7 +168,112 @@ var (
 	ErrProviderUnavailable      = &SafeError{Code: ErrorCodeProviderUnavailable}
 	ErrBusy                     = &SafeError{Code: ErrorCodeBusy}
 	ErrInvalidResponse          = &SafeError{Code: ErrorCodeInvalidResponse}
+	ErrCancelled                = &SafeError{Code: ErrorCodeCancelled}
 )
+
+type LibrarianOperation string
+
+const (
+	LibrarianOperationTitle          LibrarianOperation = "title"
+	LibrarianOperationTags           LibrarianOperation = "tags"
+	LibrarianOperationClassification LibrarianOperation = "classification"
+	LibrarianOperationRelated        LibrarianOperation = "related"
+	LibrarianOperationDuplicate      LibrarianOperation = "duplicate"
+)
+
+const (
+	LibrarianEventName         = "ai:librarian:update"
+	LibrarianMinCandidateCount = 1
+	LibrarianMaxCandidateCount = 10
+	LibrarianMaxCandidatePool  = 20
+	LibrarianReasonLimitRunes  = 160
+	LibrarianSnippetLimitRunes = 240
+)
+
+// LibrarianInput is a bounded, note snapshot plus a locally selected
+// candidate pool. The backend never performs a whole-vault AI scan.
+type LibrarianInput struct {
+	ProviderID     ProviderID                  `json:"providerID"`
+	ModelID        string                      `json:"modelID"`
+	Operation      LibrarianOperation          `json:"operation"`
+	NoteID         string                      `json:"noteID"`
+	BaseRevision   int64                       `json:"baseRevision"`
+	Title          string                      `json:"title"`
+	Content        string                      `json:"content"`
+	CandidateCount int                         `json:"candidateCount"`
+	Candidates     []LibrarianCandidateContext `json:"candidates,omitempty"`
+	ExistingTags   []LibrarianTagContext       `json:"existingTags,omitempty"`
+	Notebooks      []LibrarianNotebookContext  `json:"notebooks,omitempty"`
+}
+
+type LibrarianCandidateContext struct {
+	NoteID  string `json:"noteID"`
+	Title   string `json:"title"`
+	Snippet string `json:"snippet,omitempty"`
+}
+
+type LibrarianTagContext struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type LibrarianNotebookContext struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type LibrarianCandidate struct {
+	Value      string  `json:"value,omitempty"`
+	Name       string  `json:"name,omitempty"`
+	NotebookID string  `json:"notebookID,omitempty"`
+	NoteID     string  `json:"noteID,omitempty"`
+	Score      float64 `json:"score"`
+	Reason     string  `json:"reason,omitempty"`
+	NewTag     bool    `json:"newTag,omitempty"`
+}
+
+type LibrarianResult struct {
+	Operation  LibrarianOperation   `json:"operation"`
+	Quality    string               `json:"quality"`
+	Candidates []LibrarianCandidate `json:"candidates"`
+}
+
+type LibrarianStartResponse struct {
+	RequestID string     `json:"requestID,omitempty"`
+	Error     *SafeError `json:"error,omitempty"`
+}
+
+type LibrarianCancelResponse struct {
+	Canceled bool       `json:"canceled"`
+	Error    *SafeError `json:"error,omitempty"`
+}
+
+type LibrarianEvent struct {
+	RequestID    string             `json:"requestID"`
+	NoteID       string             `json:"noteID"`
+	BaseRevision int64              `json:"baseRevision"`
+	Operation    LibrarianOperation `json:"operation"`
+	Phase        string             `json:"phase"`
+	Sequence     int                `json:"sequence"`
+	PartialText  string             `json:"partialText,omitempty"`
+	Result       *LibrarianResult   `json:"result,omitempty"`
+	Error        *SafeError         `json:"error,omitempty"`
+}
+
+// LibrarianProviderInput is the provider-neutral request built by the Go
+// service. Prompt construction and the JSON schema stay on the Go side.
+type LibrarianProviderInput struct {
+	Operation LibrarianOperation
+	ModelID   string
+	Prompt    string
+	Schema    json.RawMessage
+}
+
+// StructuredStreamingProviderAdapter is optional so existing v1 test doubles
+// and callers keep the ProviderAdapter contract unchanged.
+type StructuredStreamingProviderAdapter interface {
+	GenerateLibrarian(ctx context.Context, providerID ProviderID, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error)
+}
 
 func normalizeProviderID(value ProviderID) (ProviderID, error) {
 	provider := ProviderID(strings.ToLower(strings.TrimSpace(string(value))))

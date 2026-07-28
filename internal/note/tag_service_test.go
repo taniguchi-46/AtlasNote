@@ -169,6 +169,64 @@ func TestServiceSetNoteTagsIsAtomicAndDoesNotChangeNoteRevision(t *testing.T) {
 	}
 }
 
+func TestServiceSetNoteTagsWithExpectedRevisionGuardsNoteAndTagSnapshots(t *testing.T) {
+	t.Parallel()
+
+	ctx, _, _, service, _ := newRecoveryTestService(t)
+	createdNote, err := service.Create(ctx, note.CreateInput{Title: "Guarded tags", Content: "content"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	alpha := createTagForTest(t, ctx, service, "Alpha")
+	beta := createTagForTest(t, ctx, service, "Beta")
+
+	setResult, err := service.SetNoteTagsWithExpectedRevision(ctx, createdNote.ID, note.SetNoteTagsWithExpectedRevisionInput{
+		ExpectedRevision: createdNote.Revision,
+		ExpectedTagIDs:   []string{},
+		TagIDs:           []string{alpha.ID},
+	})
+	if err != nil || setResult.Error != nil || setResult.RevisionConflict != nil || len(setResult.Tags) != 1 {
+		t.Fatalf("guarded initial set = %#v, %v", setResult, err)
+	}
+
+	tagStateConflict, err := service.SetNoteTagsWithExpectedRevision(ctx, createdNote.ID, note.SetNoteTagsWithExpectedRevisionInput{
+		ExpectedRevision: createdNote.Revision,
+		ExpectedTagIDs:   []string{},
+		TagIDs:           []string{beta.ID},
+	})
+	if err != nil || tagStateConflict.Error == nil || tagStateConflict.Error.Code != note.TagErrorStateConflict {
+		t.Fatalf("tag snapshot conflict = %#v, %v", tagStateConflict, err)
+	}
+	unchanged, err := service.ListNoteTags(ctx, createdNote.ID)
+	if err != nil || len(unchanged.Tags) != 1 || unchanged.Tags[0].ID != alpha.ID {
+		t.Fatalf("tag snapshot conflict changed tags = %#v, %v", unchanged, err)
+	}
+
+	updated, err := service.Update(ctx, createdNote.ID, note.UpdateInput{
+		Content:          ptr("changed"),
+		ExpectedRevision: ptr(createdNote.Revision),
+	})
+	if err != nil {
+		t.Fatalf("update note before revision conflict: %v", err)
+	}
+	revisionConflict, err := service.SetNoteTagsWithExpectedRevision(ctx, createdNote.ID, note.SetNoteTagsWithExpectedRevisionInput{
+		ExpectedRevision: updated.Revision - 1,
+		ExpectedTagIDs:   []string{alpha.ID},
+		TagIDs:           []string{beta.ID},
+	})
+	if err != nil || revisionConflict.RevisionConflict == nil || revisionConflict.RevisionConflict.ActualRevision != updated.Revision {
+		t.Fatalf("revision conflict = %#v, %v", revisionConflict, err)
+	}
+
+	after, err := service.Get(ctx, createdNote.ID)
+	if err != nil {
+		t.Fatalf("get note after guarded conflict: %v", err)
+	}
+	if after.Revision != updated.Revision {
+		t.Fatalf("guarded tag operation changed note revision: before=%d after=%d", updated.Revision, after.Revision)
+	}
+}
+
 func TestServiceListPageFiltersBySingleTagAndExcludesTrashedNotes(t *testing.T) {
 	t.Parallel()
 

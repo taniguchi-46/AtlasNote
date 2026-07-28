@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -342,6 +343,70 @@ func (r *Repository) ReplaceNoteTagsWithSync(ctx context.Context, noteID string,
 	return nil
 }
 
+func (r *Repository) ReplaceNoteTagsWithExpectedRevision(ctx context.Context, noteID string, expectedRevision int64, expectedTagIDs []string, tagIDs []string, changes []SyncChange) error {
+	tagIDs = deduplicateTagIDs(tagIDs)
+	expectedTagIDs = deduplicateTagIDs(expectedTagIDs)
+	sort.Strings(expectedTagIDs)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin guarded note tag replace tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	actualRevision, err := getNoteRevision(ctx, tx, noteID)
+	if err != nil {
+		return err
+	}
+	if actualRevision != expectedRevision {
+		return &RevisionConflict{
+			Code:             ErrorCodeRevisionConflict,
+			NoteID:           noteID,
+			ExpectedRevision: expectedRevision,
+			ActualRevision:   actualRevision,
+		}
+	}
+	actualTagIDs, err := listNoteTagIDs(ctx, tx, noteID)
+	if err != nil {
+		return err
+	}
+	if !equalStringSlices(actualTagIDs, expectedTagIDs) {
+		return ErrTagStateConflict
+	}
+	if err := ensureTagsExist(ctx, tx, tagIDs); err != nil {
+		return err
+	}
+
+	deleteQuery, deleteArgs, err := psql.Delete(noteTagsTable).
+		Where(sq.Eq{"note_id": noteID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build guarded note tag delete: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, deleteQuery, deleteArgs...); err != nil {
+		return fmt.Errorf("delete guarded note tags: %w", err)
+	}
+	for _, tagID := range tagIDs {
+		insertQuery, insertArgs, err := psql.Insert(noteTagsTable).
+			Columns("note_id", "tag_id").
+			Values(noteID, tagID).
+			ToSql()
+		if err != nil {
+			return fmt.Errorf("build guarded note tag insert: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, insertQuery, insertArgs...); err != nil {
+			return fmt.Errorf("insert guarded note tag: %w", err)
+		}
+	}
+	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit guarded note tag replace tx: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) ListNoteIDsForTag(ctx context.Context, tagID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT note_id
@@ -388,6 +453,59 @@ func ensureNoteExists(ctx context.Context, executor sqlQueryExecutor, noteID str
 	}
 
 	return nil
+}
+
+func getNoteRevision(ctx context.Context, executor sqlQueryExecutor, noteID string) (int64, error) {
+	var revision int64
+	err := executor.QueryRowContext(ctx, `
+SELECT revision
+FROM notes
+WHERE id = ?
+`, noteID).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("check note revision: %w", err)
+	}
+	return revision, nil
+}
+
+func listNoteTagIDs(ctx context.Context, executor sqlQueryExecutor, noteID string) ([]string, error) {
+	rows, err := executor.QueryContext(ctx, `
+SELECT tag_id
+FROM note_tags
+WHERE note_id = ?
+ORDER BY tag_id
+`, noteID)
+	if err != nil {
+		return nil, fmt.Errorf("list guarded note tag ids: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan guarded note tag id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate guarded note tag ids: %w", err)
+	}
+	return ids, nil
+}
+
+func equalStringSlices(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func ensureTagsExist(ctx context.Context, executor sqlQueryExecutor, tagIDs []string) error {

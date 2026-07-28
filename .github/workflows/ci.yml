@@ -89,6 +89,9 @@ jobs:
       - name: Run AI store tests
         run: npm --prefix frontend run test:ai-store
 
+      - name: Run AI librarian tests
+        run: npm --prefix frontend run test:ai-librarian
+
       - name: Run tag store tests
         run: npm --prefix frontend run test:tags
 

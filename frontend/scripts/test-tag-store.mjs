@@ -48,6 +48,7 @@ export const mock = {
   updateTag: async () => ({ id: 'updated', name: 'Updated' }),
   deleteTag: async () => {},
   setNoteTags: async () => [],
+  setNoteTagsWithExpectedRevision: async (_noteId, input) => input.tagIds.map((tagId) => ({ id: tagId, name: tagId })),
 }
 
 export function configure(next) {
@@ -60,6 +61,7 @@ export function createTag(...args) { return mock.createTag(...args) }
 export function updateTag(...args) { return mock.updateTag(...args) }
 export function deleteTag(...args) { return mock.deleteTag(...args) }
 export function setNoteTags(...args) { return mock.setNoteTags(...args) }
+export function setNoteTagsWithExpectedRevision(...args) { return mock.setNoteTagsWithExpectedRevision(...args) }
 `, 'utf8')
 
 try {
