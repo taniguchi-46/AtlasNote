@@ -221,6 +221,34 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 - v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物を扱う。AIデータはWebDAV同期しない。
 - Phase 4完了はv3完了とする。
 
+### v3保存仕様（D-03/D-04追補・2026-07-28）
+
+決定状態: 承認済み。以下をv3の保存契約とし、詳細実装はこの契約に従う。
+
+1. **保存単位とschema**
+   - Markdown本文を正本とし、AI履歴・生成成果物はローカルSQLiteの管理データとして保存する。WebDAVのentity、manifest、object、outbox、conflictには追加しない。
+   - schema version 12で、会話を `ai_histories`、会話メッセージを `ai_history_messages`、会話の入力ノートと保存時revisionを `ai_history_sources`、生成成果物を `ai_artifacts`、成果物の入力ノートと保存時revisionを `ai_artifact_sources` として追加する。
+   - `ai_histories` は `id`、`kind`（`qa` / `brainstorm`）、`title`、`provider_id`、`model_id`、`status`（`saved` / `stale` / `orphaned`）、`created_at`、`updated_at` を持つ。`ai_history_messages` は `history_id`、連番、`role`（`user` / `assistant`）、`content`、作成日時を持ち、履歴削除時に同一トランザクションで削除する。
+   - `ai_artifacts` は `id`、`kind`（`prompt` / `prompt-improvement` / `readme` / `document` / `blog` / `requirements`）、`title`、`provider_id`、`model_id`、最終本文、`status`、`created_at`、`updated_at` を持つ。sources表は履歴・成果物ごとに `note_id` と `input_revision` を保持する。
+   - sources表はノート削除時に履歴・成果物を連鎖削除しない。保存データを残すため、ノートへの外部キー `ON DELETE CASCADE` は設けない。
+
+2. **prompt・ユーザー入力の保存境界**
+   - 生成中の状態、chunk、system prompt、内部指示、Provider request body、RAGのraw context、API Key、Authorization、raw provider errorは保存しない。
+   - 履歴は利用者が明示保存した時点のuser／assistantメッセージだけを保存する。ライティングは利用者が明示保存した最終編集済み成果物だけを保存し、生成指示や全文の入力ノートは保存しない。
+
+3. **保持期間・削除**
+   - 自動期限、世代数制限、バックグラウンド削除は設けず、利用者が削除するまで保持する。
+   - 個別削除・一括削除はアプリケーション上の完全削除とし、履歴または成果物本体、messages、sourcesをトランザクションで削除する。soft-delete、tombstone、AI用一時ファイルは作らない。
+   - SQLiteのWALや空きページに対するフォレンジックな物理消去、削除後の自動VACUUMはv3の保証範囲外とする。
+
+4. **参照元ノートの完全削除**
+   - 参照元ノートが完全削除されても、保存済み履歴・成果物は残す。sourceの `note_id` と `input_revision` は保持し、参照不能になったレコードは `orphaned` と表示する。
+   - ノートが存在しても `input_revision` と現在revisionが異なる場合は `stale` と表示する。自動rebase、自動上書き、自動再生成は行わず、再生成は利用者の明示操作で最新コンテキストから実行する。
+
+5. **CI失敗の扱い**
+   - CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) はWailsの `wails build -clean` に成功した一方、`internal/ai/librarian_test.go:86` のタイミング依存テストだけが失敗した既知の受け入れ例外として記録する。
+   - 今回はユーザー判断により当該失敗を修正せず、v3保存仕様の確定と設計・実装準備を進める。ただしCIは成功扱いにせず、v3およびPhase 4の完了判定で「CI成功」を主張するには、この例外の解消または別途正式なリリース例外承認が必要である。
+
 ## 7. 対象外
 
 - 本書の追加だけでAI API、Provider、Wails API、UI、DB migration、テストを実装すること。

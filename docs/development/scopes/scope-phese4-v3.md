@@ -1,8 +1,8 @@
 # Phase 4詳細スコープ v3：AIアシスタント・ライティング・履歴
 
-最終更新: 2026-07-27
+最終更新: 2026-07-28
 
-決定状態: 正式決定（2026-07-27）
+決定状態: 正式決定（2026-07-27）／v3保存仕様追補確定（2026-07-28）
 
 ## 位置付け
 
@@ -13,6 +13,16 @@ v3では、AIアシスタントとAIライティングを追加し、利用者�
 ## 目的
 
 ノートを検索・整理するだけでなく、選択した知識を根拠として質問、発想、文章作成を行えるようにする。同時に、生成結果の保存・削除・再生成・migrationを明示的なデータ契約として確立する。
+
+## 保存仕様（2026-07-28確定）
+
+詳細な正本は [`ai-integration.md`](../ai-integration.md) の「v3保存仕様（D-03/D-04追補）」とする。v3では次の5項目を確定する。
+
+1. 保存は利用者の明示操作時だけ行い、AI履歴・生成成果物はSQLiteのローカル管理データとして分離保存する。schema version 12で `ai_histories`、`ai_history_messages`、`ai_history_sources`、`ai_artifacts`、`ai_artifact_sources` を追加し、WebDAV同期対象にはしない。
+2. 保存するのは、保存操作時のuser／assistantメッセージと、明示保存された最終編集済み成果物だけとする。system prompt、内部指示、raw context、Provider request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
+3. 自動期限は設けず、削除はsoft-deleteではないアプリケーション上の完全削除とする。messages／sourcesを含めてトランザクションで削除するが、SQLiteの物理ページ消去までは保証しない。
+4. 参照元ノートを完全削除しても履歴・成果物は保持する。`note_id`／`input_revision` を残し、参照不能は `orphaned`、revision不一致は `stale` と表示する。自動rebase・自動再生成はしない。
+5. Wails clean build成功・AI司書テスト失敗のCI run #30360052157は既知の受け入れ例外として扱う。CI成功とは記録せず、例外を残したままv3の仕様確定・実装準備を進める。
 
 ## 対象範囲
 

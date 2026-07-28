@@ -1,6 +1,6 @@
 # Phase 4 TODO：v3
 
-決定状態: 正式決定（2026-07-27）
+決定状態: 正式決定（2026-07-27）／v3保存仕様確定（2026-07-28）
 
 ## TODOの目的
 
@@ -8,13 +8,26 @@ v2のAI司書を基盤に、AIアシスタント、AIライティング、利用
 
 詳細スコープは [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md)、v1は [`todo-phese4.md`](todo-phese4.md)、v2は [`todo-phese4-v2.md`](todo-phese4-v2.md) を正とする。
 
+## v3保存仕様の確定（2026-07-28）
+
+詳細な保存契約は [`ai-integration.md`](../development/ai-integration.md) の「v3保存仕様（D-03/D-04追補）」を正とする。実装前に確定した5項目は次のとおり。
+
+1. `ai_histories`／`ai_history_messages`／`ai_history_sources` と `ai_artifacts`／`ai_artifact_sources` をschema version 12で追加し、履歴と成果物をSQLiteのローカル管理データとして保存する。WebDAV同期のentity、outbox、manifest、object、conflictには追加しない。
+2. 明示保存したuser／assistantメッセージと最終編集済み成果物だけを保存し、system prompt、内部指示、raw context、request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
+3. 自動保持期限は設けない。個別・一括削除は本体とmessages／sourcesを含むアプリケーション上の完全削除とし、soft-delete・tombstone・AI一時ファイルは作らない。物理媒体の消去は保証しない。
+4. 参照元ノート削除後も保存済みデータを残す。`note_id`／`input_revision` を保持し、参照不能は `orphaned`、revision不一致は `stale` とする。自動rebase・自動再生成はせず、再生成は明示操作に限定する。
+5. CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) はWails clean build成功、`internal/ai/librarian_test.go:86` の既知のタイミング依存テスト失敗として受け入れ例外に記録する。CI成功扱いにはせず、ユーザー指示どおり修正せずにv3仕様の確定・実装準備を進める。
+
+この確定はv3の保存設計を承認するものであり、未完了のv1／v2完了条件や、CI成功の完了条件を満たしたことを意味しない。
+
 ## v3開始条件
 
 - [ ] v1の完了条件を満たす。
 - [ ] v2の完了条件を満たす。
-- [ ] AI履歴・生成成果物を保存する対象、正本、削除、再生成、保持期間をレビュー承認する。
-- [ ] v3でもAI設定、資格情報、AI履歴、生成成果物をWebDAV同期しないことを承認する。
+- [x] AI履歴・生成成果物を保存する対象、正本、削除、再生成、保持期間をレビュー承認する（2026-07-28確定）。
+- [x] v3でもAI設定、資格情報、AI履歴、生成成果物をWebDAV同期しないことを承認する（2026-07-28確定）。
 - [ ] DB schema、migration、rollback、既存データへの影響を実装前に確定する。
+  - 保存契約としてschema version 12とテーブル境界は2026-07-28に固定した。migration、rollback、既存データへの具体的影響と受け入れは実装前に確定する。
 
 ## 1. AIアシスタント
 

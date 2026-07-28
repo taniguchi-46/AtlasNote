@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-07-27
+最終更新: 2026-07-28
 
 ## 現在のフェーズ
 
@@ -113,13 +113,15 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
 - 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
 - Phase 4 v1はD-01〜D-07の設計承認、実装、保存/同期境界テスト、CI、ローカル受け入れを完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Phase 4全体の完了条件はv2のAI司書・実行体験とv3のAIアシスタント・ライティング・ローカル履歴まで含み、v3完了をもって完了とします。GitHub ActionsのD-07 CIは[run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)で成功しています。
+- Phase 4 v3の保存仕様（明示保存、SQLiteローカル管理データ、アプリケーション上の完全削除、参照元ノート削除後の保持、CI例外の扱い）は2026-07-28に確定しました。schema version 12の詳細は `docs/development/ai-integration.md` を正とします。
+- CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) はWails clean buildに成功しましたが、`internal/ai/librarian_test.go:86` のタイミング依存テストで失敗しています。既知の受け入れ例外として修正せずにv3の仕様確定・実装準備を進めますが、CI成功およびPhase 4完了とは扱いません。
 
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
 - 添付ファイルの保存設計
 - Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
-- Phase 4 v1はD-01〜D-07を承認・実装・受け入れ済みとする。v2はAI司書、ストリーミング、部分応答、キャンセル、構造化出力を対象とし、関連メモの未完了項目を含む。v3はAIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物を対象とし、Phase 4完了条件を満たす。チャット履歴の永続化はv3の別設計とする。正本は [`scope-phese4.md`](development/scopes/scope-phese4.md)、[`scope-phese4-v2.md`](development/scopes/scope-phese4-v2.md)、[`scope-phese4-v3.md`](development/scopes/scope-phese4-v3.md)、各TODO、`docs/development/ai-integration.md` とする。
+- Phase 4 v1はD-01〜D-07を承認・実装・受け入れ済みとする。v2はAI司書、ストリーミング、部分応答、キャンセル、構造化出力を対象とし、関連メモの未完了項目を含む。v3はAIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物を対象とし、これらを完了した時点でPhase 4完了条件を満たす。チャット履歴の永続化はv3の確定保存仕様に従う。正本は [`scope-phese4.md`](development/scopes/scope-phese4.md)、[`scope-phese4-v2.md`](development/scopes/scope-phese4-v2.md)、[`scope-phese4-v3.md`](development/scopes/scope-phese4-v3.md)、各TODO、`docs/development/ai-integration.md` とする。
 
 ## 主要コマンド
 
