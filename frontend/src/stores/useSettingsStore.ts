@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
+export type AIWorkspacePlacement = 'right' | 'bottom'
 export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai'
 
 export const SIDEBAR_WIDTH_MIN = 180
@@ -10,9 +11,14 @@ export const SIDEBAR_WIDTH_MAX = 360
 export const NOTE_LIST_WIDTH_MIN = 220
 export const NOTE_LIST_WIDTH_MAX = 480
 export const EDITOR_WIDTH_MIN = 360
+export const AI_WORKSPACE_RIGHT_WIDTH_MIN = 300
+export const AI_WORKSPACE_RIGHT_WIDTH_MAX = 960
+export const AI_WORKSPACE_BOTTOM_HEIGHT_MIN = 180
+export const AI_WORKSPACE_BOTTOM_HEIGHT_MAX = 760
 
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26] as const
 const FIRST_LINE_STYLE_OPTIONS: EditorFirstLineStyle[] = ['heading1', 'heading2', 'heading3', 'paragraph']
+const AI_WORKSPACE_PLACEMENT_OPTIONS = ['right', 'bottom'] as const
 
 function readNumberOption<T extends readonly number[]>(key: string, fallback: T[number], options: T) {
   const value = Number(localStorage.getItem(key))
@@ -22,6 +28,14 @@ function readNumberOption<T extends readonly number[]>(key: string, fallback: T[
 function readNumberInRange(key: string, fallback: number, min: number, max: number) {
   const value = Number(localStorage.getItem(key))
   return Number.isFinite(value) && value >= min && value <= max ? value : fallback
+}
+
+function readClampedNumberInRange(key: string, fallback: number, min: number, max: number) {
+  const rawValue = localStorage.getItem(key)
+  if (rawValue === null || rawValue.trim() === '') return fallback
+  const value = Number(rawValue)
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.round(value)))
 }
 
 function readStringOption<T extends readonly string[]>(key: string, fallback: T[number], options: T) {
@@ -39,6 +53,25 @@ export const useSettingsStore = defineStore('settings', () => {
   )
   const noteListWidth = ref(
     readNumberInRange('atlas-note-list-width', 280, NOTE_LIST_WIDTH_MIN, NOTE_LIST_WIDTH_MAX),
+  )
+  const aiWorkspacePlacement = ref<AIWorkspacePlacement>(
+    readStringOption('atlas-ai-workspace-placement', 'right', AI_WORKSPACE_PLACEMENT_OPTIONS),
+  )
+  const aiWorkspaceRightWidth = ref(
+    readClampedNumberInRange(
+      'atlas-ai-workspace-right-width',
+      480,
+      AI_WORKSPACE_RIGHT_WIDTH_MIN,
+      AI_WORKSPACE_RIGHT_WIDTH_MAX,
+    ),
+  )
+  const aiWorkspaceBottomHeight = ref(
+    readNumberInRange(
+      'atlas-ai-workspace-bottom-height',
+      360,
+      AI_WORKSPACE_BOTTOM_HEIGHT_MIN,
+      AI_WORKSPACE_BOTTOM_HEIGHT_MAX,
+    ),
   )
   
   // Editor Settings
@@ -61,6 +94,18 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(noteListWidth, (newNoteListWidth) => {
     localStorage.setItem('atlas-note-list-width', String(newNoteListWidth))
+  }, { immediate: true })
+
+  watch(aiWorkspacePlacement, (newPlacement) => {
+    localStorage.setItem('atlas-ai-workspace-placement', newPlacement)
+  }, { immediate: true })
+
+  watch(aiWorkspaceRightWidth, (newWidth) => {
+    localStorage.setItem('atlas-ai-workspace-right-width', String(newWidth))
+  }, { immediate: true })
+
+  watch(aiWorkspaceBottomHeight, (newHeight) => {
+    localStorage.setItem('atlas-ai-workspace-bottom-height', String(newHeight))
   }, { immediate: true })
   
   watch(fontFamily, (newFont) => {
@@ -121,11 +166,28 @@ export const useSettingsStore = defineStore('settings', () => {
     noteListWidth.value = Math.min(NOTE_LIST_WIDTH_MAX, Math.max(NOTE_LIST_WIDTH_MIN, Math.round(width)))
   }
 
+  function setAIWorkspaceRightWidth(width: number) {
+    aiWorkspaceRightWidth.value = Math.min(
+      AI_WORKSPACE_RIGHT_WIDTH_MAX,
+      Math.max(AI_WORKSPACE_RIGHT_WIDTH_MIN, Math.round(width)),
+    )
+  }
+
+  function setAIWorkspaceBottomHeight(height: number) {
+    aiWorkspaceBottomHeight.value = Math.min(
+      AI_WORKSPACE_BOTTOM_HEIGHT_MAX,
+      Math.max(AI_WORKSPACE_BOTTOM_HEIGHT_MIN, Math.round(height)),
+    )
+  }
+
   return {
     isSettingsOpen,
     requestedTab,
     sidebarWidth,
     noteListWidth,
+    aiWorkspacePlacement,
+    aiWorkspaceRightWidth,
+    aiWorkspaceBottomHeight,
     fontFamily,
     editorFontSize,
     editorFirstLineStyle,
@@ -137,5 +199,7 @@ export const useSettingsStore = defineStore('settings', () => {
     closeSettings,
     setSidebarWidth,
     setNoteListWidth,
+    setAIWorkspaceRightWidth,
+    setAIWorkspaceBottomHeight,
   }
 })

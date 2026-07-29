@@ -75,6 +75,20 @@
           </div>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
+          <button
+            ref="aiWorkspaceToggle"
+            class="icon-btn ai-workspace-toggle"
+            :class="{ 'is-active': isAIWorkspaceOpen }"
+            type="button"
+            :title="aiWorkspaceToggleLabel"
+            :aria-label="aiWorkspaceToggleLabel"
+            aria-controls="ai-workspace-panel"
+            :aria-pressed="isAIWorkspaceOpen"
+            @click="toggleAIWorkspace"
+          >
+            <component :is="aiWorkspaceToggleIcon" :size="17" />
+          </button>
+
           <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
             <button
               class="mode-segment-btn"
@@ -99,17 +113,6 @@
               <SquareMIcon :size="17" />
             </button>
           </div>
-
-          <button
-            class="ai-summary-button"
-            type="button"
-            :disabled="aiStore.isGenerating"
-            title="AIで要約"
-            @click="handleAISummary"
-          >
-            <SparklesIcon :size="16" />
-            <span>AIで要約</span>
-          </button>
 
           <button
             class="icon-btn"
@@ -330,55 +333,26 @@
         </template>
       </div>
 
-      <section
-        v-if="isAISummaryVisible"
-        class="ai-summary-panel"
-        aria-live="polite"
-        aria-label="AI要約"
+      <AIWorkspace
+        v-model:open="isAIWorkspaceOpen"
+        @closed="focusAIWorkspaceToggle"
       >
-        <div class="ai-summary-heading">
-          <strong>AI要約</strong>
-          <span v-if="aiStore.summaryState === 'generating'">生成中…</span>
+        <div class="editor-body">
+          <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
+          <textarea
+            v-else
+            ref="markdownTextarea"
+            v-model="localMarkdown"
+            class="markdown-textarea"
+            placeholder="ここにMarkdownで内容を入力してください..."
+            title="Ctrl / Cmd + クリックでノートリンクを開く"
+            @input="handleMarkdownInput"
+            @click="handleMarkdownClick"
+            @keyup="updateMarkdownSelection"
+            @select="updateMarkdownSelection"
+          />
         </div>
-        <p v-if="aiStore.summaryState === 'confirming'" class="ai-summary-status">
-          要約の送信を確認しています。
-        </p>
-        <p v-else-if="aiStore.summaryError" class="ai-summary-error" role="alert">
-          {{ aiStore.summaryError.message }}
-        </p>
-        <template v-else-if="visibleAISummary">
-          <p v-if="isAISummaryStale" class="ai-summary-warning" role="status">
-            ノートが更新されたため、この要約は現在の本文より古い可能性があります。コピーはできます。
-          </p>
-          <pre class="ai-summary-result">{{ visibleAISummary.text }}</pre>
-          <div class="ai-summary-actions">
-            <button type="button" @click="handleCopyAISummary">コピー</button>
-            <button type="button" @click="aiStore.discardSummary">破棄</button>
-          </div>
-        </template>
-        <div v-else-if="aiStore.summaryState === 'error'" class="ai-summary-actions">
-          <button type="button" @click="handleAISummary">再試行</button>
-          <button type="button" @click="aiStore.discardSummary">閉じる</button>
-        </div>
-      </section>
-
-      <AILibrarianPanel />
-
-      <div class="editor-body">
-        <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
-        <textarea
-          v-else
-          ref="markdownTextarea"
-          v-model="localMarkdown"
-          class="markdown-textarea"
-          placeholder="ここにMarkdownで内容を入力してください..."
-          title="Ctrl / Cmd + クリックでノートリンクを開く"
-          @input="handleMarkdownInput"
-          @click="handleMarkdownClick"
-          @keyup="updateMarkdownSelection"
-          @select="updateMarkdownSelection"
-        />
-      </div>
+      </AIWorkspace>
 
       <div class="editor-statusbar">
         <div class="editor-statusbar-left">
@@ -415,10 +389,13 @@ import {
   ItalicIcon,
   ListIcon,
   ListOrderedIcon,
+  PanelBottomCloseIcon,
+  PanelBottomOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   PinIcon,
   QuoteIcon,
   Rows3Icon,
-  SparklesIcon,
   SquareMIcon,
   SquarePenIcon,
   StarIcon,
@@ -448,12 +425,10 @@ import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
-import { useNoteStore, type NoteDraft } from '../stores/useNoteStore'
+import { useNoteStore } from '../stores/useNoteStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
-import { useAIStore } from '../stores/useAIStore'
-import { useAILibrarianStore } from '../stores/useAILibrarianStore'
-import AILibrarianPanel from './AILibrarianPanel.vue'
+import AIWorkspace from './AIWorkspace.vue'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
@@ -485,11 +460,11 @@ const lowlight = createLowlight(common)
 const noteStore = useNoteStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
-const aiStore = useAIStore()
-const aiLibrarianStore = useAILibrarianStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
+const isAIWorkspaceOpen = ref(true)
+const aiWorkspaceToggle = ref<HTMLButtonElement | null>(null)
 const saveConflicted = computed(() => noteStore.activeDraft?.status === 'conflicted')
 const conflictDetail = computed(() => {
   const conflict = noteStore.activeDraft?.conflict
@@ -498,6 +473,16 @@ const conflictDetail = computed(() => {
   return `保存元 revision ${conflict.expectedRevision} / 最新 revision ${conflict.actualRevision}`
 })
 const saveFailed = computed(() => noteStore.activeDraft?.status === 'failed')
+const aiWorkspaceToggleLabel = computed(() => {
+  const placement = settingsStore.aiWorkspacePlacement === 'right' ? '右側' : '下側'
+  return `AIワークスペースを${isAIWorkspaceOpen.value ? '閉じる' : '開く'}（${placement}）`
+})
+const aiWorkspaceToggleIcon = computed(() => {
+  if (settingsStore.aiWorkspacePlacement === 'right') {
+    return isAIWorkspaceOpen.value ? PanelRightCloseIcon : PanelRightOpenIcon
+  }
+  return isAIWorkspaceOpen.value ? PanelBottomCloseIcon : PanelBottomOpenIcon
+})
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
@@ -591,8 +576,6 @@ watch(
     if (!note) {
       activeNoteId = null
       savedRichSelection = null
-      aiStore.discardSummaryForActiveNote(null)
-      aiLibrarianStore.discardForNote(null)
       return
     }
 
@@ -606,8 +589,6 @@ watch(
         : note.title)
 
     if (noteChanged) {
-      aiStore.discardSummaryForActiveNote(note.id)
-      aiLibrarianStore.discardForNote(note.id)
       savedRichSelection = null
       resetSaveFeedback()
       localMarkdown.value = editableContent
@@ -619,8 +600,6 @@ watch(
       }
       return
     }
-
-    aiLibrarianStore.markStaleForRevision(note.id, note.revision)
 
     if (editMode.value === 'markdown') {
       return
@@ -646,8 +625,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  aiStore.discardSummaryForActiveNote(null)
-  aiLibrarianStore.discardForNote(null)
   void noteStore.flushPendingDraft()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
@@ -658,23 +635,6 @@ onBeforeUnmount(() => {
 const charCount = computed(() => {
   return localMarkdown.value.length
 })
-
-const visibleAISummary = computed(() => {
-  const note = noteStore.activeNote
-  const result = aiStore.summary
-  if (!note || !result || result.noteID !== note.id) return null
-  return result
-})
-
-const isAISummaryVisible = computed(() => (
-  aiStore.summaryState !== 'idle'
-  && aiStore.summaryTargetNoteID === noteStore.activeNote?.id
-))
-
-const isAISummaryStale = computed(() => (
-  Boolean(visibleAISummary.value && noteStore.activeNote)
-  && visibleAISummary.value!.baseRevision !== noteStore.activeNote!.revision
-))
 
 const isTableActive = computed(() => {
   editorStateVersion.value
@@ -715,97 +675,12 @@ function handleTitleInput() {
   scheduleAutoSave(localMarkdown.value)
 }
 
-async function handleAISummary() {
-  const selectedNote = noteStore.activeNote
-  if (!selectedNote) return
-
-  if (!aiStore.isSummaryReady) {
-    aiStore.setSummaryPreconditionError('AI_SUMMARY_NOT_READY', selectedNote.id)
-    settingsStore.openSettings('ai')
-    return
-  }
-  if (selectedNote.isTrashed) {
-    aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', selectedNote.id)
-    return
-  }
-  if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
-    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', selectedNote.id)
-    return
-  }
-
-  const noteID = selectedNote.id
-  let saved = false
-  try {
-    saved = await noteStore.flushPendingDraft()
-  } catch {
-    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
-    return
-  }
-  const currentNote = noteStore.activeNote
-  const currentDraft = noteStore.activeDraft
-  if (!saved || !currentNote || currentNote.id !== noteID || currentDraft) {
-    aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
-    return
-  }
-  if (currentNote.isTrashed) {
-    aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', noteID)
-    return
-  }
-
-  if (!aiStore.beginSummary({
-    noteID,
-    content: currentNote.content,
-    baseRevision: currentNote.revision,
-  })) {
-    if (!aiStore.isSummaryReady) settingsStore.openSettings('ai')
-    return
-  }
-
-  const snapshot = aiStore.pendingSummary
-  if (!snapshot) return
-  const confirmed = window.confirm(
-    `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n指示: 次のメモを、事実を補わずに簡潔に要約してください。\n\n生成結果はノートに保存・同期されません。`,
-  )
-  if (!confirmed) {
-    aiStore.cancelSummaryConfirmation()
-    return
-  }
-
-  const confirmationNote = noteStore.activeNote
-  const confirmationDraft = noteStore.activeDraft as NoteDraft | null
-  await aiStore.confirmSummary({
-    noteID: confirmationNote?.id ?? null,
-    content: confirmationDraft?.content ?? confirmationNote?.content ?? null,
-    revision: confirmationNote?.revision ?? null,
-    hasPendingDraft: Boolean(confirmationDraft),
-  })
+function toggleAIWorkspace() {
+  isAIWorkspaceOpen.value = !isAIWorkspaceOpen.value
 }
 
-async function handleCopyAISummary() {
-  const result = visibleAISummary.value
-  if (!result) return
-
-  try {
-    await writeTableClipboard(createTableClipboardPayload(result.text))
-    notificationStore.notify('要約をクリップボードにコピーしました。', {
-      kind: 'success',
-      source: 'ai',
-      code: 'AI_SUMMARY_COPIED',
-      dedupeKey: 'ai:summary-copied',
-    })
-  } catch (error) {
-    logOperationFailure({
-      noteId: noteStore.activeNote?.id,
-      stage: 'note-editor.ai-summary-copy',
-      errorCategory: getClipboardErrorCategory(error),
-    })
-    notificationStore.notify('要約をコピーできませんでした。', {
-      kind: 'error',
-      source: 'ai',
-      code: 'AI_SUMMARY_COPY_FAILED',
-      dedupeKey: 'ai:summary-copy-failed',
-    })
-  }
+function focusAIWorkspaceToggle() {
+  void nextTick(() => aiWorkspaceToggle.value?.focus())
 }
 
 async function handleRetrySave() {
@@ -1697,84 +1572,9 @@ function formatDate(iso: string): string {
   color: var(--bg-editor);
 }
 
-.ai-summary-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.ai-summary-button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.ai-summary-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.ai-summary-panel {
-  display: grid;
-  gap: 10px;
-  max-height: 260px;
-  margin: 10px 20px 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-sidebar);
-  font-size: 13px;
-}
-
-.ai-summary-heading,
-.ai-summary-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.ai-summary-heading span,
-.ai-summary-status {
-  color: var(--text-secondary);
-}
-
-.ai-summary-error {
-  margin: 0;
-  color: var(--color-danger);
-}
-
-.ai-summary-warning {
-  margin: 0;
-  color: var(--color-warning);
-}
-
-.ai-summary-result {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--text-primary);
-  font: inherit;
-  line-height: 1.6;
-}
-
-.ai-summary-actions {
-  justify-content: flex-start;
-}
-
-.ai-summary-actions button {
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  cursor: pointer;
+.ai-workspace-toggle.is-active {
+  background: var(--bg-active);
+  color: var(--brand-primary);
 }
 
 .prose-editor :deep(.ProseMirror) {

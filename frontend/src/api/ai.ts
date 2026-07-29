@@ -139,11 +139,177 @@ export type LibrarianEvent = {
   error?: SafeAIError
 }
 
+export type AssistantKind = 'qa' | 'brainstorm'
+
+export type AIConversationMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type AIContextInput = {
+  noteIDs?: string[]
+  searchQuery?: string
+  includeBacklinks?: boolean
+}
+
+export type AIContextSource = {
+  noteID: string
+  title: string
+  revision: number
+  snippet?: string
+  contentByte: number
+}
+
+export type AIContextResponse = {
+  sources: AIContextSource[]
+  error?: SafeAIError
+}
+
+export type AssistantInput = {
+  providerID: AIProviderID
+  modelID: string
+  kind: AssistantKind
+  question: string
+  messages?: AIConversationMessage[]
+  noteIDs?: string[]
+  searchQuery?: string
+  includeBacklinks?: boolean
+}
+
+export type AssistantResult = {
+  providerID: AIProviderID
+  modelID: string
+  kind: AssistantKind
+  messages: AIConversationMessage[]
+  sources: AIContextSource[]
+}
+
+export type AssistantResponse = {
+  result?: AssistantResult
+  error?: SafeAIError
+}
+
+export type AIHistorySource = {
+  noteID: string
+  inputRevision: number
+}
+
+export type AIRecordStatus = 'saved' | 'stale' | 'orphaned'
+
+export type AIHistory = {
+  id: string
+  kind: AssistantKind
+  title: string
+  providerID: AIProviderID
+  modelID: string
+  status: AIRecordStatus
+  messages?: AIConversationMessage[]
+  sources: AIHistorySource[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type SaveAIHistoryInput = {
+  id?: string
+  kind: AssistantKind
+  title: string
+  providerID: AIProviderID
+  modelID: string
+  messages: AIConversationMessage[]
+  sources: AIHistorySource[]
+}
+
+export type AIHistoryResponse = {
+  history?: AIHistory
+  error?: SafeAIError
+}
+
+export type AIHistoryListResponse = {
+  items: AIHistory[]
+  error?: SafeAIError
+}
+
+export type WritingKind = 'prompt' | 'prompt-improvement' | 'readme' | 'document' | 'blog' | 'requirements'
+
+export type WritingInput = {
+  providerID: AIProviderID
+  modelID: string
+  kind: WritingKind
+  instruction: string
+  noteIDs?: string[]
+  searchQuery?: string
+  includeBacklinks?: boolean
+}
+
+export type WritingResult = {
+  providerID: AIProviderID
+  modelID: string
+  kind: WritingKind
+  content: string
+  sources: AIContextSource[]
+}
+
+export type WritingResponse = {
+  result?: WritingResult
+  error?: SafeAIError
+}
+
+export type AIArtifact = {
+  id: string
+  kind: WritingKind
+  title: string
+  providerID: AIProviderID
+  modelID: string
+  content: string
+  status: AIRecordStatus
+  sources: AIHistorySource[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type SaveAIArtifactInput = {
+  id?: string
+  kind: WritingKind
+  title: string
+  providerID: AIProviderID
+  modelID: string
+  content: string
+  sources: AIHistorySource[]
+}
+
+export type AIArtifactResponse = {
+  artifact?: AIArtifact
+  error?: SafeAIError
+}
+
+export type AIArtifactListResponse = {
+  items: AIArtifact[]
+  error?: SafeAIError
+}
+
+export type AIDeleteResponse = {
+  deleted: boolean
+  error?: SafeAIError
+}
+
 type AIWailsBridge = {
   ListAIModels(input: ListModelsInput): Promise<ModelListResponse>
   GenerateAISummary(input: GenerateSummaryInput): Promise<SummaryResponse>
   StartAILibrarian(input: LibrarianInput): Promise<LibrarianStartResponse>
   CancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse>
+  PrepareAIContext(input: AIContextInput): Promise<AIContextResponse>
+  RunAIAssistant(input: AssistantInput): Promise<AssistantResponse>
+  SaveAIHistory(input: SaveAIHistoryInput): Promise<AIHistoryResponse>
+  ListAIHistories(): Promise<AIHistoryListResponse>
+  GetAIHistory(id: string): Promise<AIHistoryResponse>
+  DeleteAIHistory(id: string): Promise<AIDeleteResponse>
+  DeleteAllAIHistories(): Promise<AIDeleteResponse>
+  RunAIWriting(input: WritingInput): Promise<WritingResponse>
+  SaveAIArtifact(input: SaveAIArtifactInput): Promise<AIArtifactResponse>
+  ListAIArtifacts(): Promise<AIArtifactListResponse>
+  GetAIArtifact(id: string): Promise<AIArtifactResponse>
+  DeleteAIArtifact(id: string): Promise<AIDeleteResponse>
+  DeleteAllAIArtifacts(): Promise<AIDeleteResponse>
 }
 
 type WailsWindow = Window & typeof globalThis & {
@@ -190,6 +356,58 @@ export function startAILibrarian(input: LibrarianInput): Promise<LibrarianStartR
 
 export function cancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse> {
   return getAIWailsBridge().CancelAILibrarian(requestID)
+}
+
+export function prepareAIContext(input: AIContextInput): Promise<AIContextResponse> {
+  return getAIWailsBridge().PrepareAIContext(input)
+}
+
+export function runAIAssistant(input: AssistantInput): Promise<AssistantResponse> {
+  return getAIWailsBridge().RunAIAssistant(input)
+}
+
+export function saveAIHistory(input: SaveAIHistoryInput): Promise<AIHistoryResponse> {
+  return getAIWailsBridge().SaveAIHistory(input)
+}
+
+export function listAIHistories(): Promise<AIHistoryListResponse> {
+  return getAIWailsBridge().ListAIHistories()
+}
+
+export function getAIHistory(id: string): Promise<AIHistoryResponse> {
+  return getAIWailsBridge().GetAIHistory(id)
+}
+
+export function deleteAIHistory(id: string): Promise<AIDeleteResponse> {
+  return getAIWailsBridge().DeleteAIHistory(id)
+}
+
+export function deleteAllAIHistories(): Promise<AIDeleteResponse> {
+  return getAIWailsBridge().DeleteAllAIHistories()
+}
+
+export function runAIWriting(input: WritingInput): Promise<WritingResponse> {
+  return getAIWailsBridge().RunAIWriting(input)
+}
+
+export function saveAIArtifact(input: SaveAIArtifactInput): Promise<AIArtifactResponse> {
+  return getAIWailsBridge().SaveAIArtifact(input)
+}
+
+export function listAIArtifacts(): Promise<AIArtifactListResponse> {
+  return getAIWailsBridge().ListAIArtifacts()
+}
+
+export function getAIArtifact(id: string): Promise<AIArtifactResponse> {
+  return getAIWailsBridge().GetAIArtifact(id)
+}
+
+export function deleteAIArtifact(id: string): Promise<AIDeleteResponse> {
+  return getAIWailsBridge().DeleteAIArtifact(id)
+}
+
+export function deleteAllAIArtifacts(): Promise<AIDeleteResponse> {
+  return getAIWailsBridge().DeleteAllAIArtifacts()
 }
 
 export function onAILibrarianUpdate(listener: (event: LibrarianEvent) => void): () => void {

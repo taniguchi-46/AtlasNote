@@ -21,6 +21,7 @@ type Service struct {
 	generating       bool
 	librarianMu      sync.Mutex
 	activeLibrarian  *librarianRequest
+	contextProvider  NoteContextProvider
 	shutdownCtx      context.Context
 	shutdownCancel   context.CancelFunc
 }
@@ -232,6 +233,12 @@ func (s *Service) GenerateSummary(ctx context.Context, input GenerateSummaryInpu
 		return SummaryResult{}, toSafeError(err)
 	}
 	return result, nil
+}
+
+func (s *Service) SetNoteContextProvider(provider NoteContextProvider) {
+	s.mu.Lock()
+	s.contextProvider = provider
+	s.mu.Unlock()
 }
 
 func (s *Service) GetCredential(ctx context.Context, providerID ProviderID) (string, error) {

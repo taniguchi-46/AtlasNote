@@ -295,6 +295,66 @@ CREATE TABLE IF NOT EXISTS ai_provider_settings (
 	updated_at TEXT NOT NULL
 );
 	`,
+	`
+CREATE TABLE IF NOT EXISTS ai_histories (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('qa', 'brainstorm')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_messages (
+	history_id TEXT NOT NULL,
+	sequence INTEGER NOT NULL CHECK(sequence >= 1),
+	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY(history_id, sequence),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_sources (
+	history_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(history_id, note_id),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_histories_status_updated_at
+	ON ai_histories(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_history_sources_note_id
+	ON ai_history_sources(note_id);
+
+CREATE TABLE IF NOT EXISTS ai_artifacts (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_artifact_sources (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -480,6 +540,9 @@ CREATE TABLE IF NOT EXISTS note_link_state (
 	if err := ensureAIProviderSettingsSchema(ctx, db); err != nil {
 		return err
 	}
+	if err := ensureAIHistorySchema(ctx, db); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -496,6 +559,72 @@ CREATE TABLE IF NOT EXISTS ai_provider_settings (
 );
 `); err != nil {
 		return fmt.Errorf("ensure AI provider settings schema: %w", err)
+	}
+	return nil
+}
+
+func ensureAIHistorySchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS ai_histories (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('qa', 'brainstorm')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_messages (
+	history_id TEXT NOT NULL,
+	sequence INTEGER NOT NULL CHECK(sequence >= 1),
+	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY(history_id, sequence),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_sources (
+	history_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(history_id, note_id),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_histories_status_updated_at
+	ON ai_histories(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_history_sources_note_id
+	ON ai_history_sources(note_id);
+
+CREATE TABLE IF NOT EXISTS ai_artifacts (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_artifact_sources (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+`); err != nil {
+		return fmt.Errorf("ensure AI history schema: %w", err)
 	}
 	return nil
 }

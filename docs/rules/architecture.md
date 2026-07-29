@@ -47,7 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援。v1のメモ要約は画面上だけの一時結果であり、Markdown・SQLite・同期データには保存しない。AI設定と資格情報も端末ローカルとする |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、ライティング支援。AI機能の表示は`AIWorkspace`の共通コンポーザーと`＋`メニューに集約し、モデル表示ボタンは既存のAI設定画面を開く。v1のメモ要約は画面上だけの一時結果であり、Markdown・SQLite・同期データには保存しない。AI設定と資格情報も端末ローカルとする |
 
 ## データ / 状態管理
 
@@ -56,6 +56,7 @@ Go Backend
 - ノート本文のファイル名は安定 ID を使った `note-id.md` とし、ユーザー入力をファイルパスへ直接使用しない。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
+- AIワークスペースの右側／下側配置と右側幅／下側高さだけは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AI入力・生成結果・API Keyは`localStorage`へ保持しない。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
 

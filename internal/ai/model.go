@@ -14,6 +14,10 @@ const (
 	CredentialStoreServiceName = "atlasnote-ai"
 	summaryInputLimitBytes     = 12 * 1024
 	summaryOutputTokenLimit    = 512
+	textInstructionLimitBytes  = 16 * 1024
+	textMessageLimitBytes      = 64 * 1024
+	textMaxMessages            = 24
+	textMaxOutputTokens        = 4096
 )
 
 type ProviderID string
@@ -113,6 +117,179 @@ type SummaryResponse struct {
 	Error *SafeError `json:"error,omitempty"`
 }
 
+type AssistantKind string
+
+const (
+	AssistantKindQA         AssistantKind = "qa"
+	AssistantKindBrainstorm AssistantKind = "brainstorm"
+)
+
+type AIRecordStatus string
+
+const (
+	AIRecordStatusSaved    AIRecordStatus = "saved"
+	AIRecordStatusStale    AIRecordStatus = "stale"
+	AIRecordStatusOrphaned AIRecordStatus = "orphaned"
+)
+
+type AIConversationMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type AIContextInput struct {
+	NoteIDs          []string `json:"noteIDs,omitempty"`
+	SearchQuery      string   `json:"searchQuery,omitempty"`
+	IncludeBacklinks bool     `json:"includeBacklinks,omitempty"`
+}
+
+type AIContextSource struct {
+	NoteID      string `json:"noteID"`
+	Title       string `json:"title"`
+	Revision    int64  `json:"revision"`
+	Snippet     string `json:"snippet,omitempty"`
+	ContentByte int    `json:"contentByte"`
+}
+
+type AIContextResponse struct {
+	Sources []AIContextSource `json:"sources"`
+	Error   *SafeError        `json:"error,omitempty"`
+}
+
+type AssistantInput struct {
+	ProviderID       ProviderID              `json:"providerID"`
+	ModelID          string                  `json:"modelID"`
+	Kind             AssistantKind           `json:"kind"`
+	Question         string                  `json:"question"`
+	Messages         []AIConversationMessage `json:"messages,omitempty"`
+	NoteIDs          []string                `json:"noteIDs,omitempty"`
+	SearchQuery      string                  `json:"searchQuery,omitempty"`
+	IncludeBacklinks bool                    `json:"includeBacklinks,omitempty"`
+}
+
+type AssistantResult struct {
+	ProviderID ProviderID              `json:"providerID"`
+	ModelID    string                  `json:"modelID"`
+	Kind       AssistantKind           `json:"kind"`
+	Messages   []AIConversationMessage `json:"messages"`
+	Sources    []AIContextSource       `json:"sources"`
+}
+
+type AssistantResponse struct {
+	Result *AssistantResult `json:"result,omitempty"`
+	Error  *SafeError       `json:"error,omitempty"`
+}
+
+type AIHistorySource struct {
+	NoteID        string `json:"noteID"`
+	InputRevision int64  `json:"inputRevision"`
+}
+
+type AIHistory struct {
+	ID         string                  `json:"id"`
+	Kind       AssistantKind           `json:"kind"`
+	Title      string                  `json:"title"`
+	ProviderID ProviderID              `json:"providerID"`
+	ModelID    string                  `json:"modelID"`
+	Status     AIRecordStatus          `json:"status"`
+	Messages   []AIConversationMessage `json:"messages,omitempty"`
+	Sources    []AIHistorySource       `json:"sources"`
+	CreatedAt  time.Time               `json:"createdAt"`
+	UpdatedAt  time.Time               `json:"updatedAt"`
+}
+
+type SaveAIHistoryInput struct {
+	ID         string                  `json:"id,omitempty"`
+	Kind       AssistantKind           `json:"kind"`
+	Title      string                  `json:"title"`
+	ProviderID ProviderID              `json:"providerID"`
+	ModelID    string                  `json:"modelID"`
+	Messages   []AIConversationMessage `json:"messages"`
+	Sources    []AIHistorySource       `json:"sources"`
+}
+
+type AIHistoryResponse struct {
+	History *AIHistory `json:"history,omitempty"`
+	Error   *SafeError `json:"error,omitempty"`
+}
+
+type AIHistoryListResponse struct {
+	Items []AIHistory `json:"items"`
+	Error *SafeError  `json:"error,omitempty"`
+}
+
+type WritingKind string
+
+const (
+	WritingKindPrompt            WritingKind = "prompt"
+	WritingKindPromptImprovement WritingKind = "prompt-improvement"
+	WritingKindREADME            WritingKind = "readme"
+	WritingKindDocument          WritingKind = "document"
+	WritingKindBlog              WritingKind = "blog"
+	WritingKindRequirements      WritingKind = "requirements"
+)
+
+type WritingInput struct {
+	ProviderID       ProviderID  `json:"providerID"`
+	ModelID          string      `json:"modelID"`
+	Kind             WritingKind `json:"kind"`
+	Instruction      string      `json:"instruction"`
+	NoteIDs          []string    `json:"noteIDs,omitempty"`
+	SearchQuery      string      `json:"searchQuery,omitempty"`
+	IncludeBacklinks bool        `json:"includeBacklinks,omitempty"`
+}
+
+type WritingResult struct {
+	ProviderID ProviderID        `json:"providerID"`
+	ModelID    string            `json:"modelID"`
+	Kind       WritingKind       `json:"kind"`
+	Content    string            `json:"content"`
+	Sources    []AIContextSource `json:"sources"`
+}
+
+type WritingResponse struct {
+	Result *WritingResult `json:"result,omitempty"`
+	Error  *SafeError     `json:"error,omitempty"`
+}
+
+type AIArtifact struct {
+	ID         string            `json:"id"`
+	Kind       WritingKind       `json:"kind"`
+	Title      string            `json:"title"`
+	ProviderID ProviderID        `json:"providerID"`
+	ModelID    string            `json:"modelID"`
+	Content    string            `json:"content"`
+	Status     AIRecordStatus    `json:"status"`
+	Sources    []AIHistorySource `json:"sources"`
+	CreatedAt  time.Time         `json:"createdAt"`
+	UpdatedAt  time.Time         `json:"updatedAt"`
+}
+
+type SaveAIArtifactInput struct {
+	ID         string            `json:"id,omitempty"`
+	Kind       WritingKind       `json:"kind"`
+	Title      string            `json:"title"`
+	ProviderID ProviderID        `json:"providerID"`
+	ModelID    string            `json:"modelID"`
+	Content    string            `json:"content"`
+	Sources    []AIHistorySource `json:"sources"`
+}
+
+type AIArtifactResponse struct {
+	Artifact *AIArtifact `json:"artifact,omitempty"`
+	Error    *SafeError  `json:"error,omitempty"`
+}
+
+type AIArtifactListResponse struct {
+	Items []AIArtifact `json:"items"`
+	Error *SafeError   `json:"error,omitempty"`
+}
+
+type AIDeleteResponse struct {
+	Deleted bool       `json:"deleted"`
+	Error   *SafeError `json:"error,omitempty"`
+}
+
 type ErrorCode string
 
 const (
@@ -133,6 +310,8 @@ const (
 	ErrorCodeBusy                     ErrorCode = "AI_BUSY"
 	ErrorCodeInvalidResponse          ErrorCode = "AI_INVALID_RESPONSE"
 	ErrorCodeCancelled                ErrorCode = "AI_CANCELLED"
+	ErrorCodeHistoryNotFound          ErrorCode = "AI_HISTORY_NOT_FOUND"
+	ErrorCodeArtifactNotFound         ErrorCode = "AI_ARTIFACT_NOT_FOUND"
 )
 
 // SafeError deliberately contains only stable, user-safe information. It must
@@ -169,6 +348,8 @@ var (
 	ErrBusy                     = &SafeError{Code: ErrorCodeBusy}
 	ErrInvalidResponse          = &SafeError{Code: ErrorCodeInvalidResponse}
 	ErrCancelled                = &SafeError{Code: ErrorCodeCancelled}
+	ErrHistoryNotFound          = &SafeError{Code: ErrorCodeHistoryNotFound}
+	ErrArtifactNotFound         = &SafeError{Code: ErrorCodeArtifactNotFound}
 )
 
 type LibrarianOperation string
@@ -273,6 +454,26 @@ type LibrarianProviderInput struct {
 // and callers keep the ProviderAdapter contract unchanged.
 type StructuredStreamingProviderAdapter interface {
 	GenerateLibrarian(ctx context.Context, providerID ProviderID, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error)
+}
+
+type TextMessage struct {
+	Role    string
+	Content string
+}
+
+type TextGenerationInput struct {
+	ModelID           string
+	SystemInstruction string
+	Messages          []TextMessage
+	MaxOutputTokens   int
+}
+
+type TextGenerationResult struct {
+	Text string
+}
+
+type TextGenerationProviderAdapter interface {
+	GenerateText(ctx context.Context, providerID ProviderID, apiKey string, input TextGenerationInput) (TextGenerationResult, error)
 }
 
 func normalizeProviderID(value ProviderID) (ProviderID, error) {

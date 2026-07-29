@@ -59,6 +59,17 @@
                 />
               </div>
             </div>
+            <div class="settings-section">
+              <h4>AIワークスペース</h4>
+              <div class="setting-group">
+                <label for="ai-workspace-placement">表示位置</label>
+                <select id="ai-workspace-placement" v-model="settingsStore.aiWorkspacePlacement">
+                  <option value="right">右側</option>
+                  <option value="bottom">下側</option>
+                </select>
+                <p class="setting-help">位置を選択し、表示中の境界をドラッグして幅または高さを調整します。</p>
+              </div>
+            </div>
             </section>
           </TabsContent>
 
@@ -334,6 +345,13 @@ function handleOpenChange(open: boolean) {
   font-weight: 500;
   margin-bottom: 8px;
   color: var(--text-primary);
+}
+
+.setting-help {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .setting-label-row {

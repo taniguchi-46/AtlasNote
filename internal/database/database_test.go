@@ -58,7 +58,16 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 		t.Fatalf("search index state table name = %q", tableName)
 	}
 
-	for _, expectedTable := range []string{"tags", "note_tags", "ai_provider_settings"} {
+	for _, expectedTable := range []string{
+		"tags",
+		"note_tags",
+		"ai_provider_settings",
+		"ai_histories",
+		"ai_history_messages",
+		"ai_history_sources",
+		"ai_artifacts",
+		"ai_artifact_sources",
+	} {
 		if err := db.QueryRowContext(
 			t.Context(),
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -92,6 +101,55 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	}
 	if aiColumns["api_key"] || aiColumns["secret"] {
 		t.Fatal("AI provider settings schema contains a secret column")
+	}
+}
+
+func TestAIV3SourceReferencesSurvivePermanentNoteDeletion(t *testing.T) {
+	t.Parallel()
+
+	db, err := Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.ExecContext(t.Context(), `
+INSERT INTO notes (
+	id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
+)
+VALUES ('source-note', 'Source', 'source-note.md', 0, 0, 0, 3, '2026-07-28T00:00:00Z', '2026-07-28T00:00:00Z');
+INSERT INTO ai_histories (
+	id, kind, title, provider_id, model_id, status, created_at, updated_at
+)
+VALUES ('history-1', 'qa', 'Saved Q&A', 'openrouter', 'test-model', 'saved', '2026-07-28T00:00:00Z', '2026-07-28T00:00:00Z');
+INSERT INTO ai_history_messages(history_id, sequence, role, content, created_at)
+VALUES ('history-1', 1, 'user', 'Question', '2026-07-28T00:00:00Z');
+INSERT INTO ai_history_sources(history_id, note_id, input_revision)
+VALUES ('history-1', 'source-note', 3);
+`); err != nil {
+		t.Fatalf("insert v3 fixture: %v", err)
+	}
+
+	if _, err := db.ExecContext(t.Context(), "DELETE FROM notes WHERE id = ?", "source-note"); err != nil {
+		t.Fatalf("delete source note: %v", err)
+	}
+
+	var sourceCount int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_history_sources WHERE history_id = ?", "history-1").Scan(&sourceCount); err != nil {
+		t.Fatalf("count preserved source reference: %v", err)
+	}
+	if sourceCount != 1 {
+		t.Fatalf("preserved source references = %d, want 1", sourceCount)
+	}
+
+	if _, err := db.ExecContext(t.Context(), "DELETE FROM ai_histories WHERE id = ?", "history-1"); err != nil {
+		t.Fatalf("delete history: %v", err)
+	}
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_history_messages WHERE history_id = ?", "history-1").Scan(&sourceCount); err != nil {
+		t.Fatalf("count cascaded history messages: %v", err)
+	}
+	if sourceCount != 0 {
+		t.Fatalf("cascaded history messages = %d, want 0", sourceCount)
 	}
 }
 

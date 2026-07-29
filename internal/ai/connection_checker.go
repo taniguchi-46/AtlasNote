@@ -174,6 +174,231 @@ func (a *HTTPProviderAdapter) GenerateSummary(ctx context.Context, providerID Pr
 	}
 }
 
+func (a *HTTPProviderAdapter) GenerateText(ctx context.Context, providerID ProviderID, apiKey string, input TextGenerationInput) (TextGenerationResult, error) {
+	providerID, err := normalizeProviderID(providerID)
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	if err := validateAPIKey(apiKey); err != nil {
+		return TextGenerationResult{}, err
+	}
+	normalized, err := normalizeTextGenerationInput(providerID, input)
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	operationCtx, cancel := context.WithTimeout(nonNilContext(ctx), summaryGenerationTimeout)
+	defer cancel()
+
+	switch providerID {
+	case ProviderOpenRouter:
+		return a.generateOpenRouterText(operationCtx, apiKey, normalized)
+	case ProviderGemini:
+		return a.generateGeminiText(operationCtx, apiKey, normalized)
+	default:
+		return TextGenerationResult{}, ErrProviderUnsupported
+	}
+}
+
+func normalizeTextGenerationInput(providerID ProviderID, input TextGenerationInput) (TextGenerationInput, error) {
+	modelID, err := normalizeSummaryModelID(providerID, input.ModelID)
+	if err != nil {
+		return TextGenerationInput{}, err
+	}
+	systemInstruction := strings.TrimSpace(input.SystemInstruction)
+	if systemInstruction == "" || len([]byte(systemInstruction)) > textInstructionLimitBytes {
+		return TextGenerationInput{}, ErrInputInvalid
+	}
+	// Assistant requests may prepend one bounded context message before the
+	// user/assistant conversation. Keep the public conversation limit intact
+	// while allowing that single internal envelope message.
+	if len(input.Messages) == 0 || len(input.Messages) > textMaxMessages+1 {
+		return TextGenerationInput{}, ErrInputInvalid
+	}
+	messageBytes := 0
+	messages := make([]TextMessage, 0, len(input.Messages))
+	for _, message := range input.Messages {
+		role := strings.TrimSpace(message.Role)
+		content := strings.TrimSpace(message.Content)
+		if (role != "user" && role != "assistant") || content == "" {
+			return TextGenerationInput{}, ErrInputInvalid
+		}
+		messageBytes += len([]byte(content))
+		messages = append(messages, TextMessage{Role: role, Content: content})
+	}
+	if messageBytes > textMessageLimitBytes {
+		return TextGenerationInput{}, ErrInputTooLarge
+	}
+	if input.MaxOutputTokens < 1 || input.MaxOutputTokens > textMaxOutputTokens {
+		return TextGenerationInput{}, ErrInputInvalid
+	}
+	return TextGenerationInput{
+		ModelID:           modelID,
+		SystemInstruction: systemInstruction,
+		Messages:          messages,
+		MaxOutputTokens:   input.MaxOutputTokens,
+	}, nil
+}
+
+func (a *HTTPProviderAdapter) generateOpenRouterText(ctx context.Context, apiKey string, input TextGenerationInput) (TextGenerationResult, error) {
+	payload := struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+		Stream    bool `json:"stream"`
+		MaxTokens int  `json:"max_tokens"`
+		Provider  struct {
+			ZDR            bool   `json:"zdr"`
+			DataCollection string `json:"data_collection"`
+			AllowFallbacks bool   `json:"allow_fallbacks"`
+		} `json:"provider"`
+	}{
+		Model:     input.ModelID,
+		Stream:    false,
+		MaxTokens: input.MaxOutputTokens,
+	}
+	payload.Messages = append(payload.Messages, struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{Role: "system", Content: input.SystemInstruction})
+	for _, message := range input.Messages {
+		payload.Messages = append(payload.Messages, struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{Role: message.Role, Content: message.Content})
+	}
+	payload.Provider.ZDR = true
+	payload.Provider.DataCollection = "deny"
+	payload.Provider.AllowFallbacks = false
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return TextGenerationResult{}, ErrProviderUnavailable
+	}
+	request, err := a.newRequest(ctx, http.MethodPost, openRouterSummaryEndpoint, ProviderOpenRouter, apiKey, bytes.NewReader(body))
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := a.do(request)
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	defer response.Body.Close()
+	if err := statusError(response, true); err != nil {
+		return TextGenerationResult{}, err
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := decodeProviderJSON(response.Body, &result); err != nil {
+		return TextGenerationResult{}, err
+	}
+	if len(result.Choices) == 0 || result.Choices[0].FinishReason != "stop" {
+		return TextGenerationResult{}, ErrInvalidResponse
+	}
+	var text string
+	if err := json.Unmarshal(result.Choices[0].Message.Content, &text); err != nil || strings.TrimSpace(text) == "" {
+		return TextGenerationResult{}, ErrInvalidResponse
+	}
+	return TextGenerationResult{Text: text}, nil
+}
+
+func (a *HTTPProviderAdapter) generateGeminiText(ctx context.Context, apiKey string, input TextGenerationInput) (TextGenerationResult, error) {
+	payload := struct {
+		SystemInstruction struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"systemInstruction"`
+		Contents []struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"contents"`
+		GenerationConfig struct {
+			MaxOutputTokens int `json:"maxOutputTokens"`
+		} `json:"generationConfig"`
+		Store bool `json:"store"`
+	}{Store: false}
+	payload.SystemInstruction.Parts = append(payload.SystemInstruction.Parts, struct {
+		Text string `json:"text"`
+	}{Text: input.SystemInstruction})
+	for _, message := range input.Messages {
+		role := "user"
+		if message.Role == "assistant" {
+			role = "model"
+		}
+		content := struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		}{Role: role}
+		content.Parts = append(content.Parts, struct {
+			Text string `json:"text"`
+		}{Text: message.Content})
+		payload.Contents = append(payload.Contents, content)
+	}
+	payload.GenerationConfig.MaxOutputTokens = input.MaxOutputTokens
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return TextGenerationResult{}, ErrProviderUnavailable
+	}
+	endpoint := geminiSummaryEndpoint + url.PathEscape(input.ModelID) + ":generateContent"
+	request, err := a.newRequest(ctx, http.MethodPost, endpoint, ProviderGemini, apiKey, bytes.NewReader(body))
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := a.do(request)
+	if err != nil {
+		return TextGenerationResult{}, err
+	}
+	defer response.Body.Close()
+	if err := statusError(response, true); err != nil {
+		return TextGenerationResult{}, err
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text *string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+	}
+	if err := decodeProviderJSON(response.Body, &result); err != nil {
+		return TextGenerationResult{}, err
+	}
+	if len(result.Candidates) == 0 || result.Candidates[0].FinishReason != "STOP" || len(result.Candidates[0].Content.Parts) == 0 {
+		return TextGenerationResult{}, ErrInvalidResponse
+	}
+	parts := make([]string, 0, len(result.Candidates[0].Content.Parts))
+	for _, part := range result.Candidates[0].Content.Parts {
+		if part.Text == nil {
+			return TextGenerationResult{}, ErrInvalidResponse
+		}
+		parts = append(parts, *part.Text)
+	}
+	text := strings.Join(parts, "")
+	if strings.TrimSpace(text) == "" {
+		return TextGenerationResult{}, ErrInvalidResponse
+	}
+	return TextGenerationResult{Text: text}, nil
+}
+
 func (a *HTTPProviderAdapter) listOpenRouterModels(ctx context.Context, apiKey string) ([]ModelInfo, error) {
 	request, err := a.newRequest(ctx, http.MethodGet, openRouterModelsEndpoint, ProviderOpenRouter, apiKey, nil)
 	if err != nil {

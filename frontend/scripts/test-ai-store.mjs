@@ -8,6 +8,7 @@ import { createPinia, setActivePinia } from 'pinia'
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'stores', 'useAIStore.ts')
 const panelPath = path.join(rootDir, 'src', 'components', 'AISettingsPanel.vue')
+const summaryPanelPath = path.join(rootDir, 'src', 'components', 'AISummaryPanel.vue')
 const editorPath = path.join(rootDir, 'src', 'components', 'NoteEditor.vue')
 const outDir = path.join(rootDir, '.tmp', 'ai-store-test')
 const outFile = path.join(outDir, 'useAIStore.mjs')
@@ -128,8 +129,9 @@ export async function deleteAllAICredentials() {
 `, 'utf8')
 
 try {
-  const [panelSource, editorSource] = await Promise.all([
+  const [panelSource, summaryPanelSource, editorSource] = await Promise.all([
     readFile(panelPath, 'utf8'),
+    readFile(summaryPanelPath, 'utf8'),
     readFile(editorPath, 'utf8'),
   ])
   assert.match(panelSource, /type="password"/, 'the API Key field must remain a password input')
@@ -137,17 +139,19 @@ try {
   assert.match(panelSource, /<details/, 'model metadata must be collapsible')
   assert.match(panelSource, /モデル詳細を表示/, 'the collapsed model metadata must remain discoverable')
   assert.doesNotMatch(panelSource, /<details[^>]*\bopen\b/, 'model metadata must start collapsed')
-  assert.match(editorSource, /AIで要約/, 'the editor must expose an AI summary action')
-  assert.match(editorSource, /flushPendingDraft/, 'summary must flush a draft before it is sent')
-  assert.match(editorSource, /activeDraft\?\.status === 'conflicted' \|\| noteStore\.activeDraft\?\.status === 'failed'/, 'failed and conflicted drafts must block a summary')
-  assert.match(editorSource, /catch \{\s*aiStore\.setSummaryPreconditionError\('AI_DRAFT_NOT_SAVED', noteID\)/, 'a failed draft flush must block a summary')
-  assert.match(editorSource, /!saved \|\| !currentNote \|\| currentNote\.id !== noteID \|\| currentDraft/, 'a remaining draft after flush must block a summary')
-  assert.match(editorSource, /window\.confirm/, 'summary must require explicit confirmation')
-  assert.match(editorSource, /事実を補わずに簡潔に要約/, 'confirmation must name the fixed summary instruction')
-  assert.doesNotMatch(editorSource, /\$\{snapshot\.content\}/, 'confirmation must not echo the note body into another UI surface')
-  assert.match(editorSource, /discardSummaryForActiveNote/, 'note changes must discard an in-memory summary')
-  assert.match(editorSource, /isAISummaryStale/, 'a result must be marked stale when its revision is old')
-  assert.match(editorSource, /handleCopyAISummary/, 'the result panel must only offer explicit copy handling')
+  assert.match(summaryPanelSource, /要約を生成/, 'the AI workspace must expose an AI summary action')
+  assert.doesNotMatch(editorSource, /AIで要約/, 'the editor toolbar must not keep a separate AI summary action')
+  assert.match(summaryPanelSource, /flushPendingDraft/, 'summary must flush a draft before it is sent')
+  assert.match(summaryPanelSource, /activeDraft\?\.status === 'conflicted' \|\| noteStore\.activeDraft\?\.status === 'failed'/, 'failed and conflicted drafts must block a summary')
+  assert.match(summaryPanelSource, /catch \{\s*aiStore\.setSummaryPreconditionError\('AI_DRAFT_NOT_SAVED', noteID\)/, 'a failed draft flush must block a summary')
+  assert.match(summaryPanelSource, /!saved \|\| !currentNote \|\| currentNote\.id !== noteID \|\| currentDraft/, 'a remaining draft after flush must block a summary')
+  assert.match(summaryPanelSource, /window\.confirm/, 'summary must require explicit confirmation')
+  assert.match(summaryPanelSource, /事実を補わずに簡潔に要約/, 'confirmation must name the fixed summary instruction')
+  assert.doesNotMatch(summaryPanelSource, /\$\{snapshot\.content\}/, 'confirmation must not echo the note body into another UI surface')
+  assert.match(summaryPanelSource, /discardSummaryForActiveNote/, 'note changes must discard an in-memory summary')
+  assert.match(summaryPanelSource, /isAISummaryStale/, 'a result must be marked stale when its revision is old')
+  assert.match(summaryPanelSource, /handleCopyAISummary/, 'the result panel must only offer explicit copy handling')
+  assert.doesNotMatch(summaryPanelSource, /localStorage/, 'summary UI state must not use localStorage')
   assert.doesNotMatch(source, /localStorage/, 'AI state must not be persisted in localStorage')
 
   setActivePinia(createPinia())

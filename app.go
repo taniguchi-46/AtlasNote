@@ -391,6 +391,145 @@ func (a *App) GenerateAISummary(input aiservice.GenerateSummaryInput) aiservice.
 	return aiservice.SummaryResponse{Text: result.Text}
 }
 
+func (a *App) PrepareAIContext(input aiservice.AIContextInput) aiservice.AIContextResponse {
+	if a.aiService == nil {
+		return aiservice.AIContextResponse{Sources: []aiservice.AIContextSource{}, Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	sources, err := a.aiService.PrepareContext(a.ctx, input)
+	if err != nil {
+		return aiservice.AIContextResponse{Sources: []aiservice.AIContextSource{}, Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIContextResponse{Sources: sources}
+}
+
+func (a *App) RunAIAssistant(input aiservice.AssistantInput) aiservice.AssistantResponse {
+	if a.aiService == nil {
+		return aiservice.AssistantResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	result, err := a.aiService.RunAssistant(a.ctx, input)
+	if err != nil {
+		return aiservice.AssistantResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AssistantResponse{Result: &result}
+}
+
+func (a *App) SaveAIHistory(input aiservice.SaveAIHistoryInput) aiservice.AIHistoryResponse {
+	if a.aiService == nil {
+		return aiservice.AIHistoryResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	history, err := a.aiService.SaveHistory(a.ctx, input)
+	if err != nil {
+		return aiservice.AIHistoryResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIHistoryResponse{History: &history}
+}
+
+func (a *App) ListAIHistories() aiservice.AIHistoryListResponse {
+	if a.aiService == nil {
+		return aiservice.AIHistoryListResponse{Items: []aiservice.AIHistory{}, Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	items, err := a.aiService.ListHistories(a.ctx)
+	if err != nil {
+		return aiservice.AIHistoryListResponse{Items: []aiservice.AIHistory{}, Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIHistoryListResponse{Items: items}
+}
+
+func (a *App) GetAIHistory(id string) aiservice.AIHistoryResponse {
+	if a.aiService == nil {
+		return aiservice.AIHistoryResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	history, err := a.aiService.GetHistory(a.ctx, id)
+	if err != nil {
+		return aiservice.AIHistoryResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIHistoryResponse{History: &history}
+}
+
+func (a *App) DeleteAIHistory(id string) aiservice.AIDeleteResponse {
+	if a.aiService == nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	if err := a.aiService.DeleteHistory(a.ctx, id); err != nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIDeleteResponse{Deleted: true}
+}
+
+func (a *App) DeleteAllAIHistories() aiservice.AIDeleteResponse {
+	if a.aiService == nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	if err := a.aiService.DeleteAllHistories(a.ctx); err != nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIDeleteResponse{Deleted: true}
+}
+
+func (a *App) RunAIWriting(input aiservice.WritingInput) aiservice.WritingResponse {
+	if a.aiService == nil {
+		return aiservice.WritingResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	result, err := a.aiService.RunWriting(a.ctx, input)
+	if err != nil {
+		return aiservice.WritingResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.WritingResponse{Result: &result}
+}
+
+func (a *App) SaveAIArtifact(input aiservice.SaveAIArtifactInput) aiservice.AIArtifactResponse {
+	if a.aiService == nil {
+		return aiservice.AIArtifactResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	artifact, err := a.aiService.SaveArtifact(a.ctx, input)
+	if err != nil {
+		return aiservice.AIArtifactResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIArtifactResponse{Artifact: &artifact}
+}
+
+func (a *App) ListAIArtifacts() aiservice.AIArtifactListResponse {
+	if a.aiService == nil {
+		return aiservice.AIArtifactListResponse{Items: []aiservice.AIArtifact{}, Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	items, err := a.aiService.ListArtifacts(a.ctx)
+	if err != nil {
+		return aiservice.AIArtifactListResponse{Items: []aiservice.AIArtifact{}, Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIArtifactListResponse{Items: items}
+}
+
+func (a *App) GetAIArtifact(id string) aiservice.AIArtifactResponse {
+	if a.aiService == nil {
+		return aiservice.AIArtifactResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	artifact, err := a.aiService.GetArtifact(a.ctx, id)
+	if err != nil {
+		return aiservice.AIArtifactResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIArtifactResponse{Artifact: &artifact}
+}
+
+func (a *App) DeleteAIArtifact(id string) aiservice.AIDeleteResponse {
+	if a.aiService == nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	if err := a.aiService.DeleteArtifact(a.ctx, id); err != nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIDeleteResponse{Deleted: true}
+}
+
+func (a *App) DeleteAllAIArtifacts() aiservice.AIDeleteResponse {
+	if a.aiService == nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	if err := a.aiService.DeleteAllArtifacts(a.ctx); err != nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIDeleteResponse{Deleted: true}
+}
+
 func (a *App) StartAILibrarian(input aiservice.LibrarianInput) aiservice.LibrarianStartResponse {
 	if a.aiService == nil {
 		return aiservice.LibrarianStartResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
@@ -529,6 +668,7 @@ func (a *App) initialize(ctx context.Context) {
 	syncService := syncservice.NewService(syncRepository, service, credentialManager)
 	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
 	aiService := aiservice.NewServiceWithAdapter(aiRepository, aiCredentialManager, aiservice.NewHTTPProviderAdapter())
+	aiService.SetNoteContextProvider(aiservice.NewNoteContextProvider(service))
 	syncService.SetRecoveryDataDir(paths.DataDir)
 	recoveryReport, err := service.Recover(ctx)
 	if err != nil {

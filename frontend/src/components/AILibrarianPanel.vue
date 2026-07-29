@@ -15,11 +15,14 @@
       <button
         v-for="item in operations"
         :key="item.value"
+        class="ai-librarian-icon-button"
         type="button"
+        :title="item.label"
+        :aria-label="item.label"
         :disabled="librarianStore.isGenerating || noteStore.isSaving"
         @click="startOperation(item.value)"
       >
-        {{ item.label }}
+        <component :is="item.icon" :size="15" aria-hidden="true" />
       </button>
     </div>
 
@@ -43,10 +46,13 @@
       <pre v-if="librarianStore.partialText" class="ai-librarian-partial">{{ librarianStore.partialText }}</pre>
       <button
         v-if="librarianStore.state !== 'canceling'"
+        class="ai-librarian-icon-button"
         type="button"
+        title="生成をキャンセル"
+        aria-label="生成をキャンセル"
         @click="librarianStore.cancel()"
       >
-        キャンセル
+        <XIcon :size="15" aria-hidden="true" />
       </button>
     </div>
 
@@ -64,11 +70,14 @@
           <div class="ai-librarian-candidate-actions">
             <button
               v-if="canAdopt(candidate)"
+              class="ai-librarian-icon-button"
               type="button"
+              title="候補を採用"
+              aria-label="候補を採用"
               :disabled="noteStore.isSaving"
               @click="adopt(candidate)"
             >
-              採用
+              <CheckIcon :size="15" aria-hidden="true" />
             </button>
             <span v-else-if="librarianStore.operation === 'duplicate'" class="ai-librarian-readonly">
               確認のみ
@@ -76,21 +85,56 @@
             <span v-else-if="candidate.newTag" class="ai-librarian-readonly">
               タグを手動作成後に再試行
             </span>
-            <button type="button" @click="librarianStore.removeCandidate(candidate)">破棄</button>
+            <button
+              class="ai-librarian-icon-button"
+              type="button"
+              title="候補を破棄"
+              aria-label="候補を破棄"
+              @click="librarianStore.removeCandidate(candidate)"
+            >
+              <XIcon :size="15" aria-hidden="true" />
+            </button>
           </div>
         </li>
       </ul>
     </template>
 
     <div v-if="librarianStore.state === 'success' || librarianStore.state === 'empty' || librarianStore.state === 'error' || librarianStore.state === 'stale'" class="ai-librarian-footer">
-      <button type="button" @click="retryCurrentOperation">再試行</button>
-      <button type="button" @click="librarianStore.discard">閉じる</button>
+      <button
+        class="ai-librarian-icon-button"
+        type="button"
+        title="現在の操作を再試行"
+        aria-label="現在の操作を再試行"
+        @click="retryCurrentOperation"
+      >
+        <RotateCcwIcon :size="15" aria-hidden="true" />
+      </button>
+      <button
+        class="ai-librarian-icon-button"
+        type="button"
+        title="候補を閉じる"
+        aria-label="候補を閉じる"
+        @click="librarianStore.discard"
+      >
+        <XIcon :size="15" aria-hidden="true" />
+      </button>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import type { Component } from 'vue'
+import {
+  CheckIcon,
+  CopyIcon,
+  FolderTreeIcon,
+  LinkIcon,
+  RotateCcwIcon,
+  SparklesIcon,
+  TagsIcon,
+  XIcon,
+} from '@lucide/vue'
 import type { note } from '../../wailsjs/go/models'
 import { listBacklinks } from '../api/noteLinks'
 import { searchNotes } from '../api/search'
@@ -111,13 +155,14 @@ const librarianStore = useAILibrarianStore()
 const settingsStore = useSettingsStore()
 const candidatePool = ref<LibrarianCandidateContext[]>([])
 const lastOperation = ref<LibrarianOperation | null>(null)
+let activeNoteID: string | null = null
 
-const operations: Array<{ value: LibrarianOperation; label: string }> = [
-  { value: 'title', label: 'タイトル候補' },
-  { value: 'tags', label: 'タグ候補' },
-  { value: 'classification', label: '分類候補' },
-  { value: 'related', label: '関連メモ' },
-  { value: 'duplicate', label: '重複候補' },
+const operations: Array<{ value: LibrarianOperation; label: string; icon: Component }> = [
+  { value: 'title', label: 'タイトル候補', icon: SparklesIcon },
+  { value: 'tags', label: 'タグ候補', icon: TagsIcon },
+  { value: 'classification', label: '分類候補', icon: FolderTreeIcon },
+  { value: 'related', label: '関連メモ', icon: LinkIcon },
+  { value: 'duplicate', label: '重複候補', icon: CopyIcon },
 ]
 
 function candidateKey(candidate: LibrarianCandidate) {
@@ -320,6 +365,32 @@ function normalizeTagName(value: string) {
 async function retryCurrentOperation() {
   if (lastOperation.value) await startOperation(lastOperation.value)
 }
+
+watch(
+  () => [noteStore.activeNote?.id ?? null, noteStore.activeNote?.revision ?? null] as const,
+  ([noteID, revision]) => {
+    if (!noteID) {
+      activeNoteID = null
+      librarianStore.discardForNote(null)
+      return
+    }
+
+    const noteChanged = activeNoteID !== noteID
+    activeNoteID = noteID
+    if (noteChanged) {
+      librarianStore.discardForNote(noteID)
+      return
+    }
+    if (typeof revision === 'number') librarianStore.markStaleForRevision(noteID, revision)
+  },
+  { immediate: true },
+)
+
+defineExpose({ startOperation })
+
+onBeforeUnmount(() => {
+  librarianStore.discardForNote(null)
+})
 </script>
 
 <style scoped>
@@ -349,13 +420,14 @@ async function retryCurrentOperation() {
   flex-wrap: wrap;
 }
 
-.ai-librarian-actions button,
-.ai-librarian-footer button,
-.ai-librarian-candidate-actions button,
-.ai-librarian-progress button {
+.ai-librarian-icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
   border: 1px solid var(--border-color, #cbd5e1);
   border-radius: 5px;
-  padding: 4px 8px;
   background: transparent;
   cursor: pointer;
 }
@@ -390,8 +462,6 @@ async function retryCurrentOperation() {
 }
 
 .ai-librarian-partial {
-  max-height: 120px;
-  overflow: auto;
   margin: 8px 0;
   padding: 8px;
   background: var(--muted-background, #f8fafc);

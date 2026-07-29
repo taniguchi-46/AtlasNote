@@ -26,7 +26,7 @@ v2は主要なAI司書機能を実装済みだが、未検証項目とCIブロ�
 ## 1. 実行基盤
 
 - [x] 【実装済み】ストリーミングのrequest／response契約と途中切断時の破棄条件を決める。OpenRouter／GeminiのSSE parserと不完全応答テストを実装済み。
-- [x] 【実装済み】部分応答の表示状態、完了、失敗、キャンセル、staleの状態を決める。Go event phaseとPinia stateに反映済み。
+- [x] 【実装済み】Merian部分応答の表示状態、完了、失敗、キャンセル、staleの状態を決める。Go event phaseとPinia stateに反映済み。
 - [ ] 【未検証】利用者キャンセルがProvider、Application Service、Wails、Pinia、UIまで伝播することを確認する。各層のコードと単体テストはあるが、通しの手動受け入れ記録がない。
 - [x] 【実装済み】タイトル、タグ、分類、関連候補用の構造化出力schemaと安全なparse errorを決める。Go側のschema生成・正規化・safe errorを実装済み。
 - [ ] 【CIブロック】retryなし、fallbackなし、秘密情報非露出、同時実行上限を維持する。retry／fallback禁止とsafe errorは実装済みだが、生成lockテストがCIで失敗している。
@@ -52,6 +52,7 @@ v2は主要なAI司書機能を実装済みだが、未検証項目とCIブロ�
 ## 4. UI・受け入れ
 
 - [x] 【実装済み】生成中、部分応答、キャンセル、成功、失敗、空結果、stale、競合をinlineで表示する。
+- [x] 【実装済み】AI司書をAIワークスペース下部コンポーザーの`＋`メニューにあるサブメニューへ統合し、右側／下側配置、ドラッグによる寸法調整、機能切替・履歴表示・開閉時のメモリ状態維持を`test:ai-workspace`で確認する。
 - [ ] 【未検証】キーボードでキャンセル、採用、破棄、retryを操作できることを確認する。標準buttonによる操作はあるが、専用の手動記録・テストがない。
 - [ ] 【未検証】`test:ai-librarian`相当の既存Node script方式テストを追加する。スクリプトは追加済みだが、失敗したCI runではGoテストで停止し、CI上の成功記録がない。
 - [ ] 【CIブロック】Go test doubleでstream、cancel、partial、structured output、safe error、非保存境界を検証する。テストは追加済みだが、生成lockを検証するテストがCIで失敗している。
