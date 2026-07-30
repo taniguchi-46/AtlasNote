@@ -66,7 +66,8 @@ func (r *librarianRequest) emit(event LibrarianEvent) {
 		return
 	}
 	if r.userCanceled && event.Phase != librarianCanceledPhase {
-		event = LibrarianEvent{Phase: librarianCanceledPhase, Error: SafeErrorFrom(ErrCancelled)}
+		r.mu.Unlock()
+		return
 	}
 	if event.Phase == librarianCompletedPhase || event.Phase == librarianFailedPhase || event.Phase == librarianCanceledPhase {
 		r.terminal = true
@@ -137,6 +138,9 @@ func (s *Service) runLibrarian(ctx context.Context, adapter StructuredStreamingP
 		s.librarianMu.Unlock()
 		request.cleanup()
 		s.finishGeneration()
+		if request.canceled() {
+			request.emit(LibrarianEvent{Phase: librarianCanceledPhase, Error: SafeErrorFrom(ErrCancelled)})
+		}
 	}()
 	prompt, schema, err := buildLibrarianPrompt(input)
 	if err != nil {
@@ -175,14 +179,12 @@ func (s *Service) runLibrarian(ctx context.Context, adapter StructuredStreamingP
 	})
 	if err != nil {
 		if request.canceled() {
-			request.emit(LibrarianEvent{Phase: librarianCanceledPhase, Error: SafeErrorFrom(ErrCancelled)})
 			return
 		}
 		s.emitLibrarianFailure(request, err)
 		return
 	}
 	if request.canceled() {
-		request.emit(LibrarianEvent{Phase: librarianCanceledPhase, Error: SafeErrorFrom(ErrCancelled)})
 		return
 	}
 
@@ -200,7 +202,6 @@ func requiresLibrarianCandidates(operation LibrarianOperation) bool {
 
 func (s *Service) emitLibrarianFailure(request *librarianRequest, err error) {
 	if request.canceled() {
-		request.emit(LibrarianEvent{Phase: librarianCanceledPhase, Error: SafeErrorFrom(ErrCancelled)})
 		return
 	}
 	request.emit(LibrarianEvent{Phase: librarianFailedPhase, Error: SafeErrorFrom(toSafeError(err))})
