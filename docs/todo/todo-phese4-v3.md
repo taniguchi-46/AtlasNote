@@ -8,13 +8,12 @@ v2のAI司書を基盤に、AIアシスタント、AIライティング、利用
 
 詳細スコープは [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md)、v1は [`todo-phese4.md`](todo-phese4.md)、v2は [`todo-phese4-v2.md`](todo-phese4-v2.md) を正とする。
 
-## 進捗分類（2026-07-28）
+## 進捗分類（2026-07-30）
 
 - `【実装済み】`: 対応するGo／Wails／Frontendコードと自動テストを確認できる項目。
 - `【未検証】`: 実装はあるが、異常系の追加テスト、手動受け入れ、またはWails APIの通し確認が残る項目。
-- `【CIブロック】`: ローカルでは確認できても、既知のCI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) のAI司書テスト失敗が残るため、完了判定できない項目。
 
-v3の保存基盤、AIアシスタント／ライティングの基本経路、明示保存・削除・stale／orphaned境界、v3相当のFrontend／Goテストは実装済み。手動受け入れ、Wails APIの個別通し確認、追加異常系、既知CI例外は未完了として残す。
+v3の保存基盤、AIアシスタント／ライティングの基本経路、明示保存・削除・stale／orphaned境界、v3相当のFrontend／GoテストとCI成功は確認済み。手動受け入れ、Wails APIの個別通し確認、追加異常系は未完了として残す。
 
 ## v3保存仕様の確定（2026-07-28）
 
@@ -24,7 +23,7 @@ v3の保存基盤、AIアシスタント／ライティングの基本経路、�
 2. 明示保存したuser／assistantメッセージと最終編集済み成果物だけを保存し、system prompt、内部指示、raw context、request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
 3. 自動保持期限は設けない。個別・一括削除は本体とmessages／sourcesを含むアプリケーション上の完全削除とし、soft-delete・tombstone・AI一時ファイルは作らない。物理媒体の消去は保証しない。
 4. 参照元ノート削除後も保存済みデータを残す。`note_id`／`input_revision` を保持し、参照不能は `orphaned`、revision不一致は `stale` とする。自動rebase・自動再生成はせず、再生成は明示操作に限定する。
-5. CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) はWails clean build成功、`internal/ai/librarian_test.go:86` の既知のタイミング依存テスト失敗として受け入れ例外に記録する。CI成功扱いにはせず、ユーザー指示どおり修正せずにv3仕様の確定・実装準備を進める。
+5. CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功した。AI司書キャンセル時の生成ロックに関する既知CI例外は解消したが、手動受け入れと追加検証は残る。
 
 この確定はv3の保存設計を承認するものであり、未完了のv1／v2完了条件や、CI成功の完了条件を満たしたことを意味しない。
 
@@ -65,7 +64,7 @@ v3の保存基盤、AIアシスタント／ライティングの基本経路、�
 ## 4. 同期境界
 
 - [x] 【実装済み】AI設定、credential reference、API Key、履歴、生成成果物がsync outbox、manifest、object、conflictを更新しない境界を実装・テストする。
-- [ ] 【CIブロック】Phase 3のノート、ノートブック、タグ、ノートタグ同期がAI機能追加後も回帰しないことをCIで確認する。
+- [x] 【実装済み】Phase 3のノート、ノートブック、タグ、ノートタグ同期がAI機能追加後も回帰しないことをCI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で確認する。
 - [x] 【実装済み】他端末ではAI履歴・生成成果物を同期せず、再生成・再保存が必要であることを仕様とUIに明記する。
 
 ## 5. テスト・CI・受け入れ

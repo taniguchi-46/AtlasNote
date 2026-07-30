@@ -1,6 +1,6 @@
 # Phase 4詳細スコープ v3：AIアシスタント・ライティング・履歴
 
-最終更新: 2026-07-28
+最終更新: 2026-07-30
 
 決定状態: 正式決定（2026-07-27）／v3保存仕様追補確定（2026-07-28）
 
@@ -22,7 +22,7 @@ v3では、AIアシスタントとAIライティングを追加し、利用者�
 2. 保存するのは、保存操作時のuser／assistantメッセージと、明示保存された最終編集済み成果物だけとする。system prompt、内部指示、raw context、Provider request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
 3. 自動期限は設けず、削除はsoft-deleteではないアプリケーション上の完全削除とする。messages／sourcesを含めてトランザクションで削除するが、SQLiteの物理ページ消去までは保証しない。
 4. 参照元ノートを完全削除しても履歴・成果物は保持する。`note_id`／`input_revision` を残し、参照不能は `orphaned`、revision不一致は `stale` と表示する。自動rebase・自動再生成はしない。
-5. Wails clean build成功・AI司書テスト失敗のCI run #30360052157は既知の受け入れ例外として扱う。CI成功とは記録せず、例外を残したままv3の仕様確定・実装準備を進める。
+5. CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功した。AI司書キャンセル時の生成ロックに関する既知CI例外は解消したが、手動受け入れと追加検証は残る。
 
 ## 対象範囲
 

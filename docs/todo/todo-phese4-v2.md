@@ -1,6 +1,6 @@
 # Phase 4 TODO：v2
 
-決定状態: 正式決定（2026-07-27）／進捗分類更新（2026-07-28）
+決定状態: 正式決定（2026-07-27）／進捗分類更新（2026-07-30）
 
 ## TODOの目的
 
@@ -8,13 +8,12 @@ v1で確立した安全な単発要約を基盤に、AI司書、ストリーミ�
 
 詳細スコープは [`scope-phese4-v2.md`](../development/scopes/scope-phese4-v2.md)、v1の前提は [`scope-phese4.md`](../development/scopes/scope-phese4.md)、v3の後続範囲は [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md) を正とする。
 
-## 進捗分類（2026-07-28）
+## 進捗分類（2026-07-30）
 
 - `【実装済み】`: 対応するコードまたはテストが存在し、実装の根拠を確認できる項目。
 - `【未検証】`: コードの一部または対応方針は存在するが、必要な異常系・手動受け入れ・境界テストの記録が不足している項目。
-- `【CIブロック】`: 実装・テストは存在するが、CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) の `internal/ai/librarian_test.go:86` 失敗が解消されるまで完了判定できない項目。
 
-v2は主要なAI司書機能を実装済みだが、未検証項目とCIブロックが残るため、v2完了とは判定しない。
+v2は主要なAI司書機能とCI成功を確認済みだが、未検証項目と手動受け入れが残るため、v2完了とは判定しない。
 
 ## v2開始条件
 
@@ -29,7 +28,7 @@ v2は主要なAI司書機能を実装済みだが、未検証項目とCIブロ�
 - [x] 【実装済み】Merian部分応答の表示状態、完了、失敗、キャンセル、staleの状態を決める。Go event phaseとPinia stateに反映済み。
 - [ ] 【未検証】利用者キャンセルがProvider、Application Service、Wails、Pinia、UIまで伝播することを確認する。各層のコードと単体テストはあるが、通しの手動受け入れ記録がない。
 - [x] 【実装済み】タイトル、タグ、分類、関連候補用の構造化出力schemaと安全なparse errorを決める。Go側のschema生成・正規化・safe errorを実装済み。
-- [ ] 【CIブロック】retryなし、fallbackなし、秘密情報非露出、同時実行上限を維持する。retry／fallback禁止とsafe errorは実装済みだが、生成lockテストがCIで失敗している。
+- [x] 【実装済み】retryなし、fallbackなし、秘密情報非露出、同時実行上限を維持する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で生成lockを含むGo testが成功した。
 
 ## 2. AI司書
 
@@ -54,17 +53,17 @@ v2は主要なAI司書機能を実装済みだが、未検証項目とCIブロ�
 - [x] 【実装済み】生成中、部分応答、キャンセル、成功、失敗、空結果、stale、競合をinlineで表示する。
 - [x] 【実装済み】AI司書をAIワークスペース下部コンポーザーの`＋`メニューにあるサブメニューへ統合し、右側／下側配置、ドラッグによる寸法調整、機能切替・履歴表示・開閉時のメモリ状態維持を`test:ai-workspace`で確認する。
 - [ ] 【未検証】キーボードでキャンセル、採用、破棄、retryを操作できることを確認する。標準buttonによる操作はあるが、専用の手動記録・テストがない。
-- [ ] 【未検証】`test:ai-librarian`相当の既存Node script方式テストを追加する。スクリプトは追加済みだが、失敗したCI runではGoテストで停止し、CI上の成功記録がない。
-- [ ] 【CIブロック】Go test doubleでstream、cancel、partial、structured output、safe error、非保存境界を検証する。テストは追加済みだが、生成lockを検証するテストがCIで失敗している。
+- [x] 【実装済み】`test:ai-librarian`相当の既存Node script方式テストを追加する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で成功した。
+- [x] 【実装済み】Go test doubleでstream、cancel、partial、structured output、safe error、非保存境界を検証する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で生成lockを含むGo testが成功した。
 - [ ] 【未検証】AI失敗後もローカル保存、編集、検索、既存同期が継続することを受け入れる。
 
 ## v2完了条件
 
 - [ ] 【未検証】v2の詳細スコープに記載したAI司書5機能を実装・検証する。5操作の実装は済みだが、統合・手動検証が未完了。
 - [ ] 【未検証】関連メモの4つの未完了項目を完了する。関連・重複候補の実装はあるが、判定境界と大量ノートの受け入れが未確認。
-- [ ] 【CIブロック】ストリーミング、部分応答、キャンセル、構造化出力の異常系を検証する。テストは存在するが、CI run #30360052157の失敗を解消できていない。
+- [x] 【実装済み】ストリーミング、部分応答、キャンセル、構造化出力の異常系を検証する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で関連テストが成功した。
 - [x] 【実装済み】DB schema、migration、AI用WebDAV entityを変更せずに完了する。v2実装コミットではAI保存用schema・migration・WebDAV entityを追加していない。
-- [ ] 【CIブロック】CI、手動受け入れ、受け入れ記録を完了する。Wails clean buildは成功したが、Go test失敗によりCI全体は未達である。
+- [ ] 【未検証】CI、手動受け入れ、受け入れ記録を完了する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) は成功したが、手動受け入れと受け入れ記録が未完了である。
 
 ## 絶対遵守事項
 
