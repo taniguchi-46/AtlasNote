@@ -48,7 +48,7 @@ export function useNotificationStore() {
 }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai.mjs'), `
-export const calls = { getSettings: 0, configure: [], test: [], list: [], generate: [], deleteProvider: [], deleteAll: 0 }
+export const calls = { getSettings: 0, configure: [], test: [], list: [], generate: [], saveArtifact: [], listArtifacts: 0, getArtifact: [], deleteArtifact: [], deleteProvider: [], deleteAll: 0 }
 let settings = [
   { providerID: 'openrouter', modelID: 'retired-model', credentialStatus: 'persistent' },
   { providerID: 'gemini', modelID: '', credentialStatus: 'not-configured' },
@@ -57,6 +57,7 @@ let nextTestError
 let nextModelResponse
 let generateDeferred
 const summaryResponses = []
+const artifacts = []
 
 function clone(value) { return JSON.parse(JSON.stringify(value)) }
 function deferred() {
@@ -114,6 +115,41 @@ export async function generateAISummary(input) {
   }
   return summaryResponses.length > 0 ? clone(summaryResponses.shift()) : { text: 'summary-result-marker' }
 }
+export async function saveAIArtifact(input) {
+  calls.saveArtifact.push(clone(input))
+  const artifact = {
+    id: input.id ?? \`summary-\${artifacts.length + 1}\`,
+    kind: input.kind,
+    title: input.title,
+    providerID: input.providerID,
+    modelID: input.modelID,
+    content: input.content,
+    status: 'saved',
+    sources: input.sources,
+    createdAt: '2026-07-30T00:00:00Z',
+    updatedAt: '2026-07-30T00:00:00Z',
+  }
+  const index = artifacts.findIndex((item) => item.id === artifact.id)
+  if (index >= 0) artifacts[index] = artifact
+  else artifacts.unshift(artifact)
+  return { artifact: clone(artifact) }
+}
+export async function listAIArtifacts() {
+  calls.listArtifacts += 1
+  return { items: clone(artifacts) }
+}
+export async function getAIArtifact(id) {
+  calls.getArtifact.push(id)
+  const artifact = artifacts.find((item) => item.id === id)
+  return artifact ? { artifact: clone(artifact) } : { error: { code: 'AI_ARTIFACT_NOT_FOUND' } }
+}
+export async function deleteAIArtifact(id) {
+  calls.deleteArtifact.push(id)
+  const index = artifacts.findIndex((item) => item.id === id)
+  if (index < 0) return { deleted: false, error: { code: 'AI_ARTIFACT_NOT_FOUND' } }
+  artifacts.splice(index, 1)
+  return { deleted: true }
+}
 export async function deleteAIProviderCredential(providerID) {
   calls.deleteProvider.push(providerID)
   settings = settings.map((setting) => setting.providerID === providerID
@@ -146,9 +182,9 @@ try {
   assert.match(summaryPanelSource, /catch \{\s*aiStore\.setSummaryPreconditionError\('AI_DRAFT_NOT_SAVED', noteID\)/, 'a failed draft flush must block a summary')
   assert.match(summaryPanelSource, /!saved \|\| !currentNote \|\| currentNote\.id !== noteID \|\| currentDraft/, 'a remaining draft after flush must block a summary')
   assert.match(summaryPanelSource, /window\.confirm/, 'summary must require explicit confirmation')
-  assert.match(summaryPanelSource, /事実を補わずに簡潔に要約/, 'confirmation must name the fixed summary instruction')
+  assert.match(summaryPanelSource, /Markdown形式の概要・要点/, 'confirmation must name the Markdown summary format')
   assert.doesNotMatch(summaryPanelSource, /\$\{snapshot\.content\}/, 'confirmation must not echo the note body into another UI surface')
-  assert.match(summaryPanelSource, /discardSummaryForActiveNote/, 'note changes must discard an in-memory summary')
+  assert.match(summaryPanelSource, /discardSummaryForActiveNote/, 'note changes must discard an in-flight summary')
   assert.match(summaryPanelSource, /isAISummaryStale/, 'a result must be marked stale when its revision is old')
   assert.match(summaryPanelSource, /handleCopyAISummary/, 'the result panel must only offer explicit copy handling')
   assert.doesNotMatch(summaryPanelSource, /localStorage/, 'summary UI state must not use localStorage')
@@ -190,7 +226,7 @@ try {
   assert.equal(store.draft.apiKey, '', 'Apply must clear the in-memory API Key field')
   assert.equal(store.isSummaryReady, true, 'a saved, checked, listed model may be used for a summary')
 
-  const sourceNote = { noteID: 'note-1', content: 'source-body-marker', baseRevision: 4 }
+  const sourceNote = { noteID: 'note-1', title: '対象ノート', content: 'source-body-marker', baseRevision: 4 }
   assert.equal(store.beginSummary(sourceNote), true)
   assert.equal(store.summaryState, 'confirming')
   assert.equal(mockAI.calls.generate.length, 0, 'opening confirmation must not call the provider')
@@ -227,7 +263,7 @@ try {
   })
   await Promise.resolve()
   assert.equal(store.isGenerating, true)
-  assert.equal(store.beginSummary({ noteID: 'note-2', content: 'other-body-marker', baseRevision: 1 }), false, 'only one app-wide summary may execute')
+  assert.equal(store.beginSummary({ noteID: 'note-2', title: '別ノート', content: 'other-body-marker', baseRevision: 1 }), false, 'only one app-wide summary may execute')
   store.discardSummaryForActiveNote('note-2')
   deferredSummary.resolve()
   await pendingSummary
@@ -257,10 +293,19 @@ try {
   }), true)
   assert.equal(store.summary.text, 'summary-result-marker')
   assert.equal(store.summary.baseRevision, 4, 'the result retains the immutable source revision')
+  assert.equal(mockAI.calls.saveArtifact.length, 1, 'a successful summary must be saved locally')
+  assert.equal(mockAI.calls.saveArtifact[0].kind, 'summary')
+  assert.equal(mockAI.calls.saveArtifact[0].sources[0].inputRevision, 4)
+  assert.equal(await store.refreshSummaryHistory(), true)
+  assert.equal(store.summaryHistory.length, 1)
+  assert.equal(await store.loadSummaryHistory(store.summaryHistory[0].id), true)
 
-  assert.equal(store.beginSummary({ noteID: 'note-1', content: 'x'.repeat(12 * 1024 + 1), baseRevision: 5 }), false)
-  assert.equal(store.summaryError.code, 'AI_INPUT_TOO_LARGE')
-  assert.equal(mockAI.calls.generate.length, 3, 'oversized input must not call the provider')
+  const longSource = { noteID: 'note-1', title: '長いノート', content: 'x'.repeat(12 * 1024 + 1), baseRevision: 5 }
+  assert.equal(store.beginSummary(longSource), true, 'the former fixed 12 KiB frontend limit must not block a summary')
+  assert.equal(await store.confirmSummary({
+    noteID: 'note-1', content: longSource.content, revision: 5, hasPendingDraft: false,
+  }), true)
+  assert.equal(mockAI.calls.generate.length, 4, 'a long note must reach the backend model-limit check')
   store.discardSummary()
   assert.equal(store.summary, null)
 

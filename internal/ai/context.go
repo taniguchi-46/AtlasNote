@@ -8,11 +8,12 @@ import (
 )
 
 type ContextNote struct {
-	NoteID   string
-	Title    string
-	Content  string
-	Revision int64
-	Snippet  string
+	NoteID    string
+	Title     string
+	Content   string
+	Revision  int64
+	Snippet   string
+	IsTrashed bool
 }
 
 type NoteContextProvider interface {
@@ -38,10 +39,11 @@ func (p noteServiceContextProvider) Get(ctx context.Context, noteID string) (Con
 		return ContextNote{}, err
 	}
 	return ContextNote{
-		NoteID:   current.ID,
-		Title:    current.Title,
-		Content:  current.Content,
-		Revision: current.Revision,
+		NoteID:    current.ID,
+		Title:     current.Title,
+		Content:   current.Content,
+		Revision:  current.Revision,
+		IsTrashed: current.IsTrashed,
 	}, nil
 }
 

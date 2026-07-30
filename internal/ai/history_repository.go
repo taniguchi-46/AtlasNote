@@ -388,6 +388,29 @@ func (r *Repository) deleteAllArtifacts(ctx context.Context) error {
 	return nil
 }
 
+func (r *Repository) deleteArtifactsByKinds(ctx context.Context, kinds []ArtifactKind) error {
+	if len(kinds) == 0 {
+		return ErrInputInvalid
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	args := make([]any, 0, len(kinds))
+	for _, kind := range kinds {
+		args = append(args, kind)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete selected AI artifacts tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM ai_artifacts WHERE kind IN ("+placeholders+")", args...); err != nil {
+		return fmt.Errorf("delete selected AI artifacts: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete selected AI artifacts: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) listArtifactSources(ctx context.Context, artifactID string) ([]AIHistorySource, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT note_id, input_revision
@@ -453,7 +476,7 @@ func scanArtifact(row rowScanner) (AIArtifact, error) {
 	if err := row.Scan(&item.ID, &kind, &item.Title, &providerID, &item.ModelID, &item.Content, &status, &createdAt, &updatedAt); err != nil {
 		return AIArtifact{}, err
 	}
-	item.Kind = WritingKind(kind)
+	item.Kind = ArtifactKind(kind)
 	item.ProviderID = ProviderID(providerID)
 	item.Status = AIRecordStatus(status)
 	var err error

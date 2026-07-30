@@ -8,7 +8,7 @@
 
 本書は、Phase 4 v2（AI司書・実行体験）の後に実装するv3の要求範囲と、Phase 4全体を完了と判定するための最終条件を定義する。v1は [`scope-phese4.md`](scope-phese4.md)、v2は [`scope-phese4-v2.md`](scope-phese4-v2.md)、v3の作業チェックは [`../../todo/todo-phese4-v3.md`](../../todo/todo-phese4-v3.md) を正とする。
 
-v3では、AIアシスタントとAIライティングを追加し、利用者が明示的に保存したAI履歴・生成成果物を端末内で管理する。AI設定、資格情報、履歴、生成成果物はv3でもWebDAV同期しない。
+v3では、AIアシスタントとAIライティングを追加し、利用者が明示的に保存したAI履歴・生成成果物を端末内で管理する。要約は生成成功時に要約本文と参照元revisionだけを端末内の履歴へ自動保存する。AI設定、資格情報、履歴、生成成果物はv3でもWebDAV同期しない。
 
 ## 目的
 
@@ -18,8 +18,8 @@ v3では、AIアシスタントとAIライティングを追加し、利用者�
 
 詳細な正本は [`ai-integration.md`](../ai-integration.md) の「v3保存仕様（D-03/D-04追補）」とする。v3では次の5項目を確定する。
 
-1. 保存は利用者の明示操作時だけ行い、AI履歴・生成成果物はSQLiteのローカル管理データとして分離保存する。schema version 12で `ai_histories`、`ai_history_messages`、`ai_history_sources`、`ai_artifacts`、`ai_artifact_sources` を追加し、WebDAV同期対象にはしない。
-2. 保存するのは、保存操作時のuser／assistantメッセージと、明示保存された最終編集済み成果物だけとする。system prompt、内部指示、raw context、Provider request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
+1. AIアシスタント履歴とAIライティング成果物は利用者の明示操作時に、要約履歴は生成成功時に、SQLiteのローカル管理データとして分離保存する。schema version 12で `ai_histories`、`ai_history_messages`、`ai_history_sources`、`ai_artifacts`、`ai_artifact_sources` を追加し、version 13で `ai_artifacts.kind` に `summary` を追加する。WebDAV同期対象にはしない。
+2. 保存するのは、保存操作時のuser／assistantメッセージ、明示保存された最終編集済み成果物、または成功した要約本文と参照元ノート／revisionだけとする。system prompt、内部指示、raw context、Provider request body、API Key、Authorization、raw provider error、生成中chunk、要約元本文そのものは保存しない。
 3. 自動期限は設けず、削除はsoft-deleteではないアプリケーション上の完全削除とする。messages／sourcesを含めてトランザクションで削除するが、SQLiteの物理ページ消去までは保証しない。
 4. 参照元ノートを完全削除しても履歴・成果物は保持する。`note_id`／`input_revision` を残し、参照不能は `orphaned`、revision不一致は `stale` と表示する。自動rebase・自動再生成はしない。
 5. CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功した。AI司書キャンセル時の生成ロックに関する既知CI例外は解消したが、手動受け入れと追加検証は残る。
@@ -37,16 +37,16 @@ v3では、AIアシスタントとAIライティングを追加し、利用者�
 
 - 利用者が指定した目的に対するプロンプト生成・改善を提供する。
 - 選択したノートまたは入力内容からREADME、ドキュメント、ブログ記事、要件定義の草案を生成する。
-- 生成文はプレビュー、編集、コピー、明示保存を経て確定する。
-- Markdown本文への自動上書き、既存文書への無確認追記、自動公開は行わない。
+- 生成文はプレビュー、編集、コピー、明示保存を経て確定する。利用者は明示確認後に新規ノートとして作成するか、生成時の参照revisionと一致する現在ノートへ追記または本文置換できる。
+- Markdown本文への自動上書き、既存文書への無確認追記、自動公開は行わない。ノートへ反映するときは既存のrevision/CAS・保存laneを通す。
 
 ### 3. AI履歴・生成成果物のローカル保存
 
 - Markdown本文を正本とし、AI履歴・生成成果物はSQLiteの管理データとして保存する。
-- 保存対象は、利用者が明示的に保存した会話または成果物に限定する。生成中のchunk、API Key、Authorization、raw provider errorは保存しない。
+- 保存対象は、利用者が明示的に保存した会話または成果物、および生成成功時の要約履歴に限定する。生成中のchunk、API Key、Authorization、raw provider errorは保存しない。
 - 保存レコードには、安定ID、種別、対象ノートまたは会話ID、入力時点のrevision、Provider ID、モデルID、生成日時、更新日時、本文または結果、状態を持たせる。
 - 履歴・成果物は個別削除、一括削除、再生成を提供する。
-- AIアシスタントとAIライティングはAIワークスペース下部コンポーザーの`＋`メニューから切り替え、共通入力欄で質問または作成指示を送信する。保存済み履歴・成果物はヘッダーの履歴アイコンから開き、一覧・読込・削除する。v1要約とv2候補は一時状態のため、この一覧に含めない。
+- AI機能はAIワークスペース下部コンポーザーの機能セレクターで切り替え、選択中の機能名をコンポーザーに表示する。質問または作成指示は機能ごとに分離した下書きで送信する。保存済み会話・成果物・要約履歴はヘッダーの履歴アイコンから開き、一覧・読込・削除する。AI司書候補は一時状態のため、この一覧に含めない。
 - 結果をノート本文、タグ、分類、リンクへ適用するときは既存のrevision/CAS・保存lane・Tag／Link Serviceを通す。
 - revisionが変わった結果はstaleとして表示し、自動rebase・自動上書き・自動retryは行わない。
 - schema、migration、既存データ保持、rollbackを実装前に確定する。

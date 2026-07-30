@@ -11,6 +11,7 @@ import {
   type AIContextSource,
   type AIConversationMessage,
   type AIHistory,
+  type AIHistorySource,
   type AssistantInput,
   type AssistantKind,
 } from '../api/ai'
@@ -33,6 +34,7 @@ export type AssistantRequest = {
   searchQuery: string
   includeBacklinks: boolean
   messages: AIConversationMessage[]
+  expectedSources?: AIHistorySource[]
 }
 
 const safeMessages: Record<string, string> = {
@@ -40,6 +42,7 @@ const safeMessages: Record<string, string> = {
   AI_CONFIGURATION_UNAVAILABLE: 'AI 設定を確認してください。',
   AI_CREDENTIAL_UNAVAILABLE: 'AI 認証情報を利用できません。API Keyを再入力してください。',
   AI_MODEL_UNAVAILABLE: '選択したモデルは利用できません。モデルを再選択してください。',
+  AI_MODEL_CAPABILITY_UNAVAILABLE: '選択したモデルは、このAI機能に必要な応答形式へ対応していません。別のモデルを選択してください。',
   AI_REAUTHENTICATION_REQUIRED: 'AI 認証情報の再入力が必要です。',
   AI_AUTH_FAILED: 'AI 認証に失敗しました。API Key を確認してください。',
   AI_INPUT_INVALID: 'AIアシスタントへの入力が無効です。',
@@ -52,6 +55,9 @@ const safeMessages: Record<string, string> = {
   AI_INVALID_RESPONSE: 'AI プロバイダーから有効な回答を受け取れませんでした。',
   AI_HISTORY_NOT_FOUND: 'AI履歴が見つかりません。',
   AI_CANCELLED: 'AI処理をキャンセルしました。',
+  AI_CONTEXT_CHANGED: '確認後に参照ノートが更新されました。参照を確認してからもう一度送信してください。',
+  AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、AIへ送信しません。',
+  AI_NOTE_UNAVAILABLE: 'このノートはAIの参照対象にできません。',
 }
 
 function createError(code: string, retryAfterSeconds?: number): AssistantError {
@@ -101,6 +107,9 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const activeRequest = ref<AssistantRequest | null>(null)
   const isBusy = computed(() => state.value === 'loading-context' || state.value === 'generating')
   let preparedContextKey = ''
+  let latestContextRequest = 0
+  let latestGenerationRequest = 0
+  let completedMessages: AIConversationMessage[] = []
 
   function clearError() {
     error.value = null
@@ -122,6 +131,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   async function previewContext(input: Pick<AssistantRequest, 'noteIDs' | 'searchQuery' | 'includeBacklinks' | 'kind' | 'question'>) {
+    const requestID = ++latestContextRequest
     clearError()
     state.value = 'loading-context'
     try {
@@ -130,6 +140,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         searchQuery: input.searchQuery,
         includeBacklinks: input.includeBacklinks,
       })
+      if (requestID !== latestContextRequest) return false
       if (response.error) {
         error.value = createError(response.error.code, response.error.retryAfterSeconds)
         state.value = 'error'
@@ -137,9 +148,10 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }
       contextSources.value = response.sources
       preparedContextKey = sourceKey(input)
-      state.value = messages.value.length > 0 ? 'success' : 'idle'
+      state.value = completedMessages.length > 0 ? 'success' : 'idle'
       return true
     } catch (cause) {
+      if (requestID !== latestContextRequest) return false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
       return false
@@ -162,17 +174,22 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       ...input,
       question: input.question.trim(),
       searchQuery: input.searchQuery.trim(),
-      messages: input.messages ? [...input.messages] : [...messages.value],
+      messages: input.messages ? [...input.messages] : [...completedMessages],
       providerID: setting.providerID,
       modelID: setting.modelID,
     }
     const key = sourceKey(request)
+    const requestID = ++latestGenerationRequest
     if (preparedContextKey !== key) {
       if (!await previewContext(request)) return false
     }
+    if (requestID !== latestGenerationRequest) return false
     clearError()
     state.value = 'generating'
-    activeRequest.value = request
+    messages.value = [
+      ...request.messages,
+      { role: 'user', content: request.question },
+    ]
     try {
       const response = await runAIAssistant({
         providerID: request.providerID,
@@ -183,19 +200,24 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         noteIDs: request.noteIDs,
         searchQuery: request.searchQuery,
         includeBacklinks: request.includeBacklinks,
+        expectedSources: sourceRefs(contextSources.value),
       })
+      if (requestID !== latestGenerationRequest) return false
       if (response.error || !response.result) {
         error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
         state.value = 'error'
         return false
       }
       messages.value = response.result.messages
+      completedMessages = [...response.result.messages]
       sources.value = response.result.sources
       contextSources.value = response.result.sources
       selectedHistoryID.value = null
+      activeRequest.value = request
       state.value = 'success'
       return true
     } catch (cause) {
+      if (requestID !== latestGenerationRequest) return false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
       return false
@@ -205,7 +227,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   async function save(title: string) {
     const request = activeRequest.value
     const setting = aiStore.configuredSetting
-    if (!request || !setting || (state.value === 'stale' || state.value === 'orphaned') || messages.value.length < 2) {
+    if (!request || !setting || state.value !== 'success' || messages.value.length < 2) {
       error.value = createError('AI_INPUT_INVALID')
       state.value = 'error'
       return false
@@ -246,6 +268,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }
       const history = response.history
       messages.value = history.messages ?? []
+      completedMessages = [...messages.value]
       sources.value = history.sources.map((source) => ({
         noteID: source.noteID,
         title: source.noteID,
@@ -263,6 +286,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         searchQuery: '',
         includeBacklinks: false,
         messages: [...messages.value],
+        expectedSources: history.sources,
       }
       state.value = history.status === 'saved'
         ? 'success'
@@ -310,6 +334,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   function clearConversation() {
+    latestContextRequest += 1
+    latestGenerationRequest += 1
     state.value = 'idle'
     error.value = null
     messages.value = []
@@ -318,12 +344,18 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     activeRequest.value = null
     selectedHistoryID.value = null
     preparedContextKey = ''
+    completedMessages = []
   }
 
   function markStaleForRevision(noteID: string, revision: number) {
     const source = sources.value.find((item) => item.noteID === noteID)
     if (!source || source.revision === revision || messages.value.length === 0) return
     state.value = 'stale'
+  }
+
+  function setPreconditionError(code: 'AI_DRAFT_NOT_SAVED' | 'AI_NOTE_UNAVAILABLE') {
+    error.value = createError(code)
+    state.value = 'error'
   }
 
   return {
@@ -344,5 +376,6 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     removeAllHistories,
     clearConversation,
     markStaleForRevision,
+    setPreconditionError,
   }
 })

@@ -266,6 +266,17 @@ func TestHTTPProviderAdapterRejectsUnsafeInputAndRedactsProviderErrors(t *testin
 	}
 }
 
+func TestStatusErrorSeparatesMissingModelFromUnsupportedGenerationCapability(t *testing.T) {
+	if err := statusError(jsonResponse(http.StatusNotFound, "not found"), true); !errors.Is(err, ErrModelUnavailable) {
+		t.Fatalf("not found generation error = %v, want ErrModelUnavailable", err)
+	}
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity} {
+		if err := statusError(jsonResponse(status, "request rejected"), true); !errors.Is(err, ErrModelCapabilityUnavailable) {
+			t.Fatalf("status %d generation error = %v, want ErrModelCapabilityUnavailable", status, err)
+		}
+	}
+}
+
 func TestHTTPProviderAdapterRejectsIncompleteSummaryResponses(t *testing.T) {
 	testCases := []struct {
 		name     string

@@ -4,17 +4,20 @@ import {
   configureAIProvider,
   deleteAIProviderCredential,
   deleteAllAICredentials,
+  deleteAIArtifact,
   generateAISummary,
+  getAIArtifact,
   getAISettings,
+  listAIArtifacts,
   listAIModels,
+  saveAIArtifact,
   testAIConnection,
+  type AIArtifact,
   type AIProviderID,
   type ModelInfo,
   type ProviderSettings,
 } from '../api/ai'
 import { useNotificationStore } from './useNotificationStore'
-
-const SUMMARY_INPUT_LIMIT_BYTES = 12 * 1024
 
 export type AISettingsDraft = {
   providerID: AIProviderID
@@ -30,6 +33,7 @@ export type AIErrorState = {
 
 export type SummarySource = {
   noteID: string
+  title?: string
   content: string
   baseRevision: number
 }
@@ -48,8 +52,12 @@ export type SummaryConfirmationContext = {
 
 export type SummaryResult = {
   noteID: string
+  title: string
   baseRevision: number
+  providerID: AIProviderID
+  modelID: string
   text: string
+  artifactID?: string
 }
 
 export type SummaryState = 'idle' | 'confirming' | 'generating' | 'success' | 'error'
@@ -71,7 +79,8 @@ const safeMessages: Record<string, string> = {
   AI_REAUTHENTICATION_REQUIRED: 'AI 認証情報の再入力が必要です。',
   AI_AUTH_FAILED: 'AI 認証に失敗しました。API Key を確認してください。',
   AI_MODEL_UNAVAILABLE: '選択したモデルは利用できません。モデルを再選択してください。',
-  AI_INPUT_TOO_LARGE: '本文が 12 KiB を超えているため、要約を送信しません。',
+  AI_MODEL_CAPABILITY_UNAVAILABLE: '選択したモデルは、このAI機能に必要な応答形式へ対応していません。別のモデルを選択してください。',
+  AI_INPUT_TOO_LARGE: '本文が選択したモデルのコンテキスト上限を超えています。より長いコンテキストのモデルを選ぶか、本文を分けて再試行してください。',
   AI_INPUT_INVALID: '本文が空か無効なため、要約を送信しません。',
   AI_RATE_LIMITED: 'AI プロバイダーの利用上限に達しました。時間をおいてから再試行してください。',
   AI_TIMEOUT: 'AI プロバイダーが時間内に応答しませんでした。',
@@ -82,6 +91,8 @@ const safeMessages: Record<string, string> = {
   AI_SUMMARY_NOT_READY: 'AI の接続確認とモデル選択を完了してから要約してください。',
   AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、要約を送信しません。',
   AI_NOTE_UNAVAILABLE: 'このノートは要約できません。',
+  AI_HISTORY_SAVE_FAILED: '要約は生成されましたが、履歴を保存できませんでした。もう一度保存してください。',
+  AI_ARTIFACT_NOT_FOUND: '要約履歴が見つかりません。',
 }
 
 function emptyDraft(providerID: AIProviderID = 'openrouter', modelID = ''): AISettingsDraft {
@@ -140,10 +151,6 @@ function errorFromUnknown(error: unknown): AIErrorState {
   return createSafeError(safeErrorCode(error), retryAfter)
 }
 
-function byteLength(value: string) {
-  return new TextEncoder().encode(value).length
-}
-
 export const useAIStore = defineStore('ai', () => {
   const notificationStore = useNotificationStore()
   const settings = ref<ProviderSettings[]>([])
@@ -160,6 +167,8 @@ export const useAIStore = defineStore('ai', () => {
   const pendingSummary = ref<SummarySnapshot | null>(null)
   const summary = ref<SummaryResult | null>(null)
   const summaryError = ref<AIErrorState | null>(null)
+  const summaryHistory = ref<AIArtifact[]>([])
+  const summaryHistoryError = ref<AIErrorState | null>(null)
   const isGenerating = ref(false)
 
   let verifiedProviderID: AIProviderID | null = null
@@ -208,10 +217,16 @@ export const useAIStore = defineStore('ai', () => {
 
   const isSummaryReady = computed(() => {
     const setting = configuredSetting.value
-    if (!setting || listedProviderID !== setting.providerID || verifiedProviderID !== setting.providerID) return false
-    return models.value.some((model) => (
-      model.id === setting.modelID && model.available && model.supportsSummary
-    ))
+    if (!setting) return false
+    const model = models.value.find((candidate) => candidate.id === setting.modelID)
+    return !model || (model.available && model.supportsSummary)
+  })
+
+  const isLibrarianReady = computed(() => {
+    const setting = configuredSetting.value
+    if (!setting) return false
+    const model = models.value.find((candidate) => candidate.id === setting.modelID)
+    return !model || (model.available && model.supportsLibrarian)
   })
 
   const hasConfiguredProvider = computed(() => settings.value.some(
@@ -421,11 +436,6 @@ export const useAIStore = defineStore('ai', () => {
       setSummaryPreconditionError('AI_INPUT_INVALID', source.noteID)
       return false
     }
-    if (byteLength(source.content) > SUMMARY_INPUT_LIMIT_BYTES) {
-      setSummaryPreconditionError('AI_INPUT_TOO_LARGE', source.noteID)
-      return false
-    }
-
     pendingSummary.value = {
       ...source,
       providerID: setting.providerID,
@@ -504,10 +514,14 @@ export const useAIStore = defineStore('ai', () => {
       }
       summary.value = {
         noteID: snapshot.noteID,
+        title: snapshot.title ?? '',
         baseRevision: snapshot.baseRevision,
+        providerID: snapshot.providerID,
+        modelID: snapshot.modelID,
         text: response.text,
       }
       summaryState.value = 'success'
+      await saveSummaryHistory(summary.value)
       return true
     } catch (error) {
       if (request.discarded) return false
@@ -545,20 +559,8 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   function discardSummaryForActiveNote(activeNoteID: string | null) {
-    if (summaryTargetNoteID.value !== activeNoteID) {
-      pendingSummary.value = null
-      summary.value = null
-      summaryError.value = null
-      summaryTargetNoteID.value = null
-      if (!isGenerating.value) summaryState.value = 'idle'
-    }
     if (pendingSummary.value && pendingSummary.value.noteID !== activeNoteID) {
       pendingSummary.value = null
-      summaryError.value = null
-      if (!isGenerating.value) summaryState.value = 'idle'
-    }
-    if (summary.value && summary.value.noteID !== activeNoteID) {
-      summary.value = null
       summaryError.value = null
       if (!isGenerating.value) summaryState.value = 'idle'
     }
@@ -566,6 +568,110 @@ export const useAIStore = defineStore('ai', () => {
       activeSummaryRequest.discarded = true
       summaryError.value = null
       summaryState.value = 'idle'
+    }
+  }
+
+  async function saveSummaryHistory(result: SummaryResult) {
+    summaryHistoryError.value = null
+    try {
+      const response = await saveAIArtifact({
+        kind: 'summary',
+        title: `${result.title || '無題のノート'}の要約`,
+        providerID: result.providerID,
+        modelID: result.modelID,
+        content: result.text,
+        sources: [{ noteID: result.noteID, inputRevision: result.baseRevision }],
+        ...(result.artifactID ? { id: result.artifactID } : {}),
+      })
+      if (response.error || !response.artifact) {
+        summaryHistoryError.value = createSafeError(response.error?.code ?? 'AI_HISTORY_SAVE_FAILED', response.error?.retryAfterSeconds)
+        return false
+      }
+      if (summary.value && summary.value.noteID === result.noteID && summary.value.text === result.text) {
+        summary.value = { ...summary.value, artifactID: response.artifact.id }
+      }
+      summaryHistory.value = [
+        response.artifact,
+        ...summaryHistory.value.filter((item) => item.id !== response.artifact!.id),
+      ]
+      return true
+    } catch (error) {
+      summaryHistoryError.value = errorFromUnknown(error)
+      if (summaryHistoryError.value.code === 'AI_PROVIDER_UNAVAILABLE') {
+        summaryHistoryError.value = createSafeError('AI_HISTORY_SAVE_FAILED')
+      }
+      return false
+    }
+  }
+
+  async function retrySaveSummaryHistory() {
+    if (!summary.value) return false
+    return saveSummaryHistory(summary.value)
+  }
+
+  async function refreshSummaryHistory() {
+    try {
+      const response = await listAIArtifacts()
+      if (response.error) {
+        summaryHistoryError.value = createSafeError(response.error.code, response.error.retryAfterSeconds)
+        return false
+      }
+      summaryHistory.value = response.items.filter((item) => item.kind === 'summary')
+      summaryHistoryError.value = null
+      return true
+    } catch (error) {
+      summaryHistoryError.value = errorFromUnknown(error)
+      return false
+    }
+  }
+
+  async function loadSummaryHistory(id: string) {
+    try {
+      const response = await getAIArtifact(id)
+      if (response.error || !response.artifact || response.artifact.kind !== 'summary') {
+        summaryHistoryError.value = createSafeError(response.error?.code ?? 'AI_ARTIFACT_NOT_FOUND', response.error?.retryAfterSeconds)
+        return false
+      }
+      const artifact = response.artifact
+      const source = artifact.sources[0]
+      if (!source) {
+        summaryHistoryError.value = createSafeError('AI_ARTIFACT_NOT_FOUND')
+        return false
+      }
+      summary.value = {
+        noteID: source.noteID,
+        title: artifact.title.replace(/の要約$/, ''),
+        baseRevision: source.inputRevision,
+        providerID: artifact.providerID,
+        modelID: artifact.modelID,
+        text: artifact.content,
+        artifactID: artifact.id,
+      }
+      summaryTargetNoteID.value = source.noteID
+      pendingSummary.value = null
+      summaryError.value = null
+      summaryHistoryError.value = null
+      summaryState.value = 'success'
+      return true
+    } catch (error) {
+      summaryHistoryError.value = errorFromUnknown(error)
+      return false
+    }
+  }
+
+  async function removeSummaryHistory(id: string) {
+    try {
+      const response = await deleteAIArtifact(id)
+      if (response.error || !response.deleted) {
+        summaryHistoryError.value = createSafeError(response.error?.code ?? 'AI_ARTIFACT_NOT_FOUND', response.error?.retryAfterSeconds)
+        return false
+      }
+      summaryHistory.value = summaryHistory.value.filter((item) => item.id !== id)
+      if (summary.value?.artifactID === id) discardSummary()
+      return true
+    } catch (error) {
+      summaryHistoryError.value = errorFromUnknown(error)
+      return false
     }
   }
 
@@ -604,6 +710,8 @@ export const useAIStore = defineStore('ai', () => {
     pendingSummary,
     summary,
     summaryError,
+    summaryHistory,
+    summaryHistoryError,
     isGenerating,
     configuredSetting,
     activeProviderSetting,
@@ -613,6 +721,7 @@ export const useAIStore = defineStore('ai', () => {
     canRefreshModels,
     canApply,
     isSummaryReady,
+    isLibrarianReady,
     hasConfiguredProvider,
     resetDraft,
     discardDraft,
@@ -629,5 +738,9 @@ export const useAIStore = defineStore('ai', () => {
     confirmSummary,
     discardSummary,
     discardSummaryForActiveNote,
+    retrySaveSummaryHistory,
+    refreshSummaryHistory,
+    loadSummaryHistory,
+    removeSummaryHistory,
   }
 })

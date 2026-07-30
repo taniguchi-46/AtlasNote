@@ -452,6 +452,67 @@ func TestGenerateSummaryIsSingleFlightAndKeepsResultEphemeral(t *testing.T) {
 	}
 }
 
+func TestGenerateSummaryAcceptsContentPastLegacyTwelveKiBLimit(t *testing.T) {
+	store := newMemoryCredentialStore()
+	adapter := &testProviderAdapter{summaryResult: SummaryResult{Text: "long-summary"}}
+	service, _ := newTestServiceWithAdapter(t, store, adapter)
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderOpenRouter,
+		APIKey:     "long-summary-key",
+		ModelID:    "openai/gpt-test",
+	}); err != nil {
+		t.Fatalf("configure summary provider: %v", err)
+	}
+
+	content := strings.Repeat("あ", 5_000) // 15 KiB in UTF-8, above the legacy fixed limit.
+	result, err := service.GenerateSummary(t.Context(), GenerateSummaryInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/gpt-test",
+		Content:    content,
+	})
+	if err != nil || result.Text != "long-summary" {
+		t.Fatalf("long summary result = %#v, %v", result, err)
+	}
+	adapter.mu.Lock()
+	calls := adapter.summaryCalls
+	received := adapter.receivedSummaryIn.Content
+	adapter.mu.Unlock()
+	if calls != 1 || received != content {
+		t.Fatalf("long summary adapter call = calls:%d content bytes:%d", calls, len([]byte(received)))
+	}
+}
+
+func TestGenerateSummarySeparatesUnavailableModelFromCapabilityMismatch(t *testing.T) {
+	store := newMemoryCredentialStore()
+	adapter := &testProviderAdapter{summaryResult: SummaryResult{Text: "summary"}}
+	service, _ := newTestServiceWithAdapter(t, store, adapter)
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderOpenRouter,
+		APIKey:     "model-status-key",
+		ModelID:    "openai/gpt-test",
+	}); err != nil {
+		t.Fatalf("configure summary provider: %v", err)
+	}
+
+	service.cacheModelMetadata(ProviderOpenRouter, ModelListResult{Models: []ModelInfo{{
+		ID: "openai/gpt-test", Available: false, SupportsSummary: true,
+	}}})
+	if _, err := service.GenerateSummary(t.Context(), GenerateSummaryInput{
+		ProviderID: ProviderOpenRouter, ModelID: "openai/gpt-test", Content: "summary body",
+	}); !errors.Is(err, ErrModelUnavailable) {
+		t.Fatalf("unavailable model error = %v, want ErrModelUnavailable", err)
+	}
+
+	service.cacheModelMetadata(ProviderOpenRouter, ModelListResult{Models: []ModelInfo{{
+		ID: "openai/gpt-test", Available: true, SupportsSummary: false,
+	}}})
+	if _, err := service.GenerateSummary(t.Context(), GenerateSummaryInput{
+		ProviderID: ProviderOpenRouter, ModelID: "openai/gpt-test", Content: "summary body",
+	}); !errors.Is(err, ErrModelCapabilityUnavailable) {
+		t.Fatalf("unsupported capability error = %v, want ErrModelCapabilityUnavailable", err)
+	}
+}
+
 func TestShutdownCancelsActiveSummaryRequest(t *testing.T) {
 	store := newMemoryCredentialStore()
 	started := make(chan struct{}, 1)

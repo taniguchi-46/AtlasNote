@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -45,7 +46,7 @@ VALUES ('note-1', 'Note 1', 'note-1.md', 0, 0, 0, 2, '2026-07-28T00:00:00Z', '20
 
 	artifact, err := repository.saveArtifact(t.Context(), SaveAIArtifactInput{
 		ID:         "artifact-1",
-		Kind:       WritingKindDocument,
+		Kind:       ArtifactKindDocument,
 		Title:      "Saved document",
 		ProviderID: ProviderOpenRouter,
 		ModelID:    "openai/test",
@@ -57,6 +58,21 @@ VALUES ('note-1', 'Note 1', 'note-1.md', 0, 0, 0, 2, '2026-07-28T00:00:00Z', '20
 	}
 	if artifact.Status != AIRecordStatusSaved || artifact.Content != "Final document" || len(artifact.Sources) != 1 {
 		t.Fatalf("saved artifact = %#v", artifact)
+	}
+	summary, err := repository.saveArtifact(t.Context(), SaveAIArtifactInput{
+		ID:         "summary-1",
+		Kind:       ArtifactKindSummary,
+		Title:      "Note 1の要約",
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Content:    "## 概要\nSummary text",
+		Sources:    []AIHistorySource{{NoteID: "note-1", InputRevision: 2}},
+	})
+	if err != nil {
+		t.Fatalf("save summary artifact: %v", err)
+	}
+	if summary.Kind != ArtifactKindSummary || summary.Content == "" {
+		t.Fatalf("saved summary artifact = %#v", summary)
 	}
 
 	if _, err := db.ExecContext(t.Context(), "UPDATE notes SET revision = 3 WHERE id = 'note-1'"); err != nil {
@@ -91,7 +107,13 @@ VALUES ('note-1', 'Note 1', 'note-1.md', 0, 0, 0, 2, '2026-07-28T00:00:00Z', '20
 	if count != 0 {
 		t.Fatalf("history messages after delete = %d, want 0", count)
 	}
-	if err := repository.deleteArtifact(t.Context(), "artifact-1"); err != nil {
-		t.Fatalf("delete artifact: %v", err)
+	if err := repository.deleteArtifactsByKinds(t.Context(), []ArtifactKind{ArtifactKindDocument}); err != nil {
+		t.Fatalf("delete writing artifacts: %v", err)
+	}
+	if _, err := repository.getArtifact(t.Context(), "artifact-1"); !errors.Is(err, ErrArtifactNotFound) {
+		t.Fatalf("get deleted writing artifact error = %v, want ErrArtifactNotFound", err)
+	}
+	if preservedSummary, err := repository.getArtifact(t.Context(), "summary-1"); err != nil || preservedSummary.Kind != ArtifactKindSummary {
+		t.Fatalf("summary after writing delete = %#v, %v", preservedSummary, err)
 	}
 }

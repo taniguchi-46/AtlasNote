@@ -4,10 +4,12 @@
     class="ai-v3-panel"
     aria-label="AIライティング"
     aria-live="polite"
+    :aria-busy="writingStore.isBusy"
   >
     <div class="ai-v3-heading">
       <strong>AIライティング</strong>
-      <span v-if="writingStore.isBusy">準備・生成中…</span>
+      <span v-if="writingStore.state === 'loading-context'">参照を確認中…</span>
+      <span v-else-if="writingStore.state === 'generating'">送信済み・文章を作成中…</span>
     </div>
 
     <div class="ai-v3-grid">
@@ -147,7 +149,7 @@
         type="button"
         title="成果物を保存"
         aria-label="成果物を保存"
-        :disabled="writingStore.state === 'stale' || writingStore.state === 'orphaned' || writingStore.isBusy"
+        :disabled="writingStore.state !== 'success' || writingStore.isBusy"
         @click="saveArtifact"
       >
         <SaveIcon :size="15" aria-hidden="true" />
@@ -162,6 +164,30 @@
       >
         <CheckIcon v-if="copied" :size="15" aria-hidden="true" />
         <CopyIcon v-else :size="15" aria-hidden="true" />
+      </button>
+      <button
+        class="ai-v3-apply-button"
+        type="button"
+        :disabled="!canCreateNoteFromResult"
+        @click="createGeneratedNote"
+      >
+        新規ノートにする
+      </button>
+      <button
+        class="ai-v3-apply-button"
+        type="button"
+        :disabled="!canApplyToCurrentNote"
+        @click="applyToCurrentNote('append')"
+      >
+        末尾に追記
+      </button>
+      <button
+        class="ai-v3-apply-button is-danger"
+        type="button"
+        :disabled="!canApplyToCurrentNote"
+        @click="applyToCurrentNote('replace')"
+      >
+        本文を置換
       </button>
     </div>
     <p v-if="copyError" class="ai-v3-error" role="alert">{{ copyError }}</p>
@@ -206,10 +232,35 @@ let previousNoteID: string | null = null
 
 const canGenerate = computed(() => Boolean(
   noteStore.activeNote
+  && !noteStore.activeNote.isTrashed
   && instruction.value.trim()
   && aiStore.configuredSetting?.modelID
   && !writingStore.isBusy,
 ))
+
+const canCreateNoteFromResult = computed(() => Boolean(
+  writingStore.state === 'success'
+  && writingStore.content.trim()
+  && noteStore.activeNote
+  && !noteStore.activeNote.isTrashed
+  && !writingStore.isBusy,
+))
+
+const canApplyToCurrentNote = computed(() => {
+  const target = writingStore.targetSource
+  const current = noteStore.activeNote
+  return Boolean(
+    writingStore.state === 'success'
+    && writingStore.content.trim()
+    && target
+    && current
+    && !current.isTrashed
+    && target.noteID === current.id
+    && target.revision === current.revision
+    && !noteStore.activeDraft
+    && !writingStore.isBusy,
+  )
+})
 
 function contextInput() {
   const noteID = noteStore.activeNote?.id
@@ -221,7 +272,36 @@ function contextInput() {
 }
 
 async function preview() {
+  if (!await ensureCurrentNotePersisted()) return false
   return writingStore.previewContext(contextInput())
+}
+
+async function ensureCurrentNotePersisted() {
+  const selectedNote = noteStore.activeNote
+  if (!selectedNote || selectedNote.isTrashed) {
+    writingStore.setPreconditionError('AI_NOTE_UNAVAILABLE')
+    return false
+  }
+  if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
+    writingStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  const noteID = selectedNote.id
+  try {
+    if (!await noteStore.flushPendingDraft()) {
+      writingStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+      return false
+    }
+  } catch {
+    writingStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  const current = noteStore.activeNote
+  if (!current || current.id !== noteID || current.isTrashed || noteStore.activeDraft) {
+    writingStore.setPreconditionError(current?.isTrashed ? 'AI_NOTE_UNAVAILABLE' : 'AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  return true
 }
 
 async function confirmAndGenerate() {
@@ -237,13 +317,15 @@ async function confirmAndGenerate() {
     `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\n検索範囲: 全ノート（追加検索: ${searchQuery.value.trim() || 'なし'}）\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n生成結果は自動保存されません。`,
   )) return false
 
-  return writingStore.generate({
+  void writingStore.generate({
     providerID: setting.providerID,
     modelID: setting.modelID,
     kind: kind.value,
     instruction: instruction.value,
     ...contextInput(),
   })
+  instruction.value = ''
+  return true
 }
 
 async function submitPrompt(prompt: string) {
@@ -259,7 +341,7 @@ async function saveArtifact() {
 
 async function openArtifact(id: string) {
   const artifact = writingStore.artifacts.find((item) => item.id === id)
-  if (!artifact || !await writingStore.loadArtifact(id)) return false
+  if (!artifact || artifact.kind === 'summary' || !await writingStore.loadArtifact(id)) return false
   kind.value = artifact.kind
   artifactTitle.value = artifact.title
   return true
@@ -273,6 +355,38 @@ async function copyResult() {
     window.setTimeout(() => { copied.value = false }, 1600)
   } catch {
     copyError.value = '生成結果をクリップボードへコピーできませんでした。'
+  }
+}
+
+function generatedNoteTitle() {
+  const heading = writingStore.content.match(/^\s{0,3}#\s+(.+)$/m)?.[1]?.trim()
+  if (heading) return heading.slice(0, 200)
+  const label = writingKinds.find((item) => item.value === kind.value)?.label ?? 'AI生成ノート'
+  return artifactTitle.value.trim() || `${label} ${new Date().toLocaleString('ja-JP')}`
+}
+
+async function createGeneratedNote() {
+  if (!canCreateNoteFromResult.value) return
+  const current = noteStore.activeNote
+  if (!current) return
+  if (!window.confirm('生成した文章を新規ノートとして作成します。通常ノートとしてWebDAV同期の対象になります。続行しますか？')) return
+  const created = await noteStore.newNote(generatedNoteTitle(), writingStore.content, current.notebookId ?? null)
+  if (created) writingStore.clear()
+}
+
+async function applyToCurrentNote(mode: 'append' | 'replace') {
+  if (!canApplyToCurrentNote.value) return
+  if (!await ensureCurrentNotePersisted()) return
+  const target = writingStore.targetSource
+  const current = noteStore.activeNote
+  if (!target || !current || target.noteID !== current.id || target.revision !== current.revision) {
+    writingStore.setPreconditionError('AI_CONTEXT_CHANGED')
+    return
+  }
+  const action = mode === 'replace' ? '現在のノート本文を生成結果で置き換えます' : '生成結果を現在のノート末尾へ追記します'
+  if (!window.confirm(`${action}。この変更は通常ノートとしてWebDAV同期の対象になります。続行しますか？`)) return
+  if (await noteStore.applyAIWritingContent(current.id, writingStore.content, target.revision, mode)) {
+    writingStore.clear()
   }
 }
 
@@ -390,6 +504,33 @@ onBeforeUnmount(() => {
 
 .ai-v3-actions {
   flex-wrap: wrap;
+}
+
+.ai-v3-apply-button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color, var(--border));
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ai-v3-apply-button:hover:not(:disabled),
+.ai-v3-apply-button:focus-visible:not(:disabled) {
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.ai-v3-apply-button.is-danger {
+  color: var(--color-danger, #b42318);
+}
+
+.ai-v3-apply-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .ai-v3-icon-button {

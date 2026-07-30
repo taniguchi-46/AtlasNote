@@ -52,6 +52,7 @@ const safeMessages: Record<string, string> = {
   AI_REAUTHENTICATION_REQUIRED: 'AI 認証情報の再入力が必要です。',
   AI_AUTH_FAILED: 'AI 認証に失敗しました。API Key を確認してください。',
   AI_MODEL_UNAVAILABLE: '選択したモデルは利用できません。',
+  AI_MODEL_CAPABILITY_UNAVAILABLE: '選択したモデルは、AI司書に必要な構造化応答へ対応していません。別のモデルを選択してください。',
   AI_INPUT_TOO_LARGE: '送信するノートまたは候補情報が上限を超えています。候補数を減らして再試行してください。',
   AI_INPUT_INVALID: 'AI司書への入力が無効です。',
   AI_RATE_LIMITED: 'AI プロバイダーの利用上限に達しました。時間をおいて再試行してください。',
@@ -64,6 +65,7 @@ const safeMessages: Record<string, string> = {
   AI_NOTE_UNAVAILABLE: 'このノートはAI司書の対象にできません。',
   AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、AI司書を開始しません。',
   AI_REVISION_CONFLICT: 'ノートが更新されたため、候補を適用できません。',
+  AI_CONTEXT_CHANGED: '確認後にノートが更新されました。もう一度候補を生成してください。',
   TAG_STATE_CONFLICT: 'タグが更新されたため、候補を適用できません。',
 }
 
@@ -176,6 +178,11 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
     const setting = aiStore.configuredSetting
     if (!setting || !setting.modelID.trim()) {
       error.value = createError('AI_CONFIGURATION_UNAVAILABLE')
+      state.value = 'error'
+      return false
+    }
+    if (!aiStore.isLibrarianReady) {
+      error.value = createError('AI_MODEL_CAPABILITY_UNAVAILABLE')
       state.value = 'error'
       return false
     }

@@ -12,12 +12,18 @@ import (
 
 const (
 	CredentialStoreServiceName = "atlasnote-ai"
-	summaryInputLimitBytes     = 12 * 1024
-	summaryOutputTokenLimit    = 512
-	textInstructionLimitBytes  = 16 * 1024
-	textMessageLimitBytes      = 64 * 1024
-	textMaxMessages            = 24
-	textMaxOutputTokens        = 4096
+	// summaryInputLimitBytes is an absolute local safety limit. The effective
+	// limit is narrowed further from the selected model's context window before
+	// a provider request is made.
+	summaryInputLimitBytes             = 2 * 1024 * 1024
+	summaryUnknownModelInputLimitBytes = 64 * 1024
+	summaryInstructionTokenReserve     = 1024
+	summaryOutputTokenLimit            = 1024
+	librarianInputLimitBytes           = 12 * 1024
+	textInstructionLimitBytes          = 16 * 1024
+	textMessageLimitBytes              = 64 * 1024
+	textMaxMessages                    = 24
+	textMaxOutputTokens                = 4096
 )
 
 type ProviderID string
@@ -78,12 +84,16 @@ type ListModelsInput struct {
 // ModelInfo is provider-neutral metadata. Nil token limits mean that the
 // provider did not expose the value, rather than that the limit is zero.
 type ModelInfo struct {
-	ID               string `json:"id"`
-	DisplayName      string `json:"displayName"`
-	SupportsSummary  bool   `json:"supportsSummary"`
-	InputTokenLimit  *int64 `json:"inputTokenLimit,omitempty"`
-	OutputTokenLimit *int64 `json:"outputTokenLimit,omitempty"`
-	Available        bool   `json:"available"`
+	ID                       string `json:"id"`
+	DisplayName              string `json:"displayName"`
+	SupportsSummary          bool   `json:"supportsSummary"`
+	SupportsTextGeneration   bool   `json:"supportsTextGeneration"`
+	SupportsStructuredOutput bool   `json:"supportsStructuredOutput"`
+	SupportsStreaming        bool   `json:"supportsStreaming"`
+	SupportsLibrarian        bool   `json:"supportsLibrarian"`
+	InputTokenLimit          *int64 `json:"inputTokenLimit,omitempty"`
+	OutputTokenLimit         *int64 `json:"outputTokenLimit,omitempty"`
+	Available                bool   `json:"available"`
 }
 
 type ModelListResult struct {
@@ -165,6 +175,7 @@ type AssistantInput struct {
 	NoteIDs          []string                `json:"noteIDs,omitempty"`
 	SearchQuery      string                  `json:"searchQuery,omitempty"`
 	IncludeBacklinks bool                    `json:"includeBacklinks,omitempty"`
+	ExpectedSources  []AIHistorySource       `json:"expectedSources,omitempty"`
 }
 
 type AssistantResult struct {
@@ -230,13 +241,14 @@ const (
 )
 
 type WritingInput struct {
-	ProviderID       ProviderID  `json:"providerID"`
-	ModelID          string      `json:"modelID"`
-	Kind             WritingKind `json:"kind"`
-	Instruction      string      `json:"instruction"`
-	NoteIDs          []string    `json:"noteIDs,omitempty"`
-	SearchQuery      string      `json:"searchQuery,omitempty"`
-	IncludeBacklinks bool        `json:"includeBacklinks,omitempty"`
+	ProviderID       ProviderID        `json:"providerID"`
+	ModelID          string            `json:"modelID"`
+	Kind             WritingKind       `json:"kind"`
+	Instruction      string            `json:"instruction"`
+	NoteIDs          []string          `json:"noteIDs,omitempty"`
+	SearchQuery      string            `json:"searchQuery,omitempty"`
+	IncludeBacklinks bool              `json:"includeBacklinks,omitempty"`
+	ExpectedSources  []AIHistorySource `json:"expectedSources,omitempty"`
 }
 
 type WritingResult struct {
@@ -252,9 +264,21 @@ type WritingResponse struct {
 	Error  *SafeError     `json:"error,omitempty"`
 }
 
+type ArtifactKind string
+
+const (
+	ArtifactKindSummary           ArtifactKind = "summary"
+	ArtifactKindPrompt            ArtifactKind = ArtifactKind(WritingKindPrompt)
+	ArtifactKindPromptImprovement ArtifactKind = ArtifactKind(WritingKindPromptImprovement)
+	ArtifactKindREADME            ArtifactKind = ArtifactKind(WritingKindREADME)
+	ArtifactKindDocument          ArtifactKind = ArtifactKind(WritingKindDocument)
+	ArtifactKindBlog              ArtifactKind = ArtifactKind(WritingKindBlog)
+	ArtifactKindRequirements      ArtifactKind = ArtifactKind(WritingKindRequirements)
+)
+
 type AIArtifact struct {
 	ID         string            `json:"id"`
-	Kind       WritingKind       `json:"kind"`
+	Kind       ArtifactKind      `json:"kind"`
 	Title      string            `json:"title"`
 	ProviderID ProviderID        `json:"providerID"`
 	ModelID    string            `json:"modelID"`
@@ -267,7 +291,7 @@ type AIArtifact struct {
 
 type SaveAIArtifactInput struct {
 	ID         string            `json:"id,omitempty"`
-	Kind       WritingKind       `json:"kind"`
+	Kind       ArtifactKind      `json:"kind"`
 	Title      string            `json:"title"`
 	ProviderID ProviderID        `json:"providerID"`
 	ModelID    string            `json:"modelID"`
@@ -293,25 +317,27 @@ type AIDeleteResponse struct {
 type ErrorCode string
 
 const (
-	ErrorCodeProviderUnsupported      ErrorCode = "AI_PROVIDER_UNSUPPORTED"
-	ErrorCodeAPIKeyInvalid            ErrorCode = "AI_API_KEY_INVALID"
-	ErrorCodeConfigurationUnavailable ErrorCode = "AI_CONFIGURATION_UNAVAILABLE"
-	ErrorCodeCredentialUnavailable    ErrorCode = "AI_CREDENTIAL_UNAVAILABLE"
-	ErrorCodeCredentialCleanup        ErrorCode = "AI_CREDENTIAL_CLEANUP_REQUIRED"
-	ErrorCodeReauthenticationRequired ErrorCode = "AI_REAUTHENTICATION_REQUIRED"
-	ErrorCodeAuthFailed               ErrorCode = "AI_AUTH_FAILED"
-	ErrorCodeModelUnavailable         ErrorCode = "AI_MODEL_UNAVAILABLE"
-	ErrorCodeInputTooLarge            ErrorCode = "AI_INPUT_TOO_LARGE"
-	ErrorCodeInputInvalid             ErrorCode = "AI_INPUT_INVALID"
-	ErrorCodeRateLimited              ErrorCode = "AI_RATE_LIMITED"
-	ErrorCodeTimeout                  ErrorCode = "AI_TIMEOUT"
-	ErrorCodeNetworkUnavailable       ErrorCode = "AI_NETWORK_UNAVAILABLE"
-	ErrorCodeProviderUnavailable      ErrorCode = "AI_PROVIDER_UNAVAILABLE"
-	ErrorCodeBusy                     ErrorCode = "AI_BUSY"
-	ErrorCodeInvalidResponse          ErrorCode = "AI_INVALID_RESPONSE"
-	ErrorCodeCancelled                ErrorCode = "AI_CANCELLED"
-	ErrorCodeHistoryNotFound          ErrorCode = "AI_HISTORY_NOT_FOUND"
-	ErrorCodeArtifactNotFound         ErrorCode = "AI_ARTIFACT_NOT_FOUND"
+	ErrorCodeProviderUnsupported        ErrorCode = "AI_PROVIDER_UNSUPPORTED"
+	ErrorCodeAPIKeyInvalid              ErrorCode = "AI_API_KEY_INVALID"
+	ErrorCodeConfigurationUnavailable   ErrorCode = "AI_CONFIGURATION_UNAVAILABLE"
+	ErrorCodeCredentialUnavailable      ErrorCode = "AI_CREDENTIAL_UNAVAILABLE"
+	ErrorCodeCredentialCleanup          ErrorCode = "AI_CREDENTIAL_CLEANUP_REQUIRED"
+	ErrorCodeReauthenticationRequired   ErrorCode = "AI_REAUTHENTICATION_REQUIRED"
+	ErrorCodeAuthFailed                 ErrorCode = "AI_AUTH_FAILED"
+	ErrorCodeModelUnavailable           ErrorCode = "AI_MODEL_UNAVAILABLE"
+	ErrorCodeModelCapabilityUnavailable ErrorCode = "AI_MODEL_CAPABILITY_UNAVAILABLE"
+	ErrorCodeInputTooLarge              ErrorCode = "AI_INPUT_TOO_LARGE"
+	ErrorCodeInputInvalid               ErrorCode = "AI_INPUT_INVALID"
+	ErrorCodeRateLimited                ErrorCode = "AI_RATE_LIMITED"
+	ErrorCodeTimeout                    ErrorCode = "AI_TIMEOUT"
+	ErrorCodeNetworkUnavailable         ErrorCode = "AI_NETWORK_UNAVAILABLE"
+	ErrorCodeProviderUnavailable        ErrorCode = "AI_PROVIDER_UNAVAILABLE"
+	ErrorCodeBusy                       ErrorCode = "AI_BUSY"
+	ErrorCodeInvalidResponse            ErrorCode = "AI_INVALID_RESPONSE"
+	ErrorCodeCancelled                  ErrorCode = "AI_CANCELLED"
+	ErrorCodeHistoryNotFound            ErrorCode = "AI_HISTORY_NOT_FOUND"
+	ErrorCodeArtifactNotFound           ErrorCode = "AI_ARTIFACT_NOT_FOUND"
+	ErrorCodeContextChanged             ErrorCode = "AI_CONTEXT_CHANGED"
 )
 
 // SafeError deliberately contains only stable, user-safe information. It must
@@ -331,25 +357,27 @@ func (e *SafeError) Is(target error) bool {
 }
 
 var (
-	ErrProviderUnsupported      = &SafeError{Code: ErrorCodeProviderUnsupported}
-	ErrAPIKeyInvalid            = &SafeError{Code: ErrorCodeAPIKeyInvalid}
-	ErrConfigurationUnavailable = &SafeError{Code: ErrorCodeConfigurationUnavailable}
-	ErrCredentialUnavailable    = &SafeError{Code: ErrorCodeCredentialUnavailable}
-	ErrCredentialCleanup        = &SafeError{Code: ErrorCodeCredentialCleanup}
-	ErrReauthenticationRequired = &SafeError{Code: ErrorCodeReauthenticationRequired}
-	ErrAuthFailed               = &SafeError{Code: ErrorCodeAuthFailed}
-	ErrModelUnavailable         = &SafeError{Code: ErrorCodeModelUnavailable}
-	ErrInputTooLarge            = &SafeError{Code: ErrorCodeInputTooLarge}
-	ErrInputInvalid             = &SafeError{Code: ErrorCodeInputInvalid}
-	ErrRateLimited              = &SafeError{Code: ErrorCodeRateLimited}
-	ErrTimeout                  = &SafeError{Code: ErrorCodeTimeout}
-	ErrNetworkUnavailable       = &SafeError{Code: ErrorCodeNetworkUnavailable}
-	ErrProviderUnavailable      = &SafeError{Code: ErrorCodeProviderUnavailable}
-	ErrBusy                     = &SafeError{Code: ErrorCodeBusy}
-	ErrInvalidResponse          = &SafeError{Code: ErrorCodeInvalidResponse}
-	ErrCancelled                = &SafeError{Code: ErrorCodeCancelled}
-	ErrHistoryNotFound          = &SafeError{Code: ErrorCodeHistoryNotFound}
-	ErrArtifactNotFound         = &SafeError{Code: ErrorCodeArtifactNotFound}
+	ErrProviderUnsupported        = &SafeError{Code: ErrorCodeProviderUnsupported}
+	ErrAPIKeyInvalid              = &SafeError{Code: ErrorCodeAPIKeyInvalid}
+	ErrConfigurationUnavailable   = &SafeError{Code: ErrorCodeConfigurationUnavailable}
+	ErrCredentialUnavailable      = &SafeError{Code: ErrorCodeCredentialUnavailable}
+	ErrCredentialCleanup          = &SafeError{Code: ErrorCodeCredentialCleanup}
+	ErrReauthenticationRequired   = &SafeError{Code: ErrorCodeReauthenticationRequired}
+	ErrAuthFailed                 = &SafeError{Code: ErrorCodeAuthFailed}
+	ErrModelUnavailable           = &SafeError{Code: ErrorCodeModelUnavailable}
+	ErrModelCapabilityUnavailable = &SafeError{Code: ErrorCodeModelCapabilityUnavailable}
+	ErrInputTooLarge              = &SafeError{Code: ErrorCodeInputTooLarge}
+	ErrInputInvalid               = &SafeError{Code: ErrorCodeInputInvalid}
+	ErrRateLimited                = &SafeError{Code: ErrorCodeRateLimited}
+	ErrTimeout                    = &SafeError{Code: ErrorCodeTimeout}
+	ErrNetworkUnavailable         = &SafeError{Code: ErrorCodeNetworkUnavailable}
+	ErrProviderUnavailable        = &SafeError{Code: ErrorCodeProviderUnavailable}
+	ErrBusy                       = &SafeError{Code: ErrorCodeBusy}
+	ErrInvalidResponse            = &SafeError{Code: ErrorCodeInvalidResponse}
+	ErrCancelled                  = &SafeError{Code: ErrorCodeCancelled}
+	ErrHistoryNotFound            = &SafeError{Code: ErrorCodeHistoryNotFound}
+	ErrArtifactNotFound           = &SafeError{Code: ErrorCodeArtifactNotFound}
+	ErrContextChanged             = &SafeError{Code: ErrorCodeContextChanged}
 )
 
 type LibrarianOperation string

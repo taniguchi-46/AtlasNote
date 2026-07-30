@@ -25,7 +25,10 @@ const compiled = ts.transpileModule(source, {
 await writeFile(outFile, compiled.outputText, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai-store.mjs'), `
 export function useAIStore() {
-  return { configuredSetting: { providerID: 'openrouter', modelID: 'openai/gpt-test' } }
+  return {
+    configuredSetting: { providerID: 'openrouter', modelID: 'openai/gpt-test' },
+    isLibrarianReady: true,
+  }
 }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai-librarian.mjs'), `

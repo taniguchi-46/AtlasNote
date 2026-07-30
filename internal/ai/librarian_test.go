@@ -115,6 +115,43 @@ func TestServiceLibrarianStreamsStructuredResultAndSharesGenerationLock(t *testi
 	assertAIExecutionHasNoPersistentSideEffects(t, db)
 }
 
+func TestServiceLibrarianReportsKnownCapabilityMismatchWithoutCallingProvider(t *testing.T) {
+	store := newMemoryCredentialStore()
+	adapter := &testLibrarianAdapter{testProviderAdapter: &testProviderAdapter{}}
+	service, _ := newTestServiceWithAdapter(t, store, adapter)
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderOpenRouter,
+		APIKey:     "stored-librarian-key",
+		ModelID:    "openai/gpt-test",
+	}); err != nil {
+		t.Fatalf("configure librarian provider: %v", err)
+	}
+	service.cacheModelMetadata(ProviderOpenRouter, ModelListResult{Models: []ModelInfo{{
+		ID:                "openai/gpt-test",
+		Available:         true,
+		SupportsSummary:   true,
+		SupportsLibrarian: false,
+	}}})
+
+	events := make(chan LibrarianEvent, 1)
+	response, err := service.StartLibrarian(t.Context(), testLibrarianInput(LibrarianOperationRelated), func(event LibrarianEvent) {
+		events <- event
+	})
+	if err != nil || response.RequestID == "" {
+		t.Fatalf("start librarian = %#v, %v", response, err)
+	}
+	event := receiveLibrarianEvent(t, events)
+	if event.Phase != librarianFailedPhase || event.Error == nil || event.Error.Code != ErrorCodeModelCapabilityUnavailable {
+		t.Fatalf("capability failure event = %#v", event)
+	}
+	adapter.mu.Lock()
+	calls := adapter.librarianCalls
+	adapter.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("capability mismatch called provider %d times", calls)
+	}
+}
+
 func TestServiceCancelLibrarianIsIdempotentAndEmitsCanceled(t *testing.T) {
 	store := newMemoryCredentialStore()
 	started := make(chan struct{}, 1)

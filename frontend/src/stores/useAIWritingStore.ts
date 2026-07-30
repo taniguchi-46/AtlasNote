@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   deleteAIArtifact,
-  deleteAllAIArtifacts,
+  deleteAllAIWritingArtifacts,
   getAIArtifact,
   listAIArtifacts,
   prepareAIContext,
@@ -28,6 +28,7 @@ const safeMessages: Record<string, string> = {
   AI_CREDENTIAL_UNAVAILABLE: 'AI 認証情報を利用できません。API Keyを再入力してください。',
   AI_REAUTHENTICATION_REQUIRED: 'AI 認証情報の再入力が必要です。',
   AI_MODEL_UNAVAILABLE: '選択したモデルは利用できません。モデルを再選択してください。',
+  AI_MODEL_CAPABILITY_UNAVAILABLE: '選択したモデルは、このAI機能に必要な応答形式へ対応していません。別のモデルを選択してください。',
   AI_INPUT_INVALID: 'AIライティングへの入力が無効です。',
   AI_INPUT_TOO_LARGE: '送信する目的または参照資料が大きすぎます。対象を減らして再試行してください。',
   AI_PROVIDER_UNAVAILABLE: 'AI プロバイダーを現在利用できません。',
@@ -37,6 +38,9 @@ const safeMessages: Record<string, string> = {
   AI_NETWORK_UNAVAILABLE: 'ネットワークに接続できません。',
   AI_RATE_LIMITED: 'AI プロバイダーの利用上限に達しました。時間をおいて再試行してください。',
   AI_ARTIFACT_NOT_FOUND: 'AI成果物が見つかりません。',
+  AI_CONTEXT_CHANGED: '確認後に参照ノートが更新されました。参照を確認してからもう一度送信してください。',
+  AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、AIへ送信しません。',
+  AI_NOTE_UNAVAILABLE: 'このノートはAIの参照対象にできません。',
 }
 
 function createError(code: string, retryAfterSeconds?: number): WritingError {
@@ -82,8 +86,11 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
   const artifacts = ref<AIArtifact[]>([])
   const selectedArtifactID = ref<string | null>(null)
   const activeRequest = ref<WritingInput | null>(null)
+  const targetSource = ref<AIContextSource | null>(null)
   const isBusy = computed(() => state.value === 'loading-context' || state.value === 'generating')
   let preparedContextKey = ''
+  let latestContextRequest = 0
+  let latestGenerationRequest = 0
 
   async function refreshArtifacts() {
     try {
@@ -92,7 +99,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
         error.value = createError(response.error.code, response.error.retryAfterSeconds)
         return false
       }
-      artifacts.value = response.items
+      artifacts.value = response.items.filter((item) => item.kind !== 'summary')
       return true
     } catch (cause) {
       error.value = errorFromUnknown(cause)
@@ -101,6 +108,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
   }
 
   async function previewContext(input: Pick<WritingInput, 'noteIDs' | 'searchQuery' | 'includeBacklinks'>) {
+    const requestID = ++latestContextRequest
     state.value = 'loading-context'
     error.value = null
     try {
@@ -109,6 +117,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
         searchQuery: input.searchQuery,
         includeBacklinks: input.includeBacklinks,
       })
+      if (requestID !== latestContextRequest) return false
       if (response.error) {
         error.value = createError(response.error.code, response.error.retryAfterSeconds)
         state.value = 'error'
@@ -123,6 +132,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
       state.value = content.value ? 'success' : 'idle'
       return true
     } catch (cause) {
+      if (requestID !== latestContextRequest) return false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
       return false
@@ -155,13 +165,22 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
       searchQuery: normalized.searchQuery,
       includeBacklinks: normalized.includeBacklinks,
     })
+    const requestID = ++latestGenerationRequest
     if (preparedContextKey !== preparedKey && !await previewContext(normalized)) return false
+    if (requestID !== latestGenerationRequest) return false
     error.value = null
     state.value = 'generating'
-    activeRequest.value = normalized
+    activeRequest.value = null
     selectedArtifactID.value = null
+    targetSource.value = null
+    content.value = ''
+    sources.value = []
     try {
-      const response = await runAIWriting(normalized)
+      const response = await runAIWriting({
+        ...normalized,
+        expectedSources: sourceRefs(contextSources.value),
+      })
+      if (requestID !== latestGenerationRequest) return false
       if (response.error || !response.result) {
         error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
         state.value = 'error'
@@ -170,9 +189,14 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
       content.value = response.result.content
       sources.value = response.result.sources
       contextSources.value = response.result.sources
+      targetSource.value = response.result.sources.find((source) => source.noteID === normalized.noteIDs?.[0])
+        ?? response.result.sources[0]
+        ?? null
+      activeRequest.value = normalized
       state.value = 'success'
       return true
     } catch (cause) {
+      if (requestID !== latestGenerationRequest) return false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
       return false
@@ -185,7 +209,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
 
   async function save(title: string) {
     const request = activeRequest.value
-    if (!request || (state.value === 'stale' || state.value === 'orphaned') || content.value.trim() === '') {
+    if (!request || state.value !== 'success' || content.value.trim() === '') {
       error.value = createError('AI_INPUT_INVALID')
       state.value = 'error'
       return false
@@ -224,6 +248,11 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
         return false
       }
       const artifact = response.artifact
+      if (artifact.kind === 'summary') {
+        error.value = createError('AI_ARTIFACT_NOT_FOUND')
+        state.value = 'error'
+        return false
+      }
       content.value = artifact.content
       sources.value = artifact.sources.map((source) => ({
         noteID: source.noteID,
@@ -241,6 +270,9 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
         searchQuery: '',
         includeBacklinks: false,
       }
+      targetSource.value = sources.value.find((source) => source.noteID === artifact.sources[0]?.noteID)
+        ?? sources.value[0]
+        ?? null
       selectedArtifactID.value = artifact.id
       state.value = artifact.status === 'saved'
         ? 'success'
@@ -273,7 +305,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
 
   async function removeAllArtifacts() {
     try {
-      const response = await deleteAllAIArtifacts()
+      const response = await deleteAllAIWritingArtifacts()
       if (response.error || !response.deleted) {
         error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
         return false
@@ -288,12 +320,15 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
   }
 
   function clear() {
+    latestContextRequest += 1
+    latestGenerationRequest += 1
     state.value = 'idle'
     error.value = null
     content.value = ''
     sources.value = []
     contextSources.value = []
     activeRequest.value = null
+    targetSource.value = null
     selectedArtifactID.value = null
     preparedContextKey = ''
   }
@@ -304,6 +339,11 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
     state.value = 'stale'
   }
 
+  function setPreconditionError(code: 'AI_DRAFT_NOT_SAVED' | 'AI_NOTE_UNAVAILABLE' | 'AI_CONTEXT_CHANGED') {
+    error.value = createError(code)
+    state.value = 'error'
+  }
+
   return {
     state,
     error,
@@ -312,6 +352,7 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
     contextSources,
     artifacts,
     selectedArtifactID,
+    targetSource,
     isBusy,
     refreshArtifacts,
     previewContext,
@@ -323,5 +364,6 @@ export const useAIWritingStore = defineStore('ai-writing', () => {
     removeAllArtifacts,
     clear,
     markStaleForRevision,
+    setPreconditionError,
   }
 })

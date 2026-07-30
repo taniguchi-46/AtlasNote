@@ -42,6 +42,10 @@ export type ModelInfo = {
   id: string
   displayName: string
   supportsSummary: boolean
+  supportsTextGeneration: boolean
+  supportsStructuredOutput: boolean
+  supportsStreaming: boolean
+  supportsLibrarian: boolean
   inputTokenLimit?: number
   outputTokenLimit?: number
   available: boolean
@@ -174,6 +178,7 @@ export type AssistantInput = {
   noteIDs?: string[]
   searchQuery?: string
   includeBacklinks?: boolean
+  expectedSources?: AIHistorySource[]
 }
 
 export type AssistantResult = {
@@ -239,6 +244,7 @@ export type WritingInput = {
   noteIDs?: string[]
   searchQuery?: string
   includeBacklinks?: boolean
+  expectedSources?: AIHistorySource[]
 }
 
 export type WritingResult = {
@@ -256,7 +262,7 @@ export type WritingResponse = {
 
 export type AIArtifact = {
   id: string
-  kind: WritingKind
+  kind: ArtifactKind
   title: string
   providerID: AIProviderID
   modelID: string
@@ -269,13 +275,15 @@ export type AIArtifact = {
 
 export type SaveAIArtifactInput = {
   id?: string
-  kind: WritingKind
+  kind: ArtifactKind
   title: string
   providerID: AIProviderID
   modelID: string
   content: string
   sources: AIHistorySource[]
 }
+
+export type ArtifactKind = WritingKind | 'summary'
 
 export type AIArtifactResponse = {
   artifact?: AIArtifact
@@ -310,6 +318,7 @@ type AIWailsBridge = {
   GetAIArtifact(id: string): Promise<AIArtifactResponse>
   DeleteAIArtifact(id: string): Promise<AIDeleteResponse>
   DeleteAllAIArtifacts(): Promise<AIDeleteResponse>
+  DeleteAllAIWritingArtifacts(): Promise<AIDeleteResponse>
 }
 
 type WailsWindow = Window & typeof globalThis & {
@@ -408,6 +417,10 @@ export function deleteAIArtifact(id: string): Promise<AIDeleteResponse> {
 
 export function deleteAllAIArtifacts(): Promise<AIDeleteResponse> {
   return getAIWailsBridge().DeleteAllAIArtifacts()
+}
+
+export function deleteAllAIWritingArtifacts(): Promise<AIDeleteResponse> {
+  return getAIWailsBridge().DeleteAllAIWritingArtifacts()
 }
 
 export function onAILibrarianUpdate(listener: (event: LibrarianEvent) => void): () => void {

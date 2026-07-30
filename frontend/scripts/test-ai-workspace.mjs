@@ -15,6 +15,7 @@ const [
   assistantSource,
   writingSource,
   recordsSource,
+  markdownPreviewSource,
 ] = await Promise.all([
   readFile(componentPath('AIWorkspace.vue'), 'utf8'),
   readFile(componentPath('NoteEditor.vue'), 'utf8'),
@@ -25,6 +26,7 @@ const [
   readFile(componentPath('AIAssistantPanel.vue'), 'utf8'),
   readFile(componentPath('AIWritingPanel.vue'), 'utf8'),
   readFile(componentPath('AIRecordsPanel.vue'), 'utf8'),
+  readFile(componentPath('AIMarkdownPreview.vue'), 'utf8'),
 ])
 
 assert.match(settingsStoreSource, /export type AIWorkspacePlacement = 'right' \| 'bottom'/)
@@ -83,16 +85,21 @@ assert.match(workspaceSource, /<AISummaryPanel ref="summaryPanel"\s*\/>/)
 assert.match(workspaceSource, /<AILibrarianPanel ref="librarianPanel"\s*\/>/)
 assert.match(workspaceSource, /<AIAssistantPanel ref="assistantPanel" external-composer\s*\/>/)
 assert.match(workspaceSource, /<AIWritingPanel ref="writingPanel" external-composer\s*\/>/)
-assert.match(workspaceSource, /<AIRecordsPanel @open-artifact="openArtifact" @open-history="openHistory"\s*\/>/)
+assert.match(workspaceSource, /<AIRecordsPanel @open-artifact="openArtifact" @open-history="openHistory" @open-summary="openSummary"\s*\/>/)
 assert.match(workspaceSource, /DropdownMenuRoot/)
-assert.match(workspaceSource, /title="AI機能を選択"/)
+assert.match(workspaceSource, /class="ai-workspace-composer-feature-button"/)
+assert.match(workspaceSource, /composerFeatureLabel/)
+assert.match(workspaceSource, /composerFeatureIcon/)
 assert.match(workspaceSource, /DropdownMenuSub/)
 assert.match(workspaceSource, /AI司書/)
 assert.match(workspaceSource, /:global\(\.ai-workspace-action-menu\)\s*\{/)
 assert.match(workspaceSource, /background-color: var\(--bg-editor, #fff\)/)
 assert.match(workspaceSource, /opacity: 1/)
-assert.match(workspaceSource, /runSummary/)
-assert.match(workspaceSource, /runLibrarianOperation/)
+assert.match(workspaceSource, /selectComposerFeature\('summary'\)/)
+assert.match(workspaceSource, /selectLibrarianOperation\(operation\.value\)/)
+assert.match(workspaceSource, /void summaryPanel\.value\?\.startSummary\(\)/)
+assert.match(workspaceSource, /void librarianPanel\.value\?\.startOperation\(selectedLibrarianOperation\.value\)/)
+assert.match(workspaceSource, /const composerStatus = computed/)
 assert.match(workspaceSource, /v-model="composerText"/)
 assert.match(workspaceSource, /:maxlength="composerMaximumLength"/)
 assert.match(workspaceSource, /const composerMaximumLength = computed\(\(\) => activeFeature\.value === 'assistant' \? 8000 : 12_000\)/)
@@ -153,9 +160,20 @@ assert.doesNotMatch(writingSource, /@media \(max-width: 720px\)/)
 assert.doesNotMatch(assistantSource, /ai-v3-records/)
 assert.doesNotMatch(writingSource, /ai-v3-records/)
 assert.match(summarySource, /aria-label="要約を生成"/)
+assert.match(summarySource, /AIMarkdownPreview/)
+assert.match(markdownPreviewSource, /Markdown\.configure\(RICH_MARKDOWN_OPTIONS\)/)
+assert.match(markdownPreviewSource, /openOnClick: false/)
+assert.match(markdownPreviewSource, /parseNoteLinkHref/)
+assert.match(markdownPreviewSource, /ai-markdown-preview-fallback/)
 assert.match(librarianSource, /<component :is="item\.icon" :size="15" aria-hidden="true" \/>/)
 assert.match(assistantSource, /aria-label="質問を送信"/)
+assert.match(assistantSource, /送信済み・応答待ち/)
+assert.match(assistantSource, /AIMarkdownPreview/)
 assert.match(writingSource, /aria-label="文章を生成"/)
+assert.match(writingSource, /送信済み・文章を作成中/)
+assert.match(writingSource, /新規ノートにする/)
+assert.match(writingSource, /末尾に追記/)
+assert.match(writingSource, /本文を置換/)
 assert.match(recordsSource, /Trash2Icon/)
 assert.doesNotMatch(summarySource, /overflow: auto/)
 assert.doesNotMatch(librarianSource, /max-height: 120px/)

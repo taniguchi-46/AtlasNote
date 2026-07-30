@@ -67,6 +67,14 @@ const source = {
   revision: 1,
   contentByte: 120,
 }
+let pendingAssistant
+
+export function deferAssistant() {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  pendingAssistant = { promise, resolve }
+  return pendingAssistant
+}
 
 export async function prepareAIContext(input) {
   calls.context.push(clone(input))
@@ -75,6 +83,11 @@ export async function prepareAIContext(input) {
 
 export async function runAIAssistant(input) {
   calls.assistant.push(clone(input))
+  if (pendingAssistant) {
+    const deferred = pendingAssistant
+    pendingAssistant = undefined
+    await deferred.promise
+  }
   return {
     result: {
       providerID: input.providerID,
@@ -174,6 +187,11 @@ export async function deleteAllAIArtifacts() {
   calls.artifactDeleteAll += 1
   return { deleted: true }
 }
+
+export async function deleteAllAIWritingArtifacts() {
+  calls.artifactDeleteAll += 1
+  return { deleted: true }
+}
 `, 'utf8')
 
 try {
@@ -195,6 +213,8 @@ try {
   assert.match(writingPanelSource, /window\.confirm/, 'writing generation must require confirmation')
   assert.match(assistantPanelSource, /履歴を保存/, 'assistant history must be explicitly saveable')
   assert.match(writingPanelSource, /成果物を保存/, 'writing artifact must be explicitly saveable')
+  assert.match(assistantPanelSource, /送信済み・応答待ち/)
+  assert.match(writingPanelSource, /applyAIWritingContent/)
 
   setActivePinia(createPinia())
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-ai.mjs')).href)
@@ -210,6 +230,33 @@ try {
     includeBacklinks: false,
   }), true)
   assert.equal(mock.calls.assistant.length, 0, 'context preview must not call the provider')
+  const deferredAssistant = mock.deferAssistant()
+  const lateAssistant = assistant.ask({
+    kind: 'qa',
+    question: '遅延する質問',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  })
+  for (let index = 0; index < 5 && mock.calls.assistant.length === 0; index += 1) {
+    await Promise.resolve()
+  }
+  assert.equal(mock.calls.assistant.length, 1, 'the deferred provider request must have started')
+  assert.equal(assistant.state, 'generating', 'a user message must be acknowledged before the provider responds')
+  assert.deepEqual(assistant.messages, [{ role: 'user', content: '遅延する質問' }])
+  assistant.clearConversation()
+  deferredAssistant.resolve()
+  assert.equal(await lateAssistant, false, 'a response that arrives after clear must be discarded')
+  assert.equal(assistant.state, 'idle')
+  assert.deepEqual(assistant.messages, [])
+
+  assert.equal(await assistant.previewContext({
+    kind: 'qa',
+    question: '確認したいこと',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
   assert.equal(await assistant.ask({
     kind: 'qa',
     question: '確認したいこと',
@@ -217,6 +264,7 @@ try {
     searchQuery: '',
     includeBacklinks: false,
   }), true)
+  assert.equal(mock.calls.assistant.at(-1).expectedSources[0].inputRevision, 1)
   assert.equal(mock.calls.saveHistory.length, 0, 'assistant responses must not be saved automatically')
   assert.equal(await assistant.save('質問履歴'), true)
   assert.equal(mock.calls.saveHistory.length, 1, 'assistant history must be saved only explicitly')
@@ -244,6 +292,7 @@ try {
     searchQuery: '',
     includeBacklinks: false,
   }), true)
+  assert.equal(mock.calls.writing.at(-1).expectedSources[0].inputRevision, 1)
   assert.equal(mock.calls.saveArtifact.length, 0, 'writing output must not be saved automatically')
   writing.updateContent('編集済み成果物')
   assert.equal(await writing.save('設計文書'), true)

@@ -6,9 +6,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"sync"
+	"time"
 
 	"atlasnote/internal/credential"
 )
+
+const modelMetadataCacheTTL = 10 * time.Minute
+
+type cachedModelMetadata struct {
+	models      []ModelInfo
+	retrievedAt time.Time
+}
 
 type Service struct {
 	repository       *Repository
@@ -24,6 +32,8 @@ type Service struct {
 	contextProvider  NoteContextProvider
 	shutdownCtx      context.Context
 	shutdownCancel   context.CancelFunc
+	modelMetadataMu  sync.Mutex
+	modelMetadata    map[ProviderID]cachedModelMetadata
 }
 
 func NewService(repository *Repository, credentials *credential.Manager, checker ConnectionChecker) *Service {
@@ -64,6 +74,7 @@ func newService(repository *Repository, credentials *credential.Manager, checker
 		newCredentialRef: newCredentialReference,
 		shutdownCtx:      shutdownCtx,
 		shutdownCancel:   shutdownCancel,
+		modelMetadata:    make(map[ProviderID]cachedModelMetadata),
 	}
 }
 
@@ -207,11 +218,12 @@ func (s *Service) ListModels(ctx context.Context, input ListModelsInput) (ModelL
 	if err != nil {
 		return ModelListResult{}, toSafeError(err)
 	}
+	s.cacheModelMetadata(providerID, result)
 	return result, nil
 }
 
-// GenerateSummary resolves a saved credential internally and deliberately
-// keeps the generated result outside Markdown, SQLite, and sync state.
+// GenerateSummary resolves a saved credential internally. It never mutates
+// Markdown or sync state; callers may separately persist a local AI record.
 func (s *Service) GenerateSummary(ctx context.Context, input GenerateSummaryInput) (SummaryResult, error) {
 	normalized, err := normalizeSummaryInput(input)
 	if err != nil {
@@ -228,6 +240,9 @@ func (s *Service) GenerateSummary(ctx context.Context, input GenerateSummaryInpu
 	}
 	operationCtx, cancel := s.operationContext(ctx)
 	defer cancel()
+	if err := s.validateSummaryInputLimit(operationCtx, normalized, apiKey); err != nil {
+		return SummaryResult{}, err
+	}
 	result, err := s.adapter.GenerateSummary(operationCtx, normalized.ProviderID, apiKey, normalized)
 	if err != nil {
 		return SummaryResult{}, toSafeError(err)
@@ -298,11 +313,13 @@ func (s *Service) DeleteProvider(ctx context.Context, providerID ProviderID) ([]
 		return nil, ErrConfigurationUnavailable
 	}
 	if record == nil {
+		s.clearModelMetadata(providerID)
 		return s.listSettings(ctx)
 	}
 	if err := s.deleteRecord(ctx, *record); err != nil {
 		return nil, err
 	}
+	s.clearModelMetadata(providerID)
 	return s.listSettings(ctx)
 }
 
@@ -319,7 +336,113 @@ func (s *Service) DeleteAll(ctx context.Context) ([]ProviderSettings, error) {
 			return nil, err
 		}
 	}
+	s.clearAllModelMetadata()
 	return s.listSettings(ctx)
+}
+
+func (s *Service) cacheModelMetadata(providerID ProviderID, result ModelListResult) {
+	models := append([]ModelInfo(nil), result.Models...)
+	retrievedAt := result.RetrievedAt
+	if retrievedAt.IsZero() {
+		retrievedAt = time.Now().UTC()
+	}
+	s.modelMetadataMu.Lock()
+	s.modelMetadata[providerID] = cachedModelMetadata{models: models, retrievedAt: retrievedAt}
+	s.modelMetadataMu.Unlock()
+}
+
+func (s *Service) clearModelMetadata(providerID ProviderID) {
+	s.modelMetadataMu.Lock()
+	delete(s.modelMetadata, providerID)
+	s.modelMetadataMu.Unlock()
+}
+
+func (s *Service) clearAllModelMetadata() {
+	s.modelMetadataMu.Lock()
+	clear(s.modelMetadata)
+	s.modelMetadataMu.Unlock()
+}
+
+func (s *Service) cachedModelInfo(providerID ProviderID, modelID string) (ModelInfo, bool) {
+	s.modelMetadataMu.Lock()
+	defer s.modelMetadataMu.Unlock()
+	entry, ok := s.modelMetadata[providerID]
+	if !ok || time.Since(entry.retrievedAt) > modelMetadataCacheTTL {
+		return ModelInfo{}, false
+	}
+	for _, model := range entry.models {
+		if model.ID == modelID {
+			return model, true
+		}
+	}
+	return ModelInfo{}, false
+}
+
+func (s *Service) refreshModelInfo(ctx context.Context, providerID ProviderID, modelID string, apiKey string) (ModelInfo, error) {
+	result, err := s.adapter.ListModels(ctx, providerID, apiKey)
+	if err != nil {
+		return ModelInfo{}, toSafeError(err)
+	}
+	s.cacheModelMetadata(providerID, result)
+	for _, model := range result.Models {
+		if model.ID == modelID {
+			return model, nil
+		}
+	}
+	return ModelInfo{}, ErrModelUnavailable
+}
+
+func (s *Service) validateSummaryInputLimit(ctx context.Context, input GenerateSummaryInput, apiKey string) error {
+	model, known := s.cachedModelInfo(input.ProviderID, input.ModelID)
+	if !known && len([]byte(input.Content)) > summaryUnknownModelInputLimitBytes {
+		var err error
+		model, err = s.refreshModelInfo(ctx, input.ProviderID, input.ModelID, apiKey)
+		if err != nil {
+			return err
+		}
+		known = true
+	}
+	if known && !model.Available {
+		return ErrModelUnavailable
+	}
+	if known && !model.SupportsSummary {
+		return ErrModelCapabilityUnavailable
+	}
+	limit := summaryUnknownModelInputLimitBytes
+	if known && model.InputTokenLimit != nil {
+		availableTokens := *model.InputTokenLimit - int64(summaryInstructionTokenReserve+summaryOutputTokenLimit)
+		if availableTokens < 1 {
+			return ErrModelCapabilityUnavailable
+		}
+		if availableTokens > int64(summaryInputLimitBytes) {
+			limit = summaryInputLimitBytes
+		} else {
+			// One byte per token is intentionally conservative across Japanese,
+			// mixed-language, and byte-level tokenizers.
+			limit = int(availableTokens)
+		}
+	}
+	if len([]byte(input.Content)) > limit {
+		return ErrInputTooLarge
+	}
+	return nil
+}
+
+func (s *Service) validateLibrarianModel(providerID ProviderID, modelID string) error {
+	model, known := s.cachedModelInfo(providerID, modelID)
+	if !known {
+		// A model list is advisory metadata. When it is unavailable (for example
+		// immediately after restart), let the provider perform the authoritative
+		// check instead of rejecting a configured model locally.
+		return nil
+	}
+	if !model.Available {
+		return ErrModelUnavailable
+	}
+	if !model.SupportsLibrarian {
+		return ErrModelCapabilityUnavailable
+	}
+	return nil
 }
 
 func (s *Service) deleteRecord(ctx context.Context, record providerRecord) error {

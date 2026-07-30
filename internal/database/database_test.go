@@ -581,6 +581,57 @@ SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ai_provider_sett
 	}
 }
 
+func TestMigrateVersionTwelveArtifactsAddsSummaryKindWithoutDataLoss(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open fixture database: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	for index, migration := range migrations[:12] {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("apply version twelve migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := db.Exec(`
+INSERT INTO ai_artifacts(id, kind, title, provider_id, model_id, content, status, created_at, updated_at)
+VALUES ('artifact-v12', 'document', 'Existing artifact', 'openrouter', 'test-model', 'preserve me', 'saved', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');
+INSERT INTO ai_artifact_sources(artifact_id, note_id, input_revision)
+VALUES ('artifact-v12', 'source-note', 7);
+PRAGMA user_version = 12;
+`); err != nil {
+		t.Fatalf("insert version twelve fixture: %v", err)
+	}
+
+	if err := migrate(t.Context(), db, migrations); err != nil {
+		t.Fatalf("migrate version twelve fixture: %v", err)
+	}
+
+	var kind string
+	var content string
+	if err := db.QueryRow("SELECT kind, content FROM ai_artifacts WHERE id = 'artifact-v12'").Scan(&kind, &content); err != nil {
+		t.Fatalf("read migrated artifact: %v", err)
+	}
+	if kind != "document" || content != "preserve me" {
+		t.Fatalf("migrated artifact = kind:%q content:%q", kind, content)
+	}
+	var revision int
+	if err := db.QueryRow("SELECT input_revision FROM ai_artifact_sources WHERE artifact_id = 'artifact-v12'").Scan(&revision); err != nil {
+		t.Fatalf("read migrated artifact source: %v", err)
+	}
+	if revision != 7 {
+		t.Fatalf("migrated artifact source revision = %d, want 7", revision)
+	}
+	if _, err := db.Exec(`
+INSERT INTO ai_artifacts(id, kind, title, provider_id, model_id, content, status, created_at, updated_at)
+VALUES ('summary-v13', 'summary', 'Summary', 'openrouter', 'test-model', '## 概要', 'saved', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z')
+`); err != nil {
+		t.Fatalf("insert summary artifact after migration: %v", err)
+	}
+}
+
 func TestOpenMigratesVersionSixDatabaseWithEmptyNoteLinkIndex(t *testing.T) {
 	t.Parallel()
 

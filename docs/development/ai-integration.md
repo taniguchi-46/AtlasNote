@@ -218,7 +218,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 ## 8. v2・v3への引き継ぎ
 
 - v2は [`scope-phese4-v2.md`](scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](../todo/todo-phese4-v2.md) を正とし、AI司書、ストリーミング、部分応答、キャンセル、構造化出力を扱う。v2ではAI結果を永続化しない。
-- v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物を扱う。AIデータはWebDAV同期しない。
+- v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物、および成功時に自動保存する要約履歴を扱う。AIデータはWebDAV同期しない。
 - Phase 4完了はv3完了とする。
 
 ### v3保存仕様（D-03/D-04追補・2026-07-28）
@@ -227,14 +227,14 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 
 1. **保存単位とschema**
    - Markdown本文を正本とし、AI履歴・生成成果物はローカルSQLiteの管理データとして保存する。WebDAVのentity、manifest、object、outbox、conflictには追加しない。
-   - schema version 12で、会話を `ai_histories`、会話メッセージを `ai_history_messages`、会話の入力ノートと保存時revisionを `ai_history_sources`、生成成果物を `ai_artifacts`、成果物の入力ノートと保存時revisionを `ai_artifact_sources` として追加する。
+   - schema version 12で、会話を `ai_histories`、会話メッセージを `ai_history_messages`、会話の入力ノートと保存時revisionを `ai_history_sources`、生成成果物を `ai_artifacts`、成果物の入力ノートと保存時revisionを `ai_artifact_sources` として追加する。schema version 13で、既存の成果物とsourceを保持したまま `ai_artifacts.kind` に `summary` を追加する。
    - `ai_histories` は `id`、`kind`（`qa` / `brainstorm`）、`title`、`provider_id`、`model_id`、`status`（`saved` / `stale` / `orphaned`）、`created_at`、`updated_at` を持つ。`ai_history_messages` は `history_id`、連番、`role`（`user` / `assistant`）、`content`、作成日時を持ち、履歴削除時に同一トランザクションで削除する。
-   - `ai_artifacts` は `id`、`kind`（`prompt` / `prompt-improvement` / `readme` / `document` / `blog` / `requirements`）、`title`、`provider_id`、`model_id`、最終本文、`status`、`created_at`、`updated_at` を持つ。sources表は履歴・成果物ごとに `note_id` と `input_revision` を保持する。
+   - `ai_artifacts` は `id`、`kind`（`summary` / `prompt` / `prompt-improvement` / `readme` / `document` / `blog` / `requirements`）、`title`、`provider_id`、`model_id`、最終本文、`status`、`created_at`、`updated_at` を持つ。sources表は履歴・成果物ごとに `note_id` と `input_revision` を保持する。
    - sources表はノート削除時に履歴・成果物を連鎖削除しない。保存データを残すため、ノートへの外部キー `ON DELETE CASCADE` は設けない。
 
 2. **prompt・ユーザー入力の保存境界**
    - 生成中の状態、chunk、system prompt、内部指示、Provider request body、RAGのraw context、API Key、Authorization、raw provider errorは保存しない。
-   - 履歴は利用者が明示保存した時点のuser／assistantメッセージだけを保存する。ライティングは利用者が明示保存した最終編集済み成果物だけを保存し、生成指示や全文の入力ノートは保存しない。
+   - 履歴は利用者が明示保存した時点のuser／assistantメッセージだけを保存する。ライティングは利用者が明示保存した最終編集済み成果物だけを保存し、生成指示や全文の入力ノートは保存しない。要約は成功時に要約本文と参照元の `note_id`／`input_revision` だけを自動保存し、要約元本文は保存しない。
 
 3. **保持期間・削除**
    - 自動期限、世代数制限、バックグラウンド削除は設けず、利用者が削除するまで保持する。
@@ -248,6 +248,14 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 5. **CI失敗の扱い**
    - CI run [#30360052157](https://github.com/taniguchi-46/AtlasNote/actions/runs/30360052157) はWailsの `wails build -clean` に成功した一方、`internal/ai/librarian_test.go:86` のタイミング依存テストだけが失敗した既知の受け入れ例外として記録する。
    - 今回はユーザー判断により当該失敗を修正せず、v3保存仕様の確定と設計・実装準備を進める。ただしCIは成功扱いにせず、v3およびPhase 4の完了判定で「CI成功」を主張するには、この例外の解消または別途正式なリリース例外承認が必要である。
+
+### v3 UX・実行契約追補（2026-07-30）
+
+- AIワークスペースの共通コンポーザーは、`＋`アイコンではなく選択中の機能名を表示するセレクターを使う。要約とAI司書は選択後に送信ボタンで開始し、AIアシスタントとAIライティングは機能別の下書きから送信する。
+- AIアシスタントとAIライティングは、参照資料を確認した後に送信済み状態を直ちに表示し、遅れて到着した応答は現在の操作へ反映しない。送信直前の参照ノート／revisionと実際のコンテキストが異なる場合は外部送信しない。
+- 要約はモデルのコンテキスト長を考慮して送信上限を判定し、固定12 KiBで拒否しない。本文の自動切詰め・分割は行わない。要約とAIアシスタントの回答は、raw HTMLを無効にしたMarkdownプレビューで表示する。
+- AIライティング結果は、利用者の明示確認後に新規ノートとして作成するか、生成時の参照revisionと一致する現在ノートへ追記または本文置換できる。反映は既存のrevision/CAS・ノート単位保存laneを通す。
+- AI司書では、モデルの構造化出力／ストリーミング能力をモデル一覧の補助情報として扱い、未取得の一覧だけで設定済みモデルを拒否しない。OpenRouterの構造化要求は対応providerに限定し、非対応モデルは「利用不可」ではなく能力不足として安全なエラーを返す。
 
 ## 7. 対象外
 

@@ -80,7 +80,7 @@
           <AIWritingPanel ref="writingPanel" external-composer />
         </div>
         <div v-show="activeFeature === 'records'" class="ai-workspace-feature" aria-label="履歴と成果物">
-          <AIRecordsPanel @open-artifact="openArtifact" @open-history="openHistory" />
+          <AIRecordsPanel @open-artifact="openArtifact" @open-history="openHistory" @open-summary="openSummary" />
         </div>
       </div>
 
@@ -92,7 +92,7 @@
           rows="2"
           :maxlength="composerMaximumLength"
           :placeholder="composerPlaceholder"
-          :disabled="!canUseComposer"
+          :disabled="!canUseComposer || !isPromptComposerFeature"
           @keydown.ctrl.enter.prevent="submitComposer"
           @keydown.meta.enter.prevent="submitComposer"
         />
@@ -100,14 +100,16 @@
           <DropdownMenuRoot>
             <DropdownMenuTrigger as-child>
               <button
-                class="ai-workspace-composer-icon-button"
+                class="ai-workspace-composer-feature-button"
                 type="button"
-                title="AI機能を選択"
-                aria-label="AI機能を選択"
+                :title="`${composerFeatureLabel}を選択`"
+                :aria-label="`${composerFeatureLabel}を選択`"
                 aria-haspopup="menu"
                 :disabled="isAnyBusy"
               >
-                <PlusIcon :size="17" aria-hidden="true" />
+                <component :is="composerFeatureIcon" :size="15" aria-hidden="true" />
+                <span>{{ composerFeatureLabel }}</span>
+                <ChevronDownIcon :size="14" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -118,7 +120,7 @@
                 :side-offset="8"
               >
                 <DropdownMenuLabel class="ai-workspace-action-menu-label">AI機能</DropdownMenuLabel>
-                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="runSummary">
+                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="selectComposerFeature('summary')">
                   <SparklesIcon :size="15" aria-hidden="true" />
                   要約
                 </DropdownMenuItem>
@@ -134,7 +136,7 @@
                       v-for="operation in librarianOperations"
                       :key="operation.value"
                       class="ai-workspace-action-menu-item"
-                      @select="runLibrarianOperation(operation.value)"
+                      @select="selectLibrarianOperation(operation.value)"
                     >
                       <component :is="operation.icon" :size="15" aria-hidden="true" />
                       {{ operation.label }}
@@ -142,11 +144,11 @@
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator class="ai-workspace-action-menu-separator" />
-                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="selectFeature('assistant')">
+                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="selectComposerFeature('assistant')">
                   <MessageSquareIcon :size="15" aria-hidden="true" />
                   質問・壁打ち
                 </DropdownMenuItem>
-                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="selectFeature('writing')">
+                <DropdownMenuItem class="ai-workspace-action-menu-item" @select="selectComposerFeature('writing')">
                   <PenLineIcon :size="15" aria-hidden="true" />
                   ライティング
                 </DropdownMenuItem>
@@ -175,6 +177,9 @@
             <SendIcon :size="17" aria-hidden="true" />
           </button>
         </div>
+        <p v-if="composerStatus" class="ai-workspace-composer-status" role="status">
+          {{ composerStatus }}
+        </p>
       </form>
     </aside>
   </section>
@@ -193,7 +198,6 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PenLineIcon,
-  PlusIcon,
   SparklesIcon,
   SendIcon,
   TagsIcon,
@@ -232,6 +236,7 @@ import AIWritingPanel from './AIWritingPanel.vue'
 import AIRecordsPanel from './AIRecordsPanel.vue'
 
 type WorkspaceFeature = 'summary' | 'librarian' | 'assistant' | 'writing' | 'records'
+type PromptComposerFeature = 'assistant' | 'writing'
 type SummaryPanelHandle = { startSummary: () => Promise<void> }
 type LibrarianPanelHandle = { startOperation: (operation: LibrarianOperation) => Promise<void> }
 type AssistantPanelHandle = {
@@ -275,7 +280,18 @@ const librarianPanel = ref<LibrarianPanelHandle | null>(null)
 const assistantPanel = ref<AssistantPanelHandle | null>(null)
 const writingPanel = ref<WritingPanelHandle | null>(null)
 const activeFeature = ref<WorkspaceFeature>('assistant')
-const composerText = ref('')
+const selectedLibrarianOperation = ref<LibrarianOperation>('title')
+const composerDrafts = ref<Record<PromptComposerFeature, string>>({ assistant: '', writing: '' })
+const composerText = computed({
+  get: () => {
+    const feature = activeFeature.value
+    return feature === 'assistant' || feature === 'writing' ? composerDrafts.value[feature] : ''
+  },
+  set: (value: string) => {
+    const feature = activeFeature.value
+    if (feature === 'assistant' || feature === 'writing') composerDrafts.value[feature] = value
+  },
+})
 const workspaceWidth = ref(0)
 const workspaceHeight = ref(0)
 const activeResize = ref<AIWorkspacePlacement | null>(null)
@@ -301,20 +317,41 @@ const isAnyBusy = computed(() => (
   || assistantStore.isBusy
   || writingStore.isBusy
 ))
-const isComposerFeature = computed(() => (
+const isPromptComposerFeature = computed(() => (
   activeFeature.value === 'assistant' || activeFeature.value === 'writing'
 ))
-const canUseComposer = computed(() => Boolean(noteStore.activeNote) && isComposerFeature.value && !isAnyBusy.value)
+const isComposerFeature = computed(() => activeFeature.value !== 'records')
+const canUseComposer = computed(() => Boolean(noteStore.activeNote && !noteStore.activeNote.isTrashed) && isComposerFeature.value && !isAnyBusy.value)
 const composerMaximumLength = computed(() => activeFeature.value === 'assistant' ? 8000 : 12_000)
 const canSubmitComposer = computed(() => (
   canUseComposer.value
-  && composerText.value.trim() !== ''
-  && composerText.value.length <= composerMaximumLength.value
+  && (
+    !isPromptComposerFeature.value
+    || (composerText.value.trim() !== '' && composerText.value.length <= composerMaximumLength.value)
+  )
 ))
+const selectedLibrarianLabel = computed(() => (
+  librarianOperations.find((operation) => operation.value === selectedLibrarianOperation.value)?.label ?? 'AI司書'
+))
+const composerFeatureLabel = computed(() => {
+  if (activeFeature.value === 'assistant') return '質問・壁打ち'
+  if (activeFeature.value === 'writing') return 'AIライティング'
+  if (activeFeature.value === 'summary') return '要約'
+  if (activeFeature.value === 'librarian') return `AI司書：${selectedLibrarianLabel.value}`
+  return 'AI機能'
+})
+const composerFeatureIcon = computed<Component>(() => {
+  if (activeFeature.value === 'assistant') return MessageSquareIcon
+  if (activeFeature.value === 'writing') return PenLineIcon
+  if (activeFeature.value === 'librarian') return BookOpenIcon
+  return SparklesIcon
+})
 const composerPlaceholder = computed(() => {
   if (activeFeature.value === 'assistant') return '現在のノートについて質問する'
   if (activeFeature.value === 'writing') return '作成したい文章の目的、読者、形式を入力'
-  return '＋からAI機能を選択'
+  if (activeFeature.value === 'summary') return '現在のノートをMarkdown形式で要約します'
+  if (activeFeature.value === 'librarian') return `${selectedLibrarianLabel.value}を生成します`
+  return 'AI機能を選択'
 })
 const modelButtonLabel = computed(() => aiStore.configuredSetting?.modelID || 'モデルを設定')
 const sendButtonLabel = computed(() => (
@@ -322,8 +359,21 @@ const sendButtonLabel = computed(() => (
     ? '質問を送信'
     : activeFeature.value === 'writing'
       ? '文章を生成'
-      : 'AI機能を選択してください'
+      : activeFeature.value === 'summary'
+        ? '要約を開始'
+        : activeFeature.value === 'librarian'
+          ? 'AI司書を開始'
+          : 'AI機能を選択してください'
 ))
+const composerStatus = computed(() => {
+  if (assistantStore.state === 'loading-context') return '参照を確認しています…'
+  if (assistantStore.state === 'generating') return '質問を送信しました。AIの回答を待っています…'
+  if (writingStore.state === 'loading-context') return '参照を確認しています…'
+  if (writingStore.state === 'generating') return '作成指示を送信しました。文章を生成しています…'
+  if (aiStore.summaryState === 'generating') return '要約を送信しました。生成しています…'
+  if (librarianStore.isGenerating) return 'AI司書へ送信しました。候補を生成しています…'
+  return ''
+})
 
 function getResizeBounds(targetPlacement: AIWorkspacePlacement): ResizeBounds {
   const isRight = targetPlacement === 'right'
@@ -388,18 +438,20 @@ async function selectFeature(feature: WorkspaceFeature) {
   }
 }
 
-async function runSummary() {
+async function selectComposerFeature(feature: Exclude<WorkspaceFeature, 'records'>) {
   if (isAnyBusy.value) return
-  activeFeature.value = 'summary'
-  await nextTick()
-  await summaryPanel.value?.startSummary()
+  activeFeature.value = feature
+  if (feature === 'assistant' || feature === 'writing') {
+    await nextTick()
+    focusComposer()
+  }
 }
 
-async function runLibrarianOperation(operation: LibrarianOperation) {
+async function selectLibrarianOperation(operation: LibrarianOperation) {
   if (isAnyBusy.value) return
+  selectedLibrarianOperation.value = operation
   activeFeature.value = 'librarian'
   await nextTick()
-  await librarianPanel.value?.startOperation(operation)
 }
 
 function openAISettings() {
@@ -411,12 +463,23 @@ function showRecords() {
 }
 
 async function submitComposer() {
-  const prompt = composerText.value.trim()
-  if (!prompt || !canUseComposer.value) return
+  if (!canUseComposer.value) return
   if (!aiStore.configuredSetting?.modelID) {
     openAISettings()
     return
   }
+
+  if (activeFeature.value === 'summary') {
+    void summaryPanel.value?.startSummary()
+    return
+  }
+  if (activeFeature.value === 'librarian') {
+    void librarianPanel.value?.startOperation(selectedLibrarianOperation.value)
+    return
+  }
+
+  const prompt = composerText.value.trim()
+  if (!prompt) return
 
   const submitted = activeFeature.value === 'assistant'
     ? await assistantPanel.value?.submitPrompt(prompt)
@@ -437,6 +500,12 @@ async function openArtifact(id: string) {
   const panel = writingPanel.value
   if (panel && await panel.openArtifact(id)) {
     activeFeature.value = 'writing'
+  }
+}
+
+async function openSummary(id: string) {
+  if (await aiStore.loadSummaryHistory(id)) {
+    activeFeature.value = 'summary'
   }
 }
 
@@ -777,6 +846,36 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.ai-workspace-composer-feature-button {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(100%, 190px);
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ai-workspace-composer-feature-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-workspace-composer-feature-button:hover,
+.ai-workspace-composer-feature-button:focus-visible {
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
 .ai-workspace-model-button span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -800,9 +899,17 @@ onBeforeUnmount(() => {
 }
 
 .ai-workspace-composer-icon-button:disabled,
-.ai-workspace-model-button:disabled {
+.ai-workspace-model-button:disabled,
+.ai-workspace-composer-feature-button:disabled {
   cursor: not-allowed;
   opacity: .55;
+}
+
+.ai-workspace-composer-status {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 :global(.ai-workspace-action-menu) {
@@ -858,7 +965,11 @@ onBeforeUnmount(() => {
   }
 
   .ai-workspace-model-button {
-    max-width: calc(100% - 72px);
+    max-width: calc(100% - 76px);
+  }
+
+  .ai-workspace-composer-feature-button {
+    max-width: calc(100% - 76px);
   }
 }
 

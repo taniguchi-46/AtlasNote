@@ -4,10 +4,12 @@
     class="ai-v3-panel"
     aria-label="AIアシスタント"
     aria-live="polite"
+    :aria-busy="assistantStore.isBusy"
   >
     <div class="ai-v3-heading">
       <strong>AIアシスタント</strong>
-      <span v-if="assistantStore.isBusy">準備・生成中…</span>
+      <span v-if="assistantStore.state === 'loading-context'">参照を確認中…</span>
+      <span v-else-if="assistantStore.state === 'generating'">送信済み・応答待ち…</span>
     </div>
 
     <div class="ai-v3-grid">
@@ -133,7 +135,12 @@
         :class="['ai-v3-message', `is-${message.role}`]"
       >
         <strong>{{ message.role === 'user' ? 'あなた' : 'AI' }}</strong>
-        <pre>{{ message.content }}</pre>
+        <AIMarkdownPreview
+          v-if="message.role === 'assistant'"
+          :markdown="message.content"
+          aria-label="AIアシスタントの回答"
+        />
+        <pre v-else>{{ message.content }}</pre>
       </li>
     </ul>
 
@@ -147,7 +154,7 @@
         type="button"
         title="履歴を保存"
         aria-label="履歴を保存"
-        :disabled="assistantStore.state === 'stale' || assistantStore.state === 'orphaned' || assistantStore.isBusy"
+        :disabled="assistantStore.state !== 'success' || assistantStore.isBusy"
         @click="saveHistory"
       >
         <SaveIcon :size="15" aria-hidden="true" />
@@ -164,6 +171,7 @@ import type { AIContextSource, AssistantKind } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
 import { useAIAssistantStore } from '../stores/useAIAssistantStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import AIMarkdownPreview from './AIMarkdownPreview.vue'
 
 const props = withDefaults(defineProps<{ externalComposer?: boolean }>(), {
   externalComposer: false,
@@ -181,6 +189,7 @@ let previousNoteID: string | null = null
 
 const canAsk = computed(() => Boolean(
   noteStore.activeNote
+  && !noteStore.activeNote.isTrashed
   && question.value.trim()
   && aiStore.configuredSetting?.modelID
   && !assistantStore.isBusy,
@@ -198,8 +207,36 @@ function contextInput() {
 }
 
 async function preview() {
-  if (!noteStore.activeNote) return false
+  if (!await ensureCurrentNotePersisted()) return false
   return assistantStore.previewContext(contextInput())
+}
+
+async function ensureCurrentNotePersisted() {
+  const selectedNote = noteStore.activeNote
+  if (!selectedNote || selectedNote.isTrashed) {
+    assistantStore.setPreconditionError('AI_NOTE_UNAVAILABLE')
+    return false
+  }
+  if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
+    assistantStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  const noteID = selectedNote.id
+  try {
+    if (!await noteStore.flushPendingDraft()) {
+      assistantStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+      return false
+    }
+  } catch {
+    assistantStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  const current = noteStore.activeNote
+  if (!current || current.id !== noteID || current.isTrashed || noteStore.activeDraft) {
+    assistantStore.setPreconditionError(current?.isTrashed ? 'AI_NOTE_UNAVAILABLE' : 'AI_DRAFT_NOT_SAVED')
+    return false
+  }
+  return true
 }
 
 async function confirmAndAsk() {
@@ -215,13 +252,15 @@ async function confirmAndAsk() {
     `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\n検索範囲: 全ノート（追加検索: ${searchQuery.value.trim() || 'なし'}）\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
   )) return false
 
-  return assistantStore.ask({
+  void assistantStore.ask({
     kind: kind.value,
     question: question.value,
     noteIDs: contextInput().noteIDs,
     searchQuery: searchQuery.value,
     includeBacklinks: includeBacklinks.value,
   })
+  question.value = ''
+  return true
 }
 
 async function submitPrompt(prompt: string) {

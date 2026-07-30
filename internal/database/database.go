@@ -355,6 +355,50 @@ CREATE INDEX IF NOT EXISTS idx_ai_artifacts_status_updated_at
 CREATE INDEX IF NOT EXISTS idx_ai_artifact_sources_note_id
 	ON ai_artifact_sources(note_id);
 	`,
+	`
+-- SQLite cannot extend a CHECK constraint in place. Rebuild the artifact
+-- tables inside the migration transaction so existing writing artifacts and
+-- their source references remain intact while adding the summary kind.
+CREATE TABLE ai_artifacts_v13 (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('summary', 'prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE ai_artifact_sources_v13 (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts_v13(id) ON DELETE CASCADE
+);
+
+INSERT INTO ai_artifacts_v13(
+	id, kind, title, provider_id, model_id, content, status, created_at, updated_at
+)
+SELECT id, kind, title, provider_id, model_id, content, status, created_at, updated_at
+FROM ai_artifacts;
+
+INSERT INTO ai_artifact_sources_v13(artifact_id, note_id, input_revision)
+SELECT artifact_id, note_id, input_revision
+FROM ai_artifact_sources;
+
+DROP TABLE ai_artifact_sources;
+DROP TABLE ai_artifacts;
+ALTER TABLE ai_artifacts_v13 RENAME TO ai_artifacts;
+ALTER TABLE ai_artifact_sources_v13 RENAME TO ai_artifact_sources;
+
+CREATE INDEX idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -601,7 +645,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_history_sources_note_id
 
 CREATE TABLE IF NOT EXISTS ai_artifacts (
 	id TEXT PRIMARY KEY,
-	kind TEXT NOT NULL CHECK(kind IN ('prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	kind TEXT NOT NULL CHECK(kind IN ('summary', 'prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
 	title TEXT NOT NULL DEFAULT '',
 	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
 	model_id TEXT NOT NULL,

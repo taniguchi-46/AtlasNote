@@ -35,6 +35,8 @@ export type NoteDraft = NoteSaveSnapshot & {
   } | null
 }
 
+export type AIWritingApplyMode = 'append' | 'replace'
+
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   const markers: Record<EditorFirstLineStyle, string> = {
     heading1: '# ',
@@ -285,6 +287,7 @@ export const useNoteStore = defineStore('notes', () => {
       // 新規追加だけで次ページの有無は変わらないため、現在のページング状態を維持する。
       autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
       activeNote.value = created
+      return created
     } catch (e) {
       setErrorContext({
         code: 'NOTE_CREATE_FAILED',
@@ -294,6 +297,7 @@ export const useNoteStore = defineStore('notes', () => {
         },
       })
       error.value = e instanceof Error ? e.message : 'ノートの作成に失敗しました'
+      return null
     } finally {
       endSaving()
     }
@@ -587,6 +591,67 @@ export const useNoteStore = defineStore('notes', () => {
     })
   }
 
+  async function applyAIWritingContent(
+    noteId: string,
+    generatedContent: string,
+    expectedRevision: number,
+    mode: AIWritingApplyMode,
+  ) {
+    const content = generatedContent.trim()
+    const current = activeNote.value
+    if (
+      !content
+      || !current
+      || current.id !== noteId
+      || current.isTrashed
+      || current.revision !== expectedRevision
+      || activeDraft.value
+    ) {
+      setErrorContext({ code: 'AI_WRITING_APPLY_PRECONDITION_FAILED' })
+      error.value = 'AI生成結果を反映できません。ノートを保存・再確認してからもう一度実行してください'
+      return false
+    }
+
+    return noteOperations.enqueue(noteId, async () => {
+      const latest = activeNote.value
+      if (
+        !latest
+        || latest.id !== noteId
+        || latest.isTrashed
+        || latest.revision !== expectedRevision
+        || activeDraft.value
+      ) {
+        setErrorContext({ code: 'AI_WRITING_APPLY_PRECONDITION_FAILED' })
+        error.value = 'AI生成結果を反映できません。ノートが更新されています'
+        return false
+      }
+
+      const nextContent = mode === 'replace'
+        ? content
+        : latest.content.trimEnd()
+          ? `${latest.content.trimEnd()}\n\n${content}`
+          : content
+      const endSaving = savingRequests.begin()
+      error.value = null
+      try {
+        const updated = await updateNote(noteId, {
+          content: nextContent,
+          expectedRevision,
+        })
+        applyPersistedNote(updated)
+        return true
+      } catch (e) {
+        setErrorContext({
+          code: e instanceof NoteRevisionConflictError ? e.code : 'AI_WRITING_APPLY_FAILED',
+        })
+        error.value = e instanceof Error ? e.message : 'AI生成結果をノートへ反映できませんでした'
+        return false
+      } finally {
+        endSaving()
+      }
+    })
+  }
+
   function discardAllDrafts() {
     autoSave.cancel()
     drafts.value = {}
@@ -740,6 +805,7 @@ export const useNoteStore = defineStore('notes', () => {
     selectNote,
     newNote,
     persistNote,
+    applyAIWritingContent,
     applyPersistedNote,
     getDraft,
     scheduleDraft,

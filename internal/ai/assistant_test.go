@@ -121,7 +121,7 @@ func TestServiceRunsAssistantAndWritingOnlyPersistAfterExplicitSave(t *testing.T
 	}
 
 	savedArtifact, err := service.SaveArtifact(t.Context(), SaveAIArtifactInput{
-		Kind:       writing.Kind,
+		Kind:       ArtifactKind(writing.Kind),
 		Title:      "Saved document",
 		ProviderID: writing.ProviderID,
 		ModelID:    writing.ModelID,
@@ -173,5 +173,36 @@ VALUES ('history-stale', 'note-1', 3);
 	}
 	if len(histories) != 1 || histories[0].Status != AIRecordStatusStale {
 		t.Fatalf("listed stale histories = %#v", histories)
+	}
+}
+
+func TestServiceRejectsChangedOrTrashedContextBeforeProviderRequest(t *testing.T) {
+	adapter := &testV3TextAdapter{testProviderAdapter: &testProviderAdapter{}, text: "generated"}
+	service, _ := newV3Service(t, adapter)
+
+	if _, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Question:   "Question",
+		NoteIDs:    []string{"note-1"},
+		ExpectedSources: []AIHistorySource{
+			{NoteID: "note-1", InputRevision: 3},
+		},
+	}); !errors.Is(err, ErrContextChanged) {
+		t.Fatalf("changed context error = %v, want ErrContextChanged", err)
+	}
+
+	service.SetNoteContextProvider(testContextProvider{notes: map[string]ContextNote{
+		"note-1": {NoteID: "note-1", Title: "Trashed", Content: "private body", Revision: 4, IsTrashed: true},
+	}})
+	if _, err := service.RunWriting(t.Context(), WritingInput{
+		ProviderID:  ProviderOpenRouter,
+		ModelID:     "openai/test",
+		Kind:        WritingKindDocument,
+		Instruction: "Create a document",
+		NoteIDs:     []string{"note-1"},
+	}); !errors.Is(err, ErrInputInvalid) {
+		t.Fatalf("trashed context error = %v, want ErrInputInvalid", err)
 	}
 }

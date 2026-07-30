@@ -4,7 +4,7 @@
       <strong>履歴・成果物</strong>
     </div>
     <p class="ai-records-description">
-      明示的に保存した会話と成果物だけを表示します。要約とAI司書の一時結果は保存されません。
+      保存した会話・成果物と、生成成功時に自動保存する要約を表示します。AI司書の一時結果は保存されません。
     </p>
 
     <p v-if="assistantStore.error" class="ai-records-error" role="alert">
@@ -13,6 +13,32 @@
     <p v-if="writingStore.error" class="ai-records-error" role="alert">
       {{ writingStore.error.message }}
     </p>
+    <p v-if="aiStore.summaryHistoryError" class="ai-records-error" role="alert">
+      {{ aiStore.summaryHistoryError.message }}
+    </p>
+
+    <section v-if="aiStore.summaryHistory.length > 0" class="ai-records-section" aria-label="保存済み要約">
+      <div class="ai-records-section-heading">
+        <strong>要約履歴</strong>
+      </div>
+      <ul>
+        <li v-for="summary in aiStore.summaryHistory" :key="summary.id">
+          <button class="ai-records-item-button" type="button" @click="emit('open-summary', summary.id)">
+            {{ summary.title || '無題の要約' }}
+          </button>
+          <span :class="`is-${summary.status}`">{{ statusLabel(summary.status) }}</span>
+          <button
+            class="ai-records-icon-button is-danger"
+            type="button"
+            title="要約履歴を削除"
+            aria-label="要約履歴を削除"
+            @click="removeSummary(summary.id)"
+          >
+            <Trash2Icon :size="15" aria-hidden="true" />
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <section v-if="assistantStore.histories.length > 0" class="ai-records-section" aria-label="保存済み履歴">
       <div class="ai-records-section-heading">
@@ -78,7 +104,7 @@
       </ul>
     </section>
 
-    <p v-if="assistantStore.histories.length === 0 && writingStore.artifacts.length === 0" class="ai-records-empty">
+    <p v-if="assistantStore.histories.length === 0 && writingStore.artifacts.length === 0 && aiStore.summaryHistory.length === 0" class="ai-records-empty">
       保存済みの履歴・成果物はありません。
     </p>
   </section>
@@ -88,21 +114,31 @@
 import { onMounted } from 'vue'
 import { Trash2Icon } from '@lucide/vue'
 import type { AIRecordStatus } from '../api/ai'
+import { useAIStore } from '../stores/useAIStore'
 import { useAIAssistantStore } from '../stores/useAIAssistantStore'
 import { useAIWritingStore } from '../stores/useAIWritingStore'
 
 const emit = defineEmits<{
   (event: 'open-history', id: string): void
   (event: 'open-artifact', id: string): void
+  (event: 'open-summary', id: string): void
 }>()
 
+const aiStore = useAIStore()
 const assistantStore = useAIAssistantStore()
 const writingStore = useAIWritingStore()
 
 onMounted(() => {
   void assistantStore.refreshHistories()
   void writingStore.refreshArtifacts()
+  void aiStore.refreshSummaryHistory()
 })
+
+async function removeSummary(id: string) {
+  const summary = aiStore.summaryHistory.find((item) => item.id === id)
+  if (!summary || !window.confirm(`要約「${summary.title || '無題の要約'}」を削除しますか？`)) return
+  await aiStore.removeSummaryHistory(id)
+}
 
 async function removeHistory(id: string) {
   const history = assistantStore.histories.find((item) => item.id === id)

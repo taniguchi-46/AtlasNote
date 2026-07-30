@@ -530,6 +530,16 @@ func (a *App) DeleteAllAIArtifacts() aiservice.AIDeleteResponse {
 	return aiservice.AIDeleteResponse{Deleted: true}
 }
 
+func (a *App) DeleteAllAIWritingArtifacts() aiservice.AIDeleteResponse {
+	if a.aiService == nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	if err := a.aiService.DeleteAllWritingArtifacts(a.ctx); err != nil {
+		return aiservice.AIDeleteResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIDeleteResponse{Deleted: true}
+}
+
 func (a *App) StartAILibrarian(input aiservice.LibrarianInput) aiservice.LibrarianStartResponse {
 	if a.aiService == nil {
 		return aiservice.LibrarianStartResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}

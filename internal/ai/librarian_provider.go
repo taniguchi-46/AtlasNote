@@ -45,9 +45,10 @@ func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, a
 		Stream    bool `json:"stream"`
 		MaxTokens int  `json:"max_tokens"`
 		Provider  struct {
-			ZDR            bool   `json:"zdr"`
-			DataCollection string `json:"data_collection"`
-			AllowFallbacks bool   `json:"allow_fallbacks"`
+			ZDR               bool   `json:"zdr"`
+			DataCollection    string `json:"data_collection"`
+			AllowFallbacks    bool   `json:"allow_fallbacks"`
+			RequireParameters bool   `json:"require_parameters"`
 		} `json:"provider"`
 		ResponseFormat struct {
 			Type       string `json:"type"`
@@ -70,6 +71,9 @@ func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, a
 	payload.Provider.ZDR = true
 	payload.Provider.DataCollection = "deny"
 	payload.Provider.AllowFallbacks = false
+	// Avoid silently routing the structured request to a fallback that does not
+	// support the strict schema contract required by the librarian.
+	payload.Provider.RequireParameters = true
 	payload.ResponseFormat.Type = "json_schema"
 	payload.ResponseFormat.JSONSchema.Name = "atlas_note_librarian"
 	payload.ResponseFormat.JSONSchema.Strict = true

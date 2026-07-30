@@ -73,6 +73,9 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 	if kind == AssistantKindQA && len(contextNotes) == 0 {
 		return AssistantResult{}, ErrInputInvalid
 	}
+	if err := validateExpectedSources(input.ExpectedSources, contextNotes); err != nil {
+		return AssistantResult{}, err
+	}
 
 	if !s.tryStartGeneration() {
 		return AssistantResult{}, ErrBusy
@@ -147,6 +150,9 @@ func (s *Service) RunWriting(ctx context.Context, input WritingInput) (WritingRe
 	}
 	if len(contextNotes) == 0 && kind != WritingKindPrompt && kind != WritingKindPromptImprovement {
 		return WritingResult{}, ErrInputInvalid
+	}
+	if err := validateExpectedSources(input.ExpectedSources, contextNotes); err != nil {
+		return WritingResult{}, err
 	}
 
 	if !s.tryStartGeneration() {
@@ -259,6 +265,17 @@ func (s *Service) DeleteAllArtifacts(ctx context.Context) error {
 	return s.repository.deleteAllArtifacts(ctx)
 }
 
+func (s *Service) DeleteAllWritingArtifacts(ctx context.Context) error {
+	return s.repository.deleteArtifactsByKinds(ctx, []ArtifactKind{
+		ArtifactKindPrompt,
+		ArtifactKindPromptImprovement,
+		ArtifactKindREADME,
+		ArtifactKindDocument,
+		ArtifactKindBlog,
+		ArtifactKindRequirements,
+	})
+}
+
 func (s *Service) collectContext(ctx context.Context, input AIContextInput) ([]ContextNote, error) {
 	provider := s.getContextProvider()
 	if provider == nil {
@@ -275,7 +292,7 @@ func (s *Service) collectContext(ctx context.Context, input AIContextInput) ([]C
 	items := make([]ContextNote, 0, aiMaxContextSources)
 	seen := make(map[string]struct{})
 	add := func(item ContextNote) bool {
-		if len(items) >= aiMaxContextSources || item.NoteID == "" {
+		if len(items) >= aiMaxContextSources || item.NoteID == "" || item.IsTrashed {
 			return false
 		}
 		if _, ok := seen[item.NoteID]; ok {
@@ -300,6 +317,9 @@ func (s *Service) collectContext(ctx context.Context, input AIContextInput) ([]C
 	for _, noteID := range normalized.NoteIDs {
 		item, err := provider.Get(ctx, noteID)
 		if err != nil {
+			return nil, ErrInputInvalid
+		}
+		if item.IsTrashed {
 			return nil, ErrInputInvalid
 		}
 		if !add(item) {
@@ -395,6 +415,21 @@ func normalizeWritingKind(kind WritingKind) (WritingKind, error) {
 	}
 }
 
+func normalizeArtifactKind(kind ArtifactKind) (ArtifactKind, error) {
+	switch kind {
+	case ArtifactKindSummary,
+		ArtifactKindPrompt,
+		ArtifactKindPromptImprovement,
+		ArtifactKindREADME,
+		ArtifactKindDocument,
+		ArtifactKindBlog,
+		ArtifactKindRequirements:
+		return kind, nil
+	default:
+		return "", ErrInputInvalid
+	}
+}
+
 func normalizeSources(sources []AIHistorySource) ([]AIHistorySource, error) {
 	if len(sources) > aiMaxContextSources {
 		return nil, ErrInputTooLarge
@@ -414,6 +449,39 @@ func normalizeSources(sources []AIHistorySource) ([]AIHistorySource, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].NoteID < result[j].NoteID })
 	return result, nil
+}
+
+// validateExpectedSources ensures that the snapshots shown in the UI are the
+// same snapshots sent to the provider. Empty expected sources preserve the
+// existing optional-context behavior for callers that did not preview first.
+func validateExpectedSources(expected []AIHistorySource, actual []ContextNote) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	normalizedExpected, err := normalizeSources(expected)
+	if err != nil {
+		return err
+	}
+	actualSources := make([]AIHistorySource, 0, len(actual))
+	for _, item := range actual {
+		actualSources = append(actualSources, AIHistorySource{
+			NoteID:        item.NoteID,
+			InputRevision: item.Revision,
+		})
+	}
+	normalizedActual, err := normalizeSources(actualSources)
+	if err != nil {
+		return err
+	}
+	if len(normalizedExpected) != len(normalizedActual) {
+		return ErrContextChanged
+	}
+	for index := range normalizedExpected {
+		if normalizedExpected[index] != normalizedActual[index] {
+			return ErrContextChanged
+		}
+	}
+	return nil
 }
 
 func normalizeSaveHistoryInput(input SaveAIHistoryInput) (SaveAIHistoryInput, error) {
@@ -458,7 +526,7 @@ func normalizeSaveHistoryInput(input SaveAIHistoryInput) (SaveAIHistoryInput, er
 }
 
 func normalizeSaveArtifactInput(input SaveAIArtifactInput) (SaveAIArtifactInput, error) {
-	kind, err := normalizeWritingKind(input.Kind)
+	kind, err := normalizeArtifactKind(input.Kind)
 	if err != nil {
 		return SaveAIArtifactInput{}, err
 	}

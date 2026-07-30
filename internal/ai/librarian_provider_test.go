@@ -31,7 +31,7 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 					t.Fatalf("OpenRouter librarian payload = %#v", payload)
 				}
 				provider, ok := payload["provider"].(map[string]any)
-				if !ok || provider["zdr"] != true || provider["data_collection"] != "deny" || provider["allow_fallbacks"] != false {
+				if !ok || provider["zdr"] != true || provider["data_collection"] != "deny" || provider["allow_fallbacks"] != false || provider["require_parameters"] != true {
 					t.Fatalf("OpenRouter privacy settings = %#v", provider)
 				}
 				format, ok := payload["response_format"].(map[string]any)

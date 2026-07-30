@@ -11,7 +11,7 @@
     </div>
 
     <p class="ai-summary-privacy">
-      現在のノート本文だけを送信します。生成結果は保存・同期されません。
+      現在のノート本文だけを送信します。成功した要約はこの端末の履歴へ保存され、WebDAV同期はされません。
     </p>
 
     <div v-if="aiStore.summaryState === 'idle'" class="ai-summary-actions">
@@ -55,10 +55,16 @@
       </div>
     </template>
     <template v-else-if="visibleAISummary">
+      <p v-if="!isSummaryForActiveNote" class="ai-summary-warning" role="status">
+        保存済みの要約を表示しています。参照元: {{ visibleAISummary.title || '無題のノート' }}
+      </p>
       <p v-if="isAISummaryStale" class="ai-summary-warning" role="status">
         ノートが更新されたため、この要約は現在の本文より古い可能性があります。コピーはできます。
       </p>
-      <pre class="ai-summary-result">{{ visibleAISummary.text }}</pre>
+      <AIMarkdownPreview class="ai-summary-result" :markdown="visibleAISummary.text" aria-label="AI要約のMarkdownプレビュー" />
+      <p v-if="aiStore.summaryHistoryError" class="ai-summary-warning" role="status">
+        {{ aiStore.summaryHistoryError.message }}
+      </p>
       <div class="ai-summary-actions">
         <button
           class="ai-summary-action"
@@ -68,6 +74,16 @@
           @click="handleCopyAISummary"
         >
           <CopyIcon :size="15" aria-hidden="true" />
+        </button>
+        <button
+          v-if="aiStore.summaryHistoryError"
+          class="ai-summary-action"
+          type="button"
+          title="要約履歴を再保存"
+          aria-label="要約履歴を再保存"
+          @click="aiStore.retrySaveSummaryHistory"
+        >
+          <RotateCcwIcon :size="15" aria-hidden="true" />
         </button>
         <button
           class="ai-summary-action"
@@ -90,6 +106,7 @@ import { useAIStore } from '../stores/useAIStore'
 import { useNoteStore, type NoteDraft } from '../stores/useNoteStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import AIMarkdownPreview from './AIMarkdownPreview.vue'
 import { createTableClipboardPayload, writeTableClipboard } from '../utils/tableClipboard'
 import { logOperationFailure } from '../utils/operationLogger'
 
@@ -100,14 +117,17 @@ const settingsStore = useSettingsStore()
 let activeNoteID: string | null = null
 
 const visibleAISummary = computed(() => {
-  const note = noteStore.activeNote
   const result = aiStore.summary
-  if (!note || !result || result.noteID !== note.id) return null
-  return result
+  return result ?? null
 })
 
-const isAISummaryStale = computed(() => (
+const isSummaryForActiveNote = computed(() => (
   Boolean(visibleAISummary.value && noteStore.activeNote)
+  && visibleAISummary.value!.noteID === noteStore.activeNote!.id
+))
+
+const isAISummaryStale = computed(() => (
+  isSummaryForActiveNote.value
   && visibleAISummary.value!.baseRevision !== noteStore.activeNote!.revision
 ))
 
@@ -170,6 +190,7 @@ async function handleAISummary() {
 
   if (!aiStore.beginSummary({
     noteID,
+    title: currentNote.title,
     content: currentNote.content,
     baseRevision: currentNote.revision,
   })) {
@@ -180,7 +201,7 @@ async function handleAISummary() {
   const snapshot = aiStore.pendingSummary
   if (!snapshot) return
   const confirmed = window.confirm(
-    `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n指示: 次のメモを、事実を補わずに簡潔に要約してください。\n\n生成結果はノートに保存・同期されません。`,
+    `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n出力: Markdown形式の概要・要点・必要に応じた決定事項等\n\n成功した要約はこの端末の履歴へ保存されます。ノート本文とWebDAV同期は変更されません。`,
   )
   if (!confirmed) {
     aiStore.cancelSummaryConfirmation()
@@ -287,14 +308,10 @@ defineExpose({ startSummary: handleAISummary })
 .ai-summary-result {
   margin: 0;
   padding: 10px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-input);
   color: var(--text-primary);
-  font: inherit;
-  line-height: 1.6;
 }
 
 .ai-summary-actions {
