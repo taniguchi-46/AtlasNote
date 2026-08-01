@@ -217,20 +217,27 @@ export const useAIStore = defineStore('ai', () => {
     return canUseStoredCredential.value ? 'stored' : null
   })
 
+  const isCurrentCredentialVerified = computed(() => (
+    verifiedProviderID === draft.value.providerID
+    && verifiedCredentialSource === currentCredentialSource.value
+    && (verifiedCredentialSource !== 'draft' || verifiedAPIKey === draft.value.apiKey)
+    && connectionState.value === 'success'
+  ))
+
   const canCheckConnection = computed(() => (
     !isSettingsBusy.value && currentCredentialSource.value !== null
   ))
 
   const canRefreshModels = computed(() => (
     !isSettingsBusy.value
-    && verifiedProviderID === draft.value.providerID
-    && verifiedCredentialSource === currentCredentialSource.value
-    && (verifiedCredentialSource !== 'draft' || verifiedAPIKey === draft.value.apiKey)
-    && connectionState.value === 'success'
+    && currentCredentialSource.value !== null
+    && (currentCredentialSource.value === 'stored' || isCurrentCredentialVerified.value)
   ))
 
   const canApply = computed(() => (
-    canRefreshModels.value
+    !isSettingsBusy.value
+    && listedProviderID === draft.value.providerID
+    && (currentCredentialSource.value === 'stored' || isCurrentCredentialVerified.value)
     && draft.value.modelID.trim() !== ''
     && selectedModelAvailable.value
   ))

@@ -183,6 +183,7 @@ try {
   ])
   assert.match(panelSource, /type="password"/, 'the API Key field must remain a password input')
   assert.match(panelSource, /保存済みのキーを利用/, 'the settings panel must support explicitly reusing a saved key')
+  assert.match(panelSource, /認証を確認せず/, 'saved credentials must allow model switching without a separate connection check')
   assert.match(panelSource, /生成を確認/, 'the settings panel must expose an explicit generation check')
   assert.match(panelSource, /window\.confirm/, 'credential deletion must require confirmation')
   assert.match(panelSource, /<details/, 'model metadata must be collapsible')
@@ -328,10 +329,14 @@ try {
   store.discardSummary()
   assert.equal(store.summary, null)
 
-  assert.equal(await store.checkConnection(), true, 'a saved credential must be reusable after the draft field is cleared')
-  assert.equal(mockAI.calls.test.at(-1).apiKey, '')
-  assert.equal(mockAI.calls.test.at(-1).useStoredCredential, true)
+  await store.initialize()
+  const connectionChecksBeforeModelOnlyUpdate = mockAI.calls.test.length
+  assert.equal(store.draft.apiKey, '', 'reopened settings must keep the API Key field empty')
+  assert.equal(store.canRefreshModels, true, 'a saved credential must allow model refresh without a separate connection check')
   assert.equal(await store.refreshModels(), true)
+  assert.equal(mockAI.calls.test.length, connectionChecksBeforeModelOnlyUpdate, 'model refresh must not force a separate connection check')
+  assert.equal(mockAI.calls.list.at(-1).apiKey, '')
+  assert.equal(mockAI.calls.list.at(-1).useStoredCredential, true)
   store.draft.modelID = 'unknown-limit-model'
   assert.equal(store.canApply, true)
   assert.equal(await store.applyConfiguration(), true, 'a saved credential must permit a model-only update')
