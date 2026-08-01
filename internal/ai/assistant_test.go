@@ -4,19 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 )
 
 type testV3TextAdapter struct {
 	*testProviderAdapter
-	text string
+	text         string
+	citations    []WebCitation
+	webSearches  int
+	lastInput    TextGenerationInput
+	lastProvider ProviderID
 }
 
-func (a *testV3TextAdapter) GenerateText(_ context.Context, _ ProviderID, _ string, input TextGenerationInput) (TextGenerationResult, error) {
+func (a *testV3TextAdapter) GenerateText(_ context.Context, providerID ProviderID, _ string, input TextGenerationInput) (TextGenerationResult, error) {
+	a.lastProvider = providerID
+	a.lastInput = input
 	if a.text == "" {
 		return TextGenerationResult{}, ErrInvalidResponse
 	}
-	return TextGenerationResult{Text: a.text + "|" + input.Messages[len(input.Messages)-1].Content}, nil
+	return TextGenerationResult{
+		Text:              a.text + "|" + input.Messages[len(input.Messages)-1].Content,
+		Citations:         a.citations,
+		WebSearchRequests: a.webSearches,
+	}, nil
 }
 
 type testContextProvider struct {
@@ -173,6 +184,98 @@ VALUES ('history-stale', 'note-1', 3);
 	}
 	if len(histories) != 1 || histories[0].Status != AIRecordStatusStale {
 		t.Fatalf("listed stale histories = %#v", histories)
+	}
+}
+
+func TestServiceRoutesAgentModeAndOpenRouterWebSearchWithoutPersistingTrace(t *testing.T) {
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{},
+		text:                "grounded",
+		citations:           []WebCitation{{URL: "https://example.com/source", Title: "Example"}},
+		webSearches:         1,
+	}
+	service, db := newV3Service(t, adapter)
+
+	result, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Mode:       ChatModeAgent,
+		Question:   "Find current supporting information",
+		NoteIDs:    []string{"note-1"},
+		WebSearch:  true,
+	})
+	if err != nil {
+		t.Fatalf("run agent web search: %v", err)
+	}
+	if result.Mode != ChatModeAgent ||
+		result.WebSearchRequests != 1 ||
+		!adapter.lastInput.WebSearch ||
+		adapter.lastProvider != ProviderOpenRouter {
+		t.Fatalf("agent routing result=%#v input=%#v provider=%q", result, adapter.lastInput, adapter.lastProvider)
+	}
+	if !strings.Contains(adapter.lastInput.SystemInstruction, "Agentモード規則") {
+		t.Fatalf("agent prompt missing mode contract: %q", adapter.lastInput.SystemInstruction)
+	}
+	if len(result.Citations) != 1 || result.Citations[0].URL != "https://example.com/source" {
+		t.Fatalf("agent citations = %#v", result.Citations)
+	}
+	assertAIExecutionHasNoPersistentSideEffects(t, db)
+}
+
+func TestServiceRejectsWebSearchWhenAdapterDoesNotReportExactlyOneSearch(t *testing.T) {
+	for _, searchCount := range []int{0, 2} {
+		t.Run(string(rune('0'+searchCount)), func(t *testing.T) {
+			adapter := &testV3TextAdapter{
+				testProviderAdapter: &testProviderAdapter{},
+				text:                "ungrounded",
+				webSearches:         searchCount,
+			}
+			service, _ := newV3Service(t, adapter)
+
+			_, err := service.RunAssistant(t.Context(), AssistantInput{
+				ProviderID: ProviderOpenRouter,
+				ModelID:    "openai/test",
+				Kind:       AssistantKindQA,
+				Mode:       ChatModeAsk,
+				Question:   "Find current information",
+				NoteIDs:    []string{"note-1"},
+				WebSearch:  true,
+			})
+			if !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("search count %d error = %v, want ErrInvalidResponse", searchCount, err)
+			}
+		})
+	}
+}
+
+func TestServiceRejectsUnknownModeAndGeminiWebSearchBeforeProviderRequest(t *testing.T) {
+	adapter := &testV3TextAdapter{testProviderAdapter: &testProviderAdapter{}, text: "generated"}
+	service, _ := newV3Service(t, adapter)
+
+	if _, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Mode:       ChatMode("automatic"),
+		Question:   "Question",
+		NoteIDs:    []string{"note-1"},
+	}); !errors.Is(err, ErrInputInvalid) {
+		t.Fatalf("unknown mode error = %v, want ErrInputInvalid", err)
+	}
+	if _, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderGemini,
+		ModelID:    "gemini-2.5-flash",
+		Kind:       AssistantKindQA,
+		Mode:       ChatModeAsk,
+		Question:   "Question",
+		NoteIDs:    []string{"note-1"},
+		WebSearch:  true,
+	}); !errors.Is(err, ErrModelCapabilityUnavailable) {
+		t.Fatalf("Gemini web search error = %v, want ErrModelCapabilityUnavailable", err)
+	}
+	if adapter.lastInput.WebSearch {
+		t.Fatal("provider was called for rejected Gemini web search")
 	}
 }
 

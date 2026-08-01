@@ -5,13 +5,13 @@
     aria-label="AI司書"
     aria-live="polite"
   >
-    <div class="ai-librarian-heading">
+    <div v-if="!props.timeline" class="ai-librarian-heading">
       <strong>AI司書</strong>
       <span v-if="librarianStore.isGenerating">生成中…</span>
       <span v-else-if="librarianStore.state === 'canceled'">キャンセル済み</span>
     </div>
 
-    <div class="ai-librarian-actions" role="group" aria-label="AI司書の操作">
+    <div v-if="!props.timeline" class="ai-librarian-actions" role="group" aria-label="AI司書の操作">
       <button
         v-for="item in operations"
         :key="item.value"
@@ -147,6 +147,9 @@ import { useSettingsStore } from '../stores/useSettingsStore'
 import { useTagStore } from '../stores/useTagStore'
 import type { LibrarianCandidate, LibrarianCandidateContext, LibrarianOperation } from '../api/ai'
 
+const props = withDefaults(defineProps<{ timeline?: boolean }>(), {
+  timeline: false,
+})
 const noteStore = useNoteStore()
 const tagStore = useTagStore()
 const notebookStore = useNotebookStore()
@@ -241,31 +244,31 @@ async function buildCandidatePool(note: note.Note) {
 
 async function startOperation(requestedOperation: LibrarianOperation) {
   const selectedNote = noteStore.activeNote
-  if (!selectedNote) return
+  if (!selectedNote) return false
   if (!aiStore.configuredSetting) {
     settingsStore.openSettings('ai')
     librarianStore.setApplyError('AI_CONFIGURATION_UNAVAILABLE')
-    return
+    return false
   }
   if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
     librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
-    return
+    return false
   }
 
   const noteID = selectedNote.id
   try {
     if (!await noteStore.flushPendingDraft()) {
       librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
-      return
+      return false
     }
   } catch {
     librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
-    return
+    return false
   }
   const currentNote = noteStore.activeNote
   if (!currentNote || currentNote.id !== noteID || noteStore.activeDraft) {
     librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
-    return
+    return false
   }
 
   if (!tagStore.activeNoteTagsReady || tagStore.activeNoteId !== noteID) {
@@ -282,18 +285,18 @@ async function startOperation(requestedOperation: LibrarianOperation) {
       candidatePool.value = []
       lastOperation.value = requestedOperation
       librarianStore.setEmpty(currentNote.id, currentNote.revision, requestedOperation)
-      return
+      return true
     }
   }
 
   const label = operations.find((item) => item.value === requestedOperation)?.label ?? '候補'
   if (!window.confirm(`現在のノート「${currentNote.title || '無題'}」をAIへ送信して${label}を生成します。\n\n生成結果は保存されず、採用した候補だけが既存の保存処理へ渡されます。`)) {
-    return
+    return false
   }
 
   candidatePool.value = pool
   lastOperation.value = requestedOperation
-  await librarianStore.start({
+  return librarianStore.start({
     operation: requestedOperation,
     noteID: currentNote.id,
     baseRevision: currentNote.revision,

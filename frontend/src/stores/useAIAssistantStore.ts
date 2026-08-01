@@ -9,9 +9,11 @@ import {
   runAIAssistant,
   saveAIHistory,
   type AIContextSource,
+  type AIChatMode,
   type AIConversationMessage,
   type AIHistory,
   type AIHistorySource,
+  type AIWebCitation,
   type AssistantInput,
   type AssistantKind,
 } from '../api/ai'
@@ -29,10 +31,12 @@ export type AssistantRequest = {
   providerID: AssistantInput['providerID']
   modelID: string
   kind: AssistantKind
+  mode?: AIChatMode
   question: string
   noteIDs: string[]
   searchQuery: string
   includeBacklinks: boolean
+  webSearch?: boolean
   messages: AIConversationMessage[]
   expectedSources?: AIHistorySource[]
 }
@@ -85,13 +89,29 @@ function sourceRefs(sources: AIContextSource[]) {
   return sources.map((source) => ({ noteID: source.noteID, inputRevision: source.revision }))
 }
 
-function sourceKey(input: Pick<AssistantRequest, 'kind' | 'question' | 'noteIDs' | 'searchQuery' | 'includeBacklinks'>) {
+function mergeConversationSources(
+  existing: AIContextSource[],
+  incoming: AIContextSource[],
+) {
+  const result = [...existing]
+  const seen = new Set(existing.map((source) => source.noteID))
+  for (const source of incoming) {
+    if (seen.has(source.noteID)) continue
+    seen.add(source.noteID)
+    result.push(source)
+  }
+  return result
+}
+
+function sourceKey(input: Pick<AssistantRequest, 'kind' | 'mode' | 'question' | 'noteIDs' | 'searchQuery' | 'includeBacklinks' | 'webSearch'>) {
   return JSON.stringify({
     kind: input.kind,
+    mode: input.mode ?? 'ask',
     question: input.question,
     noteIDs: input.noteIDs,
     searchQuery: input.searchQuery,
     includeBacklinks: input.includeBacklinks,
+    webSearch: input.webSearch ?? false,
   })
 }
 
@@ -100,6 +120,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const state = ref<AssistantState>('idle')
   const error = ref<AssistantError | null>(null)
   const messages = ref<AIConversationMessage[]>([])
+  const citations = ref<AIWebCitation[]>([])
+  const webSearchRequests = ref(0)
   const sources = ref<AIContextSource[]>([])
   const contextSources = ref<AIContextSource[]>([])
   const histories = ref<AIHistory[]>([])
@@ -195,11 +217,13 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         providerID: request.providerID,
         modelID: request.modelID,
         kind: request.kind,
+        mode: request.mode ?? 'ask',
         question: request.question,
         messages: request.messages,
         noteIDs: request.noteIDs,
         searchQuery: request.searchQuery,
         includeBacklinks: request.includeBacklinks,
+        webSearch: request.webSearch ?? false,
         expectedSources: sourceRefs(contextSources.value),
       })
       if (requestID !== latestGenerationRequest) return false
@@ -209,8 +233,10 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         return false
       }
       messages.value = response.result.messages
+      citations.value = response.result.citations ?? []
+      webSearchRequests.value = Math.max(0, response.result.webSearchRequests ?? 0)
       completedMessages = [...response.result.messages]
-      sources.value = response.result.sources
+      sources.value = mergeConversationSources(sources.value, response.result.sources)
       contextSources.value = response.result.sources
       selectedHistoryID.value = null
       activeRequest.value = request
@@ -258,6 +284,12 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   async function loadHistory(id: string) {
+    if (isBusy.value) {
+      error.value = createError('AI_BUSY')
+      return false
+    }
+    latestContextRequest += 1
+    latestGenerationRequest += 1
     clearError()
     try {
       const response = await getAIHistory(id)
@@ -268,6 +300,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }
       const history = response.history
       messages.value = history.messages ?? []
+      citations.value = []
+      webSearchRequests.value = 0
       completedMessages = [...messages.value]
       sources.value = history.sources.map((source) => ({
         noteID: source.noteID,
@@ -281,10 +315,12 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         providerID: history.providerID,
         modelID: history.modelID,
         kind: history.kind,
+        mode: 'ask',
         question: [...(history.messages ?? [])].reverse().find((message) => message.role === 'user')?.content ?? '',
         noteIDs: history.sources.map((source) => source.noteID),
         searchQuery: '',
         includeBacklinks: false,
+        webSearch: false,
         messages: [...messages.value],
         expectedSources: history.sources,
       }
@@ -339,6 +375,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     state.value = 'idle'
     error.value = null
     messages.value = []
+    citations.value = []
+    webSearchRequests.value = 0
     sources.value = []
     contextSources.value = []
     activeRequest.value = null
@@ -362,6 +400,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     state,
     error,
     messages,
+    citations,
+    webSearchRequests,
     sources,
     contextSources,
     histories,

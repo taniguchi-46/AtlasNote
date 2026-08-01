@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-07-30
+最終更新: 2026-08-01
 
 ## 現在のフェーズ
 
@@ -72,7 +72,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
 - 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
 - Phase 4 v3のAIアシスタント／AIライティング基本経路、schema version 12のローカル履歴・成果物とversion 13の要約履歴、明示保存・個別／一括削除、stale／orphaned評価、WebDAV非同期境界テスト（手動受け入れ、Wails API通し検証、追加異常系は未完了）
-- Phase 4のAIワークスペース（下部共通コンポーザーの選択中機能名を表示するセレクターから要約／AI司書／質問・壁打ち／ライティングを選択、モデル表示ボタンからAI設定を開く、ヘッダーの履歴アイコン）、右側／下側配置・ドラッグ寸法設定、狭幅時の実効寸法調整とAI入力の1列化、ツールバーの位置対応開閉アイコン、既存AI状態を保持する機能切替・履歴表示、Node scriptの`test:ai-workspace`（手動受け入れは未完了）
+- Phase 4のAIワークスペースを単一チャットtimelineへ刷新。開いているノートの固定context chip、追加ノート／Notebook検索scope、要約・文章作成6種・タイトル・タグ・分類・関連・重複・Web検索の`＋`メニュー、Ask／Agent切替、入力欄右下の送信ボタン、候補の明示採用、構造化tool traceとtrace直後の候補カードを実装した。Notebook scopeは直下ノートIDへ最大10件で解決し、本文・revisionは既存バックエンドでsnapshot化する。右側／下側配置・ドラッグ寸法、狭幅対応、履歴・成果物の既存保存境界を維持し、`test:ai-chat`と刷新した`test:ai-workspace`を追加した（手動受け入れは未完了）
 
 ## Phase 2の完了範囲
 
@@ -147,6 +147,8 @@ npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger
 npm --prefix frontend run test:note-links
+npm --prefix frontend run test:ai-chat
+npm --prefix frontend run test:ai-workspace
 go test ./...
 wails build
 ```
@@ -164,6 +166,7 @@ wails build
 | `docs/development/scopes/scope-phese4.md` | Phase 4 v1の実装前詳細スコープ |
 | `docs/development/scopes/scope-phese4-v2.md` | Phase 4 v2のAI司書・実行体験スコープ |
 | `docs/development/scopes/scope-phese4-v3.md` | Phase 4 v3のAIアシスタント・ライティング・履歴スコープ |
+| `docs/development/ai-chat.md` | 単一AIチャット、context、Ask／Agent、ツール実行・保存境界 |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |

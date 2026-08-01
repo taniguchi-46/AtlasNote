@@ -98,6 +98,9 @@ jobs:
       - name: Run AI workspace tests
         run: npm --prefix frontend run test:ai-workspace
 
+      - name: Run AI chat tests
+        run: npm --prefix frontend run test:ai-chat
+
       - name: Run tag store tests
         run: npm --prefix frontend run test:tags
 

@@ -134,6 +134,18 @@ const (
 	AssistantKindBrainstorm AssistantKind = "brainstorm"
 )
 
+type ChatMode string
+
+const (
+	ChatModeAsk   ChatMode = "ask"
+	ChatModeAgent ChatMode = "agent"
+)
+
+type WebCitation struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
+}
+
 type AIRecordStatus string
 
 const (
@@ -170,20 +182,25 @@ type AssistantInput struct {
 	ProviderID       ProviderID              `json:"providerID"`
 	ModelID          string                  `json:"modelID"`
 	Kind             AssistantKind           `json:"kind"`
+	Mode             ChatMode                `json:"mode,omitempty"`
 	Question         string                  `json:"question"`
 	Messages         []AIConversationMessage `json:"messages,omitempty"`
 	NoteIDs          []string                `json:"noteIDs,omitempty"`
 	SearchQuery      string                  `json:"searchQuery,omitempty"`
 	IncludeBacklinks bool                    `json:"includeBacklinks,omitempty"`
+	WebSearch        bool                    `json:"webSearch,omitempty"`
 	ExpectedSources  []AIHistorySource       `json:"expectedSources,omitempty"`
 }
 
 type AssistantResult struct {
-	ProviderID ProviderID              `json:"providerID"`
-	ModelID    string                  `json:"modelID"`
-	Kind       AssistantKind           `json:"kind"`
-	Messages   []AIConversationMessage `json:"messages"`
-	Sources    []AIContextSource       `json:"sources"`
+	ProviderID        ProviderID              `json:"providerID"`
+	ModelID           string                  `json:"modelID"`
+	Kind              AssistantKind           `json:"kind"`
+	Mode              ChatMode                `json:"mode"`
+	Messages          []AIConversationMessage `json:"messages"`
+	Sources           []AIContextSource       `json:"sources"`
+	Citations         []WebCitation           `json:"citations,omitempty"`
+	WebSearchRequests int                     `json:"webSearchRequests,omitempty"`
 }
 
 type AssistantResponse struct {
@@ -494,10 +511,13 @@ type TextGenerationInput struct {
 	SystemInstruction string
 	Messages          []TextMessage
 	MaxOutputTokens   int
+	WebSearch         bool
 }
 
 type TextGenerationResult struct {
-	Text string
+	Text              string
+	Citations         []WebCitation
+	WebSearchRequests int
 }
 
 type TextGenerationProviderAdapter interface {

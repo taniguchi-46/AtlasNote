@@ -17,6 +17,7 @@ type testLibrarianAdapter struct {
 	librarianErr          error
 	librarianChunks       []string
 	librarianStarted      chan<- struct{}
+	librarianContinue     <-chan struct{}
 	librarianWaitForClose bool
 
 	mu                  sync.Mutex
@@ -37,6 +38,9 @@ func (a *testLibrarianAdapter) GenerateLibrarian(ctx context.Context, _ Provider
 			return "", err
 		}
 	}
+	if a.librarianContinue != nil {
+		<-a.librarianContinue
+	}
 	if a.librarianWaitForClose {
 		<-ctx.Done()
 		return "", ctx.Err()
@@ -50,11 +54,19 @@ func (a *testLibrarianAdapter) GenerateLibrarian(ctx context.Context, _ Provider
 func TestServiceLibrarianStreamsStructuredResultAndSharesGenerationLock(t *testing.T) {
 	store := newMemoryCredentialStore()
 	started := make(chan struct{}, 1)
+	continueGeneration := make(chan struct{})
+	continued := false
+	defer func() {
+		if !continued {
+			close(continueGeneration)
+		}
+	}()
 	adapter := &testLibrarianAdapter{
 		testProviderAdapter: &testProviderAdapter{},
 		librarianResult:     `{"candidates":[{"noteId":"candidate-1","score":0.91,"reason":"same topic"}]}`,
 		librarianChunks:     []string{"{\"candidates\":"},
 		librarianStarted:    started,
+		librarianContinue:   continueGeneration,
 	}
 	service, db := newTestServiceWithAdapter(t, store, adapter)
 	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
@@ -85,6 +97,8 @@ func TestServiceLibrarianStreamsStructuredResultAndSharesGenerationLock(t *testi
 	}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("overlapping summary error = %v", err)
 	}
+	close(continueGeneration)
+	continued = true
 
 	partial := receiveLibrarianEvent(t, events)
 	if partial.Phase != librarianPartialPhase || partial.Sequence != 1 || partial.RequestID != response.RequestID {

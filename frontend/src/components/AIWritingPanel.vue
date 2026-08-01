@@ -6,13 +6,13 @@
     aria-live="polite"
     :aria-busy="writingStore.isBusy"
   >
-    <div class="ai-v3-heading">
+    <div v-if="!props.timeline" class="ai-v3-heading">
       <strong>AIライティング</strong>
       <span v-if="writingStore.state === 'loading-context'">参照を確認中…</span>
       <span v-else-if="writingStore.state === 'generating'">送信済み・文章を作成中…</span>
     </div>
 
-    <div class="ai-v3-grid">
+    <div v-if="!props.timeline" class="ai-v3-grid">
       <label>
         <span>出力種別</span>
         <select v-model="kind" :disabled="writingStore.isBusy">
@@ -33,12 +33,12 @@
       </label>
     </div>
 
-    <label class="ai-v3-checkbox">
+    <label v-if="!props.timeline" class="ai-v3-checkbox">
       <input v-model="includeBacklinks" type="checkbox" :disabled="writingStore.isBusy" />
       <span>現在のノートへのバックリンクも参照する</span>
     </label>
 
-    <form v-if="!props.externalComposer" class="ai-v3-form" @submit.prevent="confirmAndGenerate">
+    <form v-if="!props.externalComposer && !props.timeline" class="ai-v3-form" @submit.prevent="confirmAndGenerate">
       <label>
         <span>目的・指示</span>
         <textarea
@@ -84,7 +84,7 @@
         </button>
       </div>
     </form>
-    <div v-else class="ai-v3-actions">
+    <div v-else-if="!props.timeline" class="ai-v3-actions">
       <button
         class="ai-v3-icon-button"
         type="button"
@@ -108,9 +108,9 @@
       </button>
     </div>
 
-    <p class="ai-v3-privacy">生成結果は自動保存されません。必要なものだけ保存アイコンを押してください。保存データはこの端末のSQLiteだけに置かれ、WebDAV同期されません。</p>
+    <p v-if="!props.timeline" class="ai-v3-privacy">生成結果は自動保存されません。必要なものだけ保存アイコンを押してください。保存データはこの端末のSQLiteだけに置かれ、WebDAV同期されません。</p>
 
-    <div v-if="writingStore.contextSources.length > 0" class="ai-v3-context">
+    <div v-if="!props.timeline && writingStore.contextSources.length > 0" class="ai-v3-context">
       <strong>今回の参照資料（{{ writingStore.contextSources.length }}件）</strong>
       <ul>
         <li v-for="source in writingStore.contextSources" :key="sourceKey(source)">
@@ -204,8 +204,14 @@ import { useAIStore } from '../stores/useAIStore'
 import { useAIWritingStore } from '../stores/useAIWritingStore'
 import { useNoteStore } from '../stores/useNoteStore'
 
-const props = withDefaults(defineProps<{ externalComposer?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  externalComposer?: boolean
+  timeline?: boolean
+  additionalNoteIDs?: string[]
+}>(), {
   externalComposer: false,
+  timeline: false,
+  additionalNoteIDs: () => [],
 })
 const noteStore = useNoteStore()
 const aiStore = useAIStore()
@@ -264,8 +270,14 @@ const canApplyToCurrentNote = computed(() => {
 
 function contextInput() {
   const noteID = noteStore.activeNote?.id
+  const noteIDs = [
+    ...(noteID ? [noteID] : []),
+    ...props.additionalNoteIDs,
+  ]
+    .filter((id, index, all) => Boolean(id) && all.indexOf(id) === index)
+    .slice(0, 10)
   return {
-    noteIDs: noteID ? [noteID] : [],
+    noteIDs,
     searchQuery: searchQuery.value.trim(),
     includeBacklinks: includeBacklinks.value,
   }
@@ -313,22 +325,26 @@ async function confirmAndGenerate() {
   const sourceSummary = writingStore.contextSources.length > 0
     ? writingStore.contextSources.map((source) => `・${source.title || '無題のノート'} (revision ${source.revision})`).join('\n')
     : '・参照資料なし'
+  const localSearchSummary = searchQuery.value.trim()
+    ? `全ノートから「${searchQuery.value.trim()}」を検索`
+    : 'なし'
   if (!window.confirm(
-    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\n検索範囲: 全ノート（追加検索: ${searchQuery.value.trim() || 'なし'}）\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n生成結果は自動保存されません。`,
+    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nローカル追加検索: ${localSearchSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n生成結果は自動保存されません。`,
   )) return false
 
-  void writingStore.generate({
+  const generated = await writingStore.generate({
     providerID: setting.providerID,
     modelID: setting.modelID,
     kind: kind.value,
     instruction: instruction.value,
     ...contextInput(),
   })
-  instruction.value = ''
-  return true
+  if (generated) instruction.value = ''
+  return generated
 }
 
-async function submitPrompt(prompt: string) {
+async function submitPrompt(prompt: string, requestedKind?: WritingKind) {
+  if (requestedKind) kind.value = requestedKind
   instruction.value = prompt.trim()
   return confirmAndGenerate()
 }

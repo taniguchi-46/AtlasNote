@@ -53,6 +53,7 @@ export const calls = {
   saveArtifact: [],
   historyDeletes: [],
   artifactDeletes: [],
+  historyGets: [],
   historyDeleteAll: 0,
   artifactDeleteAll: 0,
 }
@@ -61,13 +62,17 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-const source = {
+let source = {
   noteID: 'note-1',
   title: '対象ノート',
   revision: 1,
   contentByte: 120,
 }
 let pendingAssistant
+
+export function setSource(nextSource) {
+  source = clone(nextSource)
+}
 
 export function deferAssistant() {
   let resolve
@@ -125,7 +130,8 @@ export async function listAIHistories() {
   return { items: [] }
 }
 
-export async function getAIHistory() {
+export async function getAIHistory(id) {
+  calls.historyGets.push(id)
   return { error: { code: 'AI_HISTORY_NOT_FOUND' } }
 }
 
@@ -244,6 +250,16 @@ try {
   assert.equal(mock.calls.assistant.length, 1, 'the deferred provider request must have started')
   assert.equal(assistant.state, 'generating', 'a user message must be acknowledged before the provider responds')
   assert.deepEqual(assistant.messages, [{ role: 'user', content: '遅延する質問' }])
+  assert.equal(
+    await assistant.loadHistory('history-while-generating'),
+    false,
+    'history loading must be rejected while a response is in flight',
+  )
+  assert.deepEqual(
+    mock.calls.historyGets,
+    [],
+    'busy history rejection must happen before reading and replacing conversation state',
+  )
   assistant.clearConversation()
   deferredAssistant.resolve()
   assert.equal(await lateAssistant, false, 'a response that arrives after clear must be discarded')
@@ -265,16 +281,53 @@ try {
     includeBacklinks: false,
   }), true)
   assert.equal(mock.calls.assistant.at(-1).expectedSources[0].inputRevision, 1)
+  mock.setSource({
+    noteID: 'note-2',
+    title: '追加ノート',
+    revision: 4,
+    contentByte: 80,
+  })
+  assert.equal(await assistant.previewContext({
+    kind: 'qa',
+    question: '追加ノートについて',
+    noteIDs: ['note-2'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '追加ノートについて',
+    noteIDs: ['note-2'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  assert.deepEqual(
+    assistant.sources.map((item) => [item.noteID, item.revision]),
+    [['note-1', 1], ['note-2', 4]],
+    'a multi-turn conversation must retain the source snapshot from every turn',
+  )
   assert.equal(mock.calls.saveHistory.length, 0, 'assistant responses must not be saved automatically')
   assert.equal(await assistant.save('質問履歴'), true)
   assert.equal(mock.calls.saveHistory.length, 1, 'assistant history must be saved only explicitly')
-  assert.equal(mock.calls.saveHistory[0].sources[0].inputRevision, 1)
+  assert.deepEqual(
+    mock.calls.saveHistory[0].sources,
+    [
+      { noteID: 'note-1', inputRevision: 1 },
+      { noteID: 'note-2', inputRevision: 4 },
+    ],
+  )
   assistant.markStaleForRevision('note-1', 2)
   assert.equal(assistant.state, 'stale', 'a newer source revision must stale the in-memory conversation')
   assert.equal(await assistant.save('古い履歴'), false, 'stale conversations must not be saved')
   assert.equal(await assistant.removeAllHistories(), true)
   assert.equal(mock.calls.historyDeleteAll, 1)
 
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 1,
+    contentByte: 120,
+  })
   const writing = useAIWritingStore()
   writing.clear()
   assert.equal(await writing.previewContext({

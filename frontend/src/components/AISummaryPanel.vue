@@ -5,16 +5,16 @@
     aria-label="AI要約"
     aria-live="polite"
   >
-    <div class="ai-summary-heading">
+    <div v-if="!props.timeline" class="ai-summary-heading">
       <strong>AI要約</strong>
       <span v-if="aiStore.summaryState === 'generating'">生成中…</span>
     </div>
 
-    <p class="ai-summary-privacy">
+    <p v-if="!props.timeline" class="ai-summary-privacy">
       現在のノート本文だけを送信します。成功した要約はこの端末の履歴へ保存され、WebDAV同期はされません。
     </p>
 
-    <div v-if="aiStore.summaryState === 'idle'" class="ai-summary-actions">
+    <div v-if="!props.timeline && aiStore.summaryState === 'idle'" class="ai-summary-actions">
       <button
         class="ai-summary-action ai-summary-generate"
         type="button"
@@ -110,6 +110,9 @@ import AIMarkdownPreview from './AIMarkdownPreview.vue'
 import { createTableClipboardPayload, writeTableClipboard } from '../utils/tableClipboard'
 import { logOperationFailure } from '../utils/operationLogger'
 
+const props = withDefaults(defineProps<{ timeline?: boolean }>(), {
+  timeline: false,
+})
 const aiStore = useAIStore()
 const noteStore = useNoteStore()
 const notificationStore = useNotificationStore()
@@ -153,20 +156,20 @@ onBeforeUnmount(() => {
 
 async function handleAISummary() {
   const selectedNote = noteStore.activeNote
-  if (!selectedNote) return
+  if (!selectedNote) return false
 
   if (!aiStore.isSummaryReady) {
     aiStore.setSummaryPreconditionError('AI_SUMMARY_NOT_READY', selectedNote.id)
     settingsStore.openSettings('ai')
-    return
+    return false
   }
   if (selectedNote.isTrashed) {
     aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', selectedNote.id)
-    return
+    return false
   }
   if (noteStore.activeDraft?.status === 'conflicted' || noteStore.activeDraft?.status === 'failed') {
     aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', selectedNote.id)
-    return
+    return false
   }
 
   const noteID = selectedNote.id
@@ -175,17 +178,17 @@ async function handleAISummary() {
     saved = await noteStore.flushPendingDraft()
   } catch {
     aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
-    return
+    return false
   }
   const currentNote = noteStore.activeNote
   const currentDraft = noteStore.activeDraft
   if (!saved || !currentNote || currentNote.id !== noteID || currentDraft) {
     aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
-    return
+    return false
   }
   if (currentNote.isTrashed) {
     aiStore.setSummaryPreconditionError('AI_NOTE_UNAVAILABLE', noteID)
-    return
+    return false
   }
 
   if (!aiStore.beginSummary({
@@ -195,22 +198,22 @@ async function handleAISummary() {
     baseRevision: currentNote.revision,
   })) {
     if (!aiStore.isSummaryReady) settingsStore.openSettings('ai')
-    return
+    return false
   }
 
   const snapshot = aiStore.pendingSummary
-  if (!snapshot) return
+  if (!snapshot) return false
   const confirmed = window.confirm(
     `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n出力: Markdown形式の概要・要点・必要に応じた決定事項等\n\n成功した要約はこの端末の履歴へ保存されます。ノート本文とWebDAV同期は変更されません。`,
   )
   if (!confirmed) {
     aiStore.cancelSummaryConfirmation()
-    return
+    return false
   }
 
   const confirmationNote = noteStore.activeNote
   const confirmationDraft = noteStore.activeDraft as NoteDraft | null
-  await aiStore.confirmSummary({
+  return aiStore.confirmSummary({
     noteID: confirmationNote?.id ?? null,
     content: confirmationDraft?.content ?? confirmationNote?.content ?? null,
     revision: confirmationNote?.revision ?? null,

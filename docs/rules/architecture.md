@@ -47,7 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の共通コンポーザーで選択中の機能名を表示して切り替え、モデル表示ボタンは既存のAI設定画面を開く。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。ライティング結果をノートへ反映するときは既存のrevision/CAS・保存laneを通す。AI設定と資格情報も端末ローカルとする |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用、Agentも許可済み読み取り・候補生成だけを実行し、変更は利用者の明示採用後に既存のrevision/CAS・保存laneを通す。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
 ## データ / 状態管理
 
@@ -56,7 +56,7 @@ Go Backend
 - ノート本文のファイル名は安定 ID を使った `note-id.md` とし、ユーザー入力をファイルパスへ直接使用しない。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- AIワークスペースの右側／下側配置と右側幅／下側高さだけは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AI入力・生成結果・API Keyは`localStorage`へ保持しない。
+- AIワークスペースの右側／下側配置と右側幅／下側高さだけは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
 
@@ -110,7 +110,7 @@ Go Backend
 | 連携 | 方針 |
 | --- | --- |
 | WebDAV | Phase 3で採用する同期方式。コア実装済み・実サーバー受け入れ確認中で、`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧は `docs/development/webdav-sync.md` を正とする |
-| AI API | ユーザー自身の API Key を利用する。初期プロバイダーはOpenRouterとGemini APIで、モデル一覧はプロバイダーから取得する。AI設定のプロバイダーID・モデルID・credential referenceとAPI Key、要約履歴、AI会話、成果物は端末ローカルであり、WebDAV同期しない。接続先は固定HTTPSのみで、proxy・redirect・自動retryは提供しない。Go側Provider adapterは接続確認、モデル一覧、要約、AI司書、AIアシスタント、ライティングを公開し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する。要約は選択モデルのコンテキスト長から安全な入力上限を判定し、本文の自動切詰め・分割は行わない。AI設定は下書き・接続確認・明示適用で更新し、外部送信前に保存済み本文とrevisionのsnapshotを確認する |
+| AI API | ユーザー自身の API Key を利用する。初期プロバイダーはOpenRouterとGemini APIで、モデル一覧はプロバイダーから取得する。AI設定のプロバイダーID・モデルID・credential referenceとAPI Key、要約履歴、AI会話、成果物は端末ローカルであり、WebDAV同期しない。接続先は固定HTTPSのみで、proxy・redirect・自動retryは提供しない。Go側Provider adapterは接続確認、モデル一覧、要約、AI司書、AIアシスタント、ライティングを公開し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する。要約は選択モデルのコンテキスト長から安全な入力上限を判定し、本文の自動切詰め・分割は行わない。AI設定は下書き・接続確認・明示適用で更新し、外部送信前に保存済み本文とrevisionのsnapshotを確認する。Web検索はProvider能力と実行ごとの明示確認が揃う場合だけ許可し、外部結果を信頼できない入力として扱う |
 | OS Keychain | WebDAVパスワードとAI API KeyはCredential Manager / Keychain / Secret Serviceへ別のservice namespaceで保存し、利用不可時はsession限定とする。AI API Keyを`.env`、SQLite、Markdown、`localStorage`へ保存しない |
 
 ### 外部Markdownのraw HTML
@@ -124,4 +124,3 @@ Go Backend
 ## 未確定事項
 
 - 関連メモ（Phase 4）に必要なデータ構造と更新境界。
-- AI 機能の呼び出し境界を Go 側に集約するか、フロントエンド側の設定 UI とどう分けるか。

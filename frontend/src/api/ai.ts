@@ -144,10 +144,16 @@ export type LibrarianEvent = {
 }
 
 export type AssistantKind = 'qa' | 'brainstorm'
+export type AIChatMode = 'ask' | 'agent'
 
 export type AIConversationMessage = {
   role: 'user' | 'assistant'
   content: string
+}
+
+export type AIWebCitation = {
+  url: string
+  title?: string
 }
 
 export type AIContextInput = {
@@ -173,11 +179,13 @@ export type AssistantInput = {
   providerID: AIProviderID
   modelID: string
   kind: AssistantKind
+  mode?: AIChatMode
   question: string
   messages?: AIConversationMessage[]
   noteIDs?: string[]
   searchQuery?: string
   includeBacklinks?: boolean
+  webSearch?: boolean
   expectedSources?: AIHistorySource[]
 }
 
@@ -185,8 +193,11 @@ export type AssistantResult = {
   providerID: AIProviderID
   modelID: string
   kind: AssistantKind
+  mode?: AIChatMode
   messages: AIConversationMessage[]
   sources: AIContextSource[]
+  citations?: AIWebCitation[]
+  webSearchRequests?: number
 }
 
 export type AssistantResponse = {

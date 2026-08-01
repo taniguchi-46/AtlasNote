@@ -1,7 +1,7 @@
 <template>
   <section
     v-if="noteStore.activeNote && !noteStore.activeNote.isTrashed"
-    class="ai-v3-panel"
+    :class="['ai-v3-panel', { 'is-execution-bridge': props.executionBridge }]"
     aria-label="AIアシスタント"
     aria-live="polite"
     :aria-busy="assistantStore.isBusy"
@@ -167,14 +167,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { EraserIcon, SaveIcon, SearchIcon, SendIcon } from '@lucide/vue'
-import type { AIContextSource, AssistantKind } from '../api/ai'
+import type { AIChatMode, AIContextSource, AssistantKind } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
 import { useAIAssistantStore } from '../stores/useAIAssistantStore'
 import { useNoteStore } from '../stores/useNoteStore'
 import AIMarkdownPreview from './AIMarkdownPreview.vue'
 
-const props = withDefaults(defineProps<{ externalComposer?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  externalComposer?: boolean
+  executionBridge?: boolean
+  additionalNoteIDs?: string[]
+  chatMode?: AIChatMode
+  webSearch?: boolean
+}>(), {
   externalComposer: false,
+  executionBridge: false,
+  additionalNoteIDs: () => [],
+  chatMode: 'ask',
+  webSearch: false,
 })
 const noteStore = useNoteStore()
 const aiStore = useAIStore()
@@ -197,12 +207,20 @@ const canAsk = computed(() => Boolean(
 
 function contextInput() {
   const noteID = noteStore.activeNote?.id
+  const noteIDs = [
+    ...(noteID ? [noteID] : []),
+    ...props.additionalNoteIDs,
+  ]
+    .filter((id, index, all) => Boolean(id) && all.indexOf(id) === index)
+    .slice(0, 10)
   return {
     kind: kind.value,
+    mode: props.chatMode,
     question: question.value.trim(),
-    noteIDs: noteID ? [noteID] : [],
+    noteIDs,
     searchQuery: searchQuery.value.trim(),
     includeBacklinks: includeBacklinks.value,
+    webSearch: props.webSearch,
   }
 }
 
@@ -245,22 +263,33 @@ async function confirmAndAsk() {
 
   const setting = aiStore.configuredSetting
   if (!setting) return false
+  if (props.webSearch && setting.providerID !== 'openrouter') {
+    return false
+  }
   const sourceSummary = assistantStore.contextSources.length > 0
     ? assistantStore.contextSources.map((source) => `・${source.title || '無題のノート'} (revision ${source.revision})`).join('\n')
     : '・参照資料なし'
+  const localSearchSummary = searchQuery.value.trim()
+    ? `全ノートから「${searchQuery.value.trim()}」を検索`
+    : 'なし'
+  const webSearchSummary = props.webSearch
+    ? '\nWeb検索: 有効（OpenRouter Web Search / Exaを必須化します。各検索・合計とも最大3件で、実行回数が1回でない応答は表示しません。追加料金が発生します。質問・参照内容から生成された検索クエリはOpenRouterとExaへ外部送信されます。）'
+    : '\nWeb検索: 無効'
   if (!window.confirm(
-    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\n検索範囲: 全ノート（追加検索: ${searchQuery.value.trim() || 'なし'}）\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
+    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
   )) return false
 
-  void assistantStore.ask({
+  const asked = await assistantStore.ask({
     kind: kind.value,
+    mode: props.chatMode,
     question: question.value,
     noteIDs: contextInput().noteIDs,
     searchQuery: searchQuery.value,
     includeBacklinks: includeBacklinks.value,
+    webSearch: props.webSearch,
   })
-  question.value = ''
-  return true
+  if (asked) question.value = ''
+  return asked
 }
 
 async function submitPrompt(prompt: string) {
@@ -322,6 +351,10 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: var(--panel-background, var(--bg-sidebar));
   font-size: 12px;
+}
+
+.ai-v3-panel.is-execution-bridge {
+  display: none;
 }
 
 .ai-v3-heading,
