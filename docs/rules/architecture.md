@@ -47,7 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用、Agentも許可済み読み取り・候補生成だけを実行し、変更は利用者の明示採用後に既存のrevision/CAS・保存laneを通す。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、現行Agentも許可済みの読み取り・候補生成だけを実行する。Agentの変更提案・差分確認・明示適用は決定済みだが未実装であり、実装後も既存のrevision/CAS・保存laneを通す。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
 ## データ / 状態管理
 

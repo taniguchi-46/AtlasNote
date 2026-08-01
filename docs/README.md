@@ -1,57 +1,38 @@
 # Atlas Note ドキュメント
 
-Atlas Note のドキュメント入口です。現在の状況、要求範囲、確定設計、実装順序、作業チェックリストを役割ごとに分けて管理します。
+Atlas Noteの仕様、設計、進捗、作業チェックの入口です。ファイルの配置は維持し、用途ごとのREADMEから辿れる構成にしています。
 
-## 参照順
+## まず読む
 
-1. [プロジェクト状況](status.md)で現在のフェーズ、完了事項、残課題、移行条件を確認する。
-2. [開発ロードマップ](development/scopes/scope.md)で要求範囲と対象外を確認する。
-3. 対象機能の「正本」と明記された設計資料を確認する。
-4. 現在フェーズの実装順序とTODOを確認する。
-5. 実装前後に[AI共通ガイド](rules/ai.md)、[アーキテクチャ](rules/architecture.md)、[実装規約](rules/conventions.md)を確認する。
+1. [プロジェクト状況](status.md)で現在の実装状態・残作業・受け入れ状況を確認する。
+2. [開発ロードマップ](development/scopes/scope.md)でPhaseごとの対象範囲を確認する。
+3. [開発・設計資料の索引](development/README.md)または[TODO索引](todo/README.md)から、対象機能の正本へ進む。
+4. 実装時は[アーキテクチャ](rules/architecture.md)、[実装規約](rules/conventions.md)、[AI共通ガイド](rules/ai.md)を確認する。
 
-## 正本と役割
+## ディレクトリ案内
 
-| 目的 | 正本 | 役割 |
+| 場所 | 役割 | 入口 |
 | --- | --- | --- |
-| 現在状況 | [docs/status.md](status.md) | 実装済み、残課題、保留事項、確認状況 |
-| 要求範囲 | [scope.md](development/scopes/scope.md) | Phaseごとの機能要件と対象外 |
-| Phase 3同期設計 | [webdav-sync.md](development/webdav-sync.md) | 同期対象、リモート形式、競合、認証、outboxの確定契約 |
-| Phase 3実装順序 | [implementation-plan.md](development/implementation-plan.md) | 設計に従った実装ステップ |
-| Phase 3進捗 | [todo-phese3.md](todo/todo-phese3.md) | 実装・検証チェックリスト |
-| Phase 4 v1詳細スコープ | [scope-phese4.md](development/scopes/scope-phese4.md) | AI設定・単発要約の要求範囲と境界 |
-| Phase 4 AI決定記録 | [ai-integration.md](development/ai-integration.md) | D-01〜D-07の承認内容とv1開始ゲート |
-| Phase 4 v1 TODO | [todo-phese4.md](todo/todo-phese4.md) | AI認証・保存・同期境界などのv1課題 |
-| Phase 4 v2詳細スコープ | [scope-phese4-v2.md](development/scopes/scope-phese4-v2.md) | AI司書・実行体験の正式範囲 |
-| Phase 4 v2 TODO | [todo-phese4-v2.md](todo/todo-phese4-v2.md) | AI司書・stream/cancel/structured outputの実装TODO |
-| Phase 4 v3詳細スコープ | [scope-phese4-v3.md](development/scopes/scope-phese4-v3.md) | AIアシスタント・ライティング・履歴の正式範囲 |
-| Phase 4 v3 TODO | [todo-phese4-v3.md](todo/todo-phese4-v3.md) | Phase 4完了までのv3実装・検証TODO |
-| 横断ルール | [docs/rules/](rules/) | Agent、アーキテクチャ、命名、Git、用語 |
+| `docs/status.md` | 現在の実装・検証状態、残課題、保留事項 | [プロジェクト状況](status.md) |
+| `docs/development/` | 機能設計、同期・データ契約、開発ガイド | [開発・設計資料](development/README.md) |
+| `docs/development/scopes/` | Phaseごとの要求範囲・対象外・完了条件 | [scope索引](development/scopes/README.md) |
+| `docs/todo/` | 実装・検証・受け入れのチェックリスト | [TODO索引](todo/README.md) |
+| `docs/rules/` | アーキテクチャ、実装規約、Git、用語 | [ルール一覧](rules/) |
 
-仕様の決定事項は設計資料、現在の実装状態はコードとテスト、進捗は `docs/status.md` とTODOを根拠にします。文書同士が矛盾する場合は、勝手に解釈を固定せず、正本と未確定事項を確認します。
+## Phase 4 AIの正本
 
-## 開発ガイド
+| 目的 | 文書 |
+| --- | --- |
+| 単一チャット、context、Ask／Agent、Web検索、変更提案のUI契約 | [AIチャット](development/ai-chat.md) |
+| AI設定、Provider、資格情報、v1の決定記録、保存境界 | [AI統合](development/ai-integration.md) |
+| Phase 4 v1／v2／v3の対象範囲・完了条件 | [scope索引](development/scopes/README.md) |
+| Phase 4の実装・検証状況 | [TODO索引](todo/README.md) |
 
-- [初心者向け開発ガイド](development/beginner-guide.md)
-- [開発環境セットアップ](development/setup.md)
-- [開発環境方針](development/environment.md)
-- [技術スタック](development/tech-stack.md)
+現行実装と決定済み・未実装の仕様は、必ず区別して記載します。文書間に矛盾がある場合は、`docs/status.md`、該当scope、TODOを確認し、未確定事項を勝手に実装済みとして扱いません。
 
-## 設計資料
+## 更新ルール
 
-- [ノートrevision・競合検出・保存キュー](development/note-concurrency.md)
-- [Markdown全文検索索引](development/search-index.md)
-- [検索API](development/search-api.md)
-- [タグ設計](development/tag-design.md)
-- [大量ノート性能計測](development/performance.md)
-
-## Phase 2の記録
-
-- [Phase 2詳細スコープ](development/scopes/scope-phese2.md)
-- [Phase 2実績・残課題](todo/todo-phese2.md)
-- [Phase 4 v1詳細スコープ](development/scopes/scope-phese4.md)
-- [Phase 4 v1 TODO](todo/todo-phese4.md)
-- [Phase 4 v2詳細スコープ](development/scopes/scope-phese4-v2.md)
-- [Phase 4 v2 TODO](todo/todo-phese4-v2.md)
-- [Phase 4 v3詳細スコープ](development/scopes/scope-phese4-v3.md)
-- [Phase 4 v3 TODO](todo/todo-phese4-v3.md)
+- 要求範囲・対象外・完了条件を変えるときは、該当するscopeを更新する。
+- 実装・テスト・手動受け入れの進捗は、該当するTODOと`docs/status.md`を更新する。
+- 実装状態に依存するUI・API・保存境界は、機能設計資料に記録する。
+- 既存ファイルを移動する前に、`rg`でMarkdownリンクとコード参照を確認する。
