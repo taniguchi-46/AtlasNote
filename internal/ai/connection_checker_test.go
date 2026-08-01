@@ -22,7 +22,7 @@ func TestHTTPConnectionCheckerUsesFixedHTTPSRequests(t *testing.T) {
 		header   string
 	}{
 		{ProviderOpenRouter, "https://openrouter.ai/api/v1/key", "Authorization"},
-		{ProviderGemini, "https://generativelanguage.googleapis.com/v1/models?pageSize=1", "X-Goog-Api-Key"},
+		{ProviderGemini, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", "X-Goog-Api-Key"},
 	}
 	for _, testCase := range cases {
 		t.Run(string(testCase.provider), func(t *testing.T) {
@@ -43,6 +43,15 @@ func TestHTTPConnectionCheckerUsesFixedHTTPSRequests(t *testing.T) {
 				t.Fatalf("check fixed endpoint: %v", err)
 			}
 		})
+	}
+}
+
+func TestGeminiEndpointsUseV1Beta(t *testing.T) {
+	if geminiModelsEndpoint != "https://generativelanguage.googleapis.com/v1beta/models" {
+		t.Fatalf("Gemini model endpoint = %q", geminiModelsEndpoint)
+	}
+	if geminiSummaryEndpoint != "https://generativelanguage.googleapis.com/v1beta/models/" {
+		t.Fatalf("Gemini generation endpoint = %q", geminiSummaryEndpoint)
 	}
 }
 

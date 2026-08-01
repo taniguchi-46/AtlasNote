@@ -48,7 +48,7 @@ export function useNotificationStore() {
 }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai.mjs'), `
-export const calls = { getSettings: 0, configure: [], test: [], list: [], generate: [], saveArtifact: [], listArtifacts: 0, getArtifact: [], deleteArtifact: [], deleteProvider: [], deleteAll: 0 }
+export const calls = { getSettings: 0, configure: [], updateModel: [], test: [], testGeneration: [], list: [], generate: [], saveArtifact: [], listArtifacts: 0, getArtifact: [], deleteArtifact: [], deleteProvider: [], deleteAll: 0 }
 let settings = [
   { providerID: 'openrouter', modelID: 'retired-model', credentialStatus: 'persistent' },
   { providerID: 'gemini', modelID: '', credentialStatus: 'not-configured' },
@@ -82,6 +82,13 @@ export async function configureAIProvider(input) {
     : setting)
   return clone(settings)
 }
+export async function updateAIProviderModel(input) {
+  calls.updateModel.push(clone(input))
+  settings = settings.map((setting) => setting.providerID === input.providerID
+    ? { ...setting, modelID: input.modelID }
+    : setting)
+  return clone(settings)
+}
 export async function testAIConnection(input) {
   calls.test.push(clone(input))
   if (nextTestError) {
@@ -89,6 +96,10 @@ export async function testAIConnection(input) {
     nextTestError = undefined
     throw error
   }
+  return { success: true }
+}
+export async function testAIGeneration(input) {
+  calls.testGeneration.push(clone(input))
   return { success: true }
 }
 export async function listAIModels(input) {
@@ -171,6 +182,8 @@ try {
     readFile(editorPath, 'utf8'),
   ])
   assert.match(panelSource, /type="password"/, 'the API Key field must remain a password input')
+  assert.match(panelSource, /保存済みのキーを利用/, 'the settings panel must support explicitly reusing a saved key')
+  assert.match(panelSource, /生成を確認/, 'the settings panel must expose an explicit generation check')
   assert.match(panelSource, /window\.confirm/, 'credential deletion must require confirmation')
   assert.match(panelSource, /<details/, 'model metadata must be collapsible')
   assert.match(panelSource, /モデル詳細を表示/, 'the collapsed model metadata must remain discoverable')
@@ -220,6 +233,12 @@ try {
 
   store.draft.modelID = 'summarizer-model'
   assert.equal(store.canApply, true)
+  assert.equal(store.canTestGeneration, true)
+  assert.equal(await store.testGeneration(), true, 'an explicit generation test must use the checked draft credential')
+  assert.equal(mockAI.calls.testGeneration.length, 1)
+  assert.equal(mockAI.calls.testGeneration[0].apiKey, 'test-key-marker')
+  assert.equal(mockAI.calls.testGeneration[0].useStoredCredential, false)
+  assert.equal(store.generationTestState, 'success')
   assert.equal(await store.applyConfiguration(), true)
   assert.equal(mockAI.calls.configure.length, 1)
   assert.equal(mockAI.calls.configure[0].apiKey, 'test-key-marker')
@@ -308,6 +327,16 @@ try {
   assert.equal(mockAI.calls.generate.length, 4, 'a long note must reach the backend model-limit check')
   store.discardSummary()
   assert.equal(store.summary, null)
+
+  assert.equal(await store.checkConnection(), true, 'a saved credential must be reusable after the draft field is cleared')
+  assert.equal(mockAI.calls.test.at(-1).apiKey, '')
+  assert.equal(mockAI.calls.test.at(-1).useStoredCredential, true)
+  assert.equal(await store.refreshModels(), true)
+  store.draft.modelID = 'unknown-limit-model'
+  assert.equal(store.canApply, true)
+  assert.equal(await store.applyConfiguration(), true, 'a saved credential must permit a model-only update')
+  assert.equal(mockAI.calls.configure.length, 1, 'a model-only update must not replace the API key')
+  assert.deepEqual(mockAI.calls.updateModel, [{ providerID: 'openrouter', modelID: 'unknown-limit-model' }])
 
   assert.equal(await store.deleteProvider('openrouter'), true)
   assert.deepEqual(mockAI.calls.deleteProvider, ['openrouter'])

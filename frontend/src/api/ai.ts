@@ -30,6 +30,7 @@ export type ConfigureProviderInput = {
 export type TestConnectionInput = {
   providerID: AIProviderID
   apiKey: string
+  useStoredCredential: boolean
 }
 
 export type ConnectionTestResult = {
@@ -37,6 +38,15 @@ export type ConnectionTestResult = {
 }
 
 export type ListModelsInput = TestConnectionInput
+
+export type UpdateProviderModelInput = {
+  providerID: AIProviderID
+  modelID: string
+}
+
+export type TestGenerationInput = TestConnectionInput & {
+  modelID: string
+}
 
 export type ModelInfo = {
   id: string
@@ -313,6 +323,8 @@ export type AIDeleteResponse = {
 
 type AIWailsBridge = {
   ListAIModels(input: ListModelsInput): Promise<ModelListResponse>
+  TestAIGeneration(input: TestGenerationInput): Promise<ConnectionTestResult>
+  UpdateAIProviderModel(input: UpdateProviderModelInput): Promise<ProviderSettings[]>
   GenerateAISummary(input: GenerateSummaryInput): Promise<SummaryResponse>
   StartAILibrarian(input: LibrarianInput): Promise<LibrarianStartResponse>
   CancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse>
@@ -364,6 +376,14 @@ export function testAIConnection(input: TestConnectionInput): Promise<Connection
 
 export function listAIModels(input: ListModelsInput): Promise<ModelListResponse> {
   return getAIWailsBridge().ListAIModels(input)
+}
+
+export function testAIGeneration(input: TestGenerationInput): Promise<ConnectionTestResult> {
+  return getAIWailsBridge().TestAIGeneration(input)
+}
+
+export function updateAIProviderModel(input: UpdateProviderModelInput): Promise<ProviderSettings[]> {
+  return getAIWailsBridge().UpdateAIProviderModel(input)
 }
 
 export function generateAISummary(input: GenerateSummaryInput): Promise<SummaryResponse> {

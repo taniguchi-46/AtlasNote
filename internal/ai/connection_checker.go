@@ -18,15 +18,27 @@ const (
 	modelListTimeout         = 10 * time.Second
 	summaryGenerationTimeout = 60 * time.Second
 	maxProviderResponseBytes = 1024 * 1024
+	maxProviderErrorBytes    = 16 * 1024
 
 	openRouterKeyEndpoint     = "https://openrouter.ai/api/v1/key"
 	openRouterModelsEndpoint  = "https://openrouter.ai/api/v1/models"
 	openRouterSummaryEndpoint = "https://openrouter.ai/api/v1/chat/completions"
-	geminiModelsEndpoint      = "https://generativelanguage.googleapis.com/v1/models"
-	geminiSummaryEndpoint     = "https://generativelanguage.googleapis.com/v1/models/"
+	geminiModelsEndpoint      = "https://generativelanguage.googleapis.com/v1beta/models"
+	geminiSummaryEndpoint     = "https://generativelanguage.googleapis.com/v1beta/models/"
 )
 
 var errRedirectBlocked = errors.New("AI provider redirect blocked")
+
+type geminiThinkingConfig struct {
+	ThinkingLevel string `json:"thinkingLevel"`
+}
+
+func geminiSummaryThinkingConfig(modelID string) *geminiThinkingConfig {
+	if strings.EqualFold(strings.TrimSpace(modelID), "gemini-3.6-flash") {
+		return &geminiThinkingConfig{ThinkingLevel: "minimal"}
+	}
+	return nil
+}
 
 // ProviderAdapter is the only provider-specific boundary used by the AI
 // application service. It deliberately exposes no conversation, streaming,
@@ -114,8 +126,11 @@ func (a *HTTPProviderAdapter) CheckConnection(ctx context.Context, providerID Pr
 		return err
 	}
 	defer response.Body.Close()
+	if err := statusError(response, false); err != nil {
+		return err
+	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-	return statusError(response, false)
+	return nil
 }
 
 func (a *HTTPProviderAdapter) ListModels(ctx context.Context, providerID ProviderID, apiKey string) (ModelListResult, error) {
@@ -437,6 +452,9 @@ func (a *HTTPProviderAdapter) generateGeminiText(ctx context.Context, apiKey str
 	}
 
 	var result struct {
+		PromptFeedback struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
@@ -449,7 +467,16 @@ func (a *HTTPProviderAdapter) generateGeminiText(ctx context.Context, apiKey str
 	if err := decodeProviderJSON(response.Body, &result); err != nil {
 		return TextGenerationResult{}, err
 	}
-	if len(result.Candidates) == 0 || result.Candidates[0].FinishReason != "STOP" || len(result.Candidates[0].Content.Parts) == 0 {
+	if len(result.Candidates) == 0 {
+		if strings.TrimSpace(result.PromptFeedback.BlockReason) != "" {
+			return TextGenerationResult{}, ErrContentBlocked
+		}
+		return TextGenerationResult{}, ErrInvalidResponse
+	}
+	if result.Candidates[0].FinishReason != "STOP" {
+		return TextGenerationResult{}, geminiFinishReasonError(result.Candidates[0].FinishReason)
+	}
+	if len(result.Candidates[0].Content.Parts) == 0 {
 		return TextGenerationResult{}, ErrInvalidResponse
 	}
 	parts := make([]string, 0, len(result.Candidates[0].Content.Parts))
@@ -701,7 +728,8 @@ func (a *HTTPProviderAdapter) generateGeminiSummary(ctx context.Context, apiKey 
 			} `json:"parts"`
 		} `json:"contents"`
 		GenerationConfig struct {
-			MaxOutputTokens int `json:"maxOutputTokens"`
+			MaxOutputTokens int                   `json:"maxOutputTokens"`
+			ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 		} `json:"generationConfig"`
 		Store bool `json:"store"`
 	}{Store: false}
@@ -719,6 +747,7 @@ func (a *HTTPProviderAdapter) generateGeminiSummary(ctx context.Context, apiKey 
 	}{Text: input.Content})
 	payload.Contents = append(payload.Contents, content)
 	payload.GenerationConfig.MaxOutputTokens = summaryOutputTokenLimit
+	payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -740,6 +769,9 @@ func (a *HTTPProviderAdapter) generateGeminiSummary(ctx context.Context, apiKey 
 	}
 
 	var result struct {
+		PromptFeedback struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
@@ -752,7 +784,16 @@ func (a *HTTPProviderAdapter) generateGeminiSummary(ctx context.Context, apiKey 
 	if err := decodeProviderJSON(response.Body, &result); err != nil {
 		return SummaryResult{}, err
 	}
-	if len(result.Candidates) == 0 || result.Candidates[0].FinishReason != "STOP" || len(result.Candidates[0].Content.Parts) == 0 {
+	if len(result.Candidates) == 0 {
+		if strings.TrimSpace(result.PromptFeedback.BlockReason) != "" {
+			return SummaryResult{}, ErrContentBlocked
+		}
+		return SummaryResult{}, ErrInvalidResponse
+	}
+	if result.Candidates[0].FinishReason != "STOP" {
+		return SummaryResult{}, geminiFinishReasonError(result.Candidates[0].FinishReason)
+	}
+	if len(result.Candidates[0].Content.Parts) == 0 {
 		return SummaryResult{}, ErrInvalidResponse
 	}
 	parts := make([]string, 0, len(result.Candidates[0].Content.Parts))
@@ -807,12 +848,50 @@ func statusError(response *http.Response, generation bool) error {
 		return ErrAuthFailed
 	case response.StatusCode == http.StatusTooManyRequests:
 		return rateLimitError(response.Header.Get("Retry-After"))
-	case generation && response.StatusCode == http.StatusNotFound:
+	}
+
+	if providerErrorStatus(response.Body) == "FAILED_PRECONDITION" {
+		return ErrProviderConfiguration
+	}
+	if generation && response.StatusCode == http.StatusNotFound {
 		return ErrModelUnavailable
-	case generation && (response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity):
+	}
+	if generation && (response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity) {
 		return ErrModelCapabilityUnavailable
+	}
+	return ErrProviderUnavailable
+}
+
+// providerErrorStatus reads only the documented machine-readable status from a
+// bounded error envelope. It intentionally ignores provider messages and
+// details so raw error bodies cannot reach logs, UI, or Wails errors.
+func providerErrorStatus(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	content, err := io.ReadAll(io.LimitReader(body, maxProviderErrorBytes+1))
+	if err != nil || len(content) > maxProviderErrorBytes {
+		return ""
+	}
+	var payload struct {
+		Error struct {
+			Status string `json:"status"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(payload.Error.Status))
+}
+
+func geminiFinishReasonError(reason string) error {
+	switch strings.ToUpper(strings.TrimSpace(reason)) {
+	case "MAX_TOKENS":
+		return ErrOutputLimit
+	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "LANGUAGE":
+		return ErrContentBlocked
 	default:
-		return ErrProviderUnavailable
+		return ErrInvalidResponse
 	}
 }
 

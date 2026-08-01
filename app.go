@@ -358,6 +358,23 @@ func (a *App) TestAIConnection(input aiservice.TestConnectionInput) (aiservice.C
 	return a.aiService.TestConnection(a.ctx, input)
 }
 
+// TestAIGeneration sends only the service's fixed probe content to the
+// selected model and discards the output. It is intentionally separate from
+// authentication/model-list checks so the UI can verify actual generation.
+func (a *App) TestAIGeneration(input aiservice.TestGenerationInput) (aiservice.ConnectionTestResult, error) {
+	if a.aiService == nil {
+		return aiservice.ConnectionTestResult{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.TestGeneration(a.ctx, input)
+}
+
+func (a *App) UpdateAIProviderModel(input aiservice.UpdateProviderModelInput) ([]aiservice.ProviderSettings, error) {
+	if a.aiService == nil {
+		return []aiservice.ProviderSettings{}, errors.New("AI service is not initialized")
+	}
+	return a.aiService.UpdateProviderModel(a.ctx, input)
+}
+
 // ListAIModels returns only normalized model metadata and a typed safe error.
 // The draft API key is consumed by the Go service and never appears in this
 // response or in a Wails error string.

@@ -11,7 +11,9 @@ import {
   listAIArtifacts,
   listAIModels,
   saveAIArtifact,
+  testAIGeneration,
   testAIConnection,
+  updateAIProviderModel,
   type AIArtifact,
   type AIProviderID,
   type ModelInfo,
@@ -30,6 +32,8 @@ export type AIErrorState = {
   message: string
   retryAfterSeconds?: number
 }
+
+type CredentialSource = 'draft' | 'stored'
 
 export type SummarySource = {
   noteID: string
@@ -78,8 +82,11 @@ const safeMessages: Record<string, string> = {
   AI_CREDENTIAL_CLEANUP_REQUIRED: 'AI 認証情報の更新後処理に失敗しました。設定を確認してください。',
   AI_REAUTHENTICATION_REQUIRED: 'AI 認証情報の再入力が必要です。',
   AI_AUTH_FAILED: 'AI 認証に失敗しました。API Key を確認してください。',
+  AI_PROVIDER_CONFIGURATION_REQUIRED: 'AI プロバイダーのプロジェクト設定、利用可能な地域、または無料枠の利用状況を確認してください。',
   AI_MODEL_UNAVAILABLE: '選択したモデルは利用できません。モデルを再選択してください。',
   AI_MODEL_CAPABILITY_UNAVAILABLE: '選択したモデルは、このAI機能に必要な応答形式へ対応していません。別のモデルを選択してください。',
+  AI_OUTPUT_LIMIT: 'モデルの出力上限に達したため、応答を完了できませんでした。別のモデルで再試行してください。',
+  AI_CONTENT_BLOCKED: '入力または応答が AI プロバイダーの安全基準によりブロックされました。内容を見直して再試行してください。',
   AI_INPUT_TOO_LARGE: '本文が選択したモデルのコンテキスト上限を超えています。より長いコンテキストのモデルを選ぶか、本文を分けて再試行してください。',
   AI_INPUT_INVALID: '本文が空か無効なため、要約を送信しません。',
   AI_RATE_LIMITED: 'AI プロバイダーの利用上限に達しました。時間をおいてから再試行してください。',
@@ -162,6 +169,8 @@ export const useAIStore = defineStore('ai', () => {
   const connectionError = ref<AIErrorState | null>(null)
   const modelsError = ref<AIErrorState | null>(null)
   const settingsError = ref<AIErrorState | null>(null)
+  const generationTestState = ref<'idle' | 'success' | 'error'>('idle')
+  const generationTestError = ref<AIErrorState | null>(null)
   const summaryState = ref<SummaryState>('idle')
   const summaryTargetNoteID = ref<string | null>(null)
   const pendingSummary = ref<SummarySnapshot | null>(null)
@@ -173,6 +182,7 @@ export const useAIStore = defineStore('ai', () => {
 
   let verifiedProviderID: AIProviderID | null = null
   let verifiedAPIKey = ''
+  let verifiedCredentialSource: CredentialSource | null = null
   let listedProviderID: AIProviderID | null = null
   let nextSummaryRequestID = 0
   let activeSummaryRequest: ActiveSummaryRequest | null = null
@@ -198,14 +208,24 @@ export const useAIStore = defineStore('ai', () => {
     selectedModel.value?.available && selectedModel.value.supportsSummary,
   ))
 
+  const canUseStoredCredential = computed(() => Boolean(
+    activeProviderSetting.value && isConfiguredCredential(activeProviderSetting.value.credentialStatus),
+  ))
+
+  const currentCredentialSource = computed<CredentialSource | null>(() => {
+    if (draft.value.apiKey.trim() !== '') return 'draft'
+    return canUseStoredCredential.value ? 'stored' : null
+  })
+
   const canCheckConnection = computed(() => (
-    !isSettingsBusy.value && draft.value.apiKey.trim() !== ''
+    !isSettingsBusy.value && currentCredentialSource.value !== null
   ))
 
   const canRefreshModels = computed(() => (
     !isSettingsBusy.value
     && verifiedProviderID === draft.value.providerID
-    && verifiedAPIKey === draft.value.apiKey
+    && verifiedCredentialSource === currentCredentialSource.value
+    && (verifiedCredentialSource !== 'draft' || verifiedAPIKey === draft.value.apiKey)
     && connectionState.value === 'success'
   ))
 
@@ -214,6 +234,8 @@ export const useAIStore = defineStore('ai', () => {
     && draft.value.modelID.trim() !== ''
     && selectedModelAvailable.value
   ))
+
+  const canTestGeneration = computed(() => canApply.value && !isSettingsBusy.value)
 
   const isSummaryReady = computed(() => {
     const setting = configuredSetting.value
@@ -236,16 +258,32 @@ export const useAIStore = defineStore('ai', () => {
   function clearVerification() {
     verifiedProviderID = null
     verifiedAPIKey = ''
+    verifiedCredentialSource = null
     listedProviderID = null
     models.value = []
     modelsRetrievedAt.value = null
     connectionState.value = 'idle'
     connectionError.value = null
     modelsError.value = null
+    generationTestState.value = 'idle'
+    generationTestError.value = null
   }
 
   function matchesCurrentDraft(input: { providerID: AIProviderID; apiKey: string }) {
     return draft.value.providerID === input.providerID && draft.value.apiKey === input.apiKey
+  }
+
+  function credentialInputForDraft() {
+    const apiKey = draft.value.apiKey
+    return {
+      providerID: draft.value.providerID,
+      apiKey,
+      useStoredCredential: apiKey.trim() === '',
+    }
+  }
+
+  function matchesCurrentCredentialInput(input: { providerID: AIProviderID; apiKey: string; useStoredCredential: boolean }) {
+    return matchesCurrentDraft(input) && input.useStoredCredential === (draft.value.apiKey.trim() === '')
   }
 
   function resetDraft() {
@@ -292,7 +330,9 @@ export const useAIStore = defineStore('ai', () => {
 
   async function checkConnection() {
     if (!canCheckConnection.value) {
-      connectionError.value = createSafeError('AI_API_KEY_INVALID')
+      connectionError.value = createSafeError(
+        draft.value.apiKey.trim() === '' ? 'AI_REAUTHENTICATION_REQUIRED' : 'AI_API_KEY_INVALID',
+      )
       connectionState.value = 'error'
       return false
     }
@@ -301,13 +341,10 @@ export const useAIStore = defineStore('ai', () => {
     isSettingsBusy.value = true
     connectionError.value = null
     connectionState.value = 'idle'
-    const input = {
-      providerID: draft.value.providerID,
-      apiKey: draft.value.apiKey,
-    }
+    const input = credentialInputForDraft()
     try {
       const result = await testAIConnection(input)
-      if (!matchesCurrentDraft(input)) return false
+      if (!matchesCurrentCredentialInput(input)) return false
       if (!result.success) {
         connectionError.value = createSafeError('AI_PROVIDER_UNAVAILABLE')
         connectionState.value = 'error'
@@ -315,6 +352,7 @@ export const useAIStore = defineStore('ai', () => {
       }
       verifiedProviderID = input.providerID
       verifiedAPIKey = input.apiKey
+      verifiedCredentialSource = input.useStoredCredential ? 'stored' : 'draft'
       listedProviderID = null
       models.value = []
       modelsRetrievedAt.value = null
@@ -322,7 +360,7 @@ export const useAIStore = defineStore('ai', () => {
       connectionState.value = 'success'
       return true
     } catch (error) {
-      if (!matchesCurrentDraft(input)) return false
+      if (!matchesCurrentCredentialInput(input)) return false
       clearVerification()
       connectionError.value = errorFromUnknown(error)
       connectionState.value = 'error'
@@ -340,13 +378,10 @@ export const useAIStore = defineStore('ai', () => {
 
     isSettingsBusy.value = true
     modelsError.value = null
-    const input = {
-      providerID: draft.value.providerID,
-      apiKey: draft.value.apiKey,
-    }
+    const input = credentialInputForDraft()
     try {
       const response = await listAIModels(input)
-      if (!matchesCurrentDraft(input)) return false
+      if (!matchesCurrentCredentialInput(input)) return false
       if (response.error) {
         modelsError.value = createSafeError(response.error.code, response.error.retryAfterSeconds)
         return false
@@ -356,7 +391,7 @@ export const useAIStore = defineStore('ai', () => {
       listedProviderID = input.providerID
       return true
     } catch (error) {
-      if (!matchesCurrentDraft(input)) return false
+      if (!matchesCurrentCredentialInput(input)) return false
       modelsError.value = errorFromUnknown(error)
       return false
     } finally {
@@ -378,11 +413,45 @@ export const useAIStore = defineStore('ai', () => {
       modelID: draft.value.modelID,
     }
     try {
-      settings.value = normalizeSettings(await configureAIProvider(input))
+      settings.value = normalizeSettings(input.apiKey.trim() === ''
+        ? await updateAIProviderModel({ providerID: input.providerID, modelID: input.modelID })
+        : await configureAIProvider(input))
       draft.value.apiKey = ''
       return true
     } catch (error) {
       settingsError.value = errorFromUnknown(error)
+      return false
+    } finally {
+      isSettingsBusy.value = false
+    }
+  }
+
+  async function testGeneration() {
+    if (!canTestGeneration.value || isSettingsBusy.value) {
+      generationTestError.value = createSafeError('AI_SUMMARY_NOT_READY')
+      generationTestState.value = 'error'
+      return false
+    }
+
+    isSettingsBusy.value = true
+    generationTestError.value = null
+    generationTestState.value = 'idle'
+    const credentialInput = credentialInputForDraft()
+    const input = { ...credentialInput, modelID: draft.value.modelID }
+    try {
+      const result = await testAIGeneration(input)
+      if (!matchesCurrentCredentialInput(input) || draft.value.modelID !== input.modelID) return false
+      if (!result.success) {
+        generationTestError.value = createSafeError('AI_PROVIDER_UNAVAILABLE')
+        generationTestState.value = 'error'
+        return false
+      }
+      generationTestState.value = 'success'
+      return true
+    } catch (error) {
+      if (!matchesCurrentCredentialInput(input) || draft.value.modelID !== input.modelID) return false
+      generationTestError.value = errorFromUnknown(error)
+      generationTestState.value = 'error'
       return false
     } finally {
       isSettingsBusy.value = false
@@ -689,9 +758,21 @@ export const useAIStore = defineStore('ai', () => {
   watch(
     () => draft.value.apiKey,
     (apiKey) => {
-      if (apiKey !== '' && (apiKey !== verifiedAPIKey || draft.value.providerID !== verifiedProviderID)) {
+      const source = currentCredentialSource.value
+      if (
+        source !== verifiedCredentialSource
+        || (source === 'draft' && (apiKey !== verifiedAPIKey || draft.value.providerID !== verifiedProviderID))
+      ) {
         clearVerification()
       }
+    },
+  )
+
+  watch(
+    () => draft.value.modelID,
+    () => {
+      generationTestState.value = 'idle'
+      generationTestError.value = null
     },
   )
 
@@ -705,6 +786,8 @@ export const useAIStore = defineStore('ai', () => {
     connectionError,
     modelsError,
     settingsError,
+    generationTestState,
+    generationTestError,
     summaryState,
     summaryTargetNoteID,
     pendingSummary,
@@ -720,6 +803,7 @@ export const useAIStore = defineStore('ai', () => {
     canCheckConnection,
     canRefreshModels,
     canApply,
+    canTestGeneration,
     isSummaryReady,
     isLibrarianReady,
     hasConfiguredProvider,
@@ -731,6 +815,7 @@ export const useAIStore = defineStore('ai', () => {
     checkConnection,
     refreshModels,
     applyConfiguration,
+    testGeneration,
     deleteProvider,
     deleteAllProviders,
     beginSummary,

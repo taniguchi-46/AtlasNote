@@ -66,19 +66,38 @@ type ConfigureProviderInput struct {
 }
 
 type TestConnectionInput struct {
-	ProviderID ProviderID `json:"providerID"`
-	APIKey     string     `json:"apiKey"`
+	ProviderID          ProviderID `json:"providerID"`
+	APIKey              string     `json:"apiKey"`
+	UseStoredCredential bool       `json:"useStoredCredential"`
 }
 
 type ConnectionTestResult struct {
 	Success bool `json:"success"`
 }
 
-// ListModelsInput deliberately accepts a draft key so D-06 can load a model
-// list before the user explicitly saves the credential.
+// ListModelsInput accepts either a draft key or an explicitly selected saved
+// credential. The key is never persisted by this request.
 type ListModelsInput struct {
+	ProviderID          ProviderID `json:"providerID"`
+	APIKey              string     `json:"apiKey"`
+	UseStoredCredential bool       `json:"useStoredCredential"`
+}
+
+// UpdateProviderModelInput changes only the non-secret selected model for an
+// already configured provider. It deliberately contains no credential field.
+type UpdateProviderModelInput struct {
 	ProviderID ProviderID `json:"providerID"`
-	APIKey     string     `json:"apiKey"`
+	ModelID    string     `json:"modelID"`
+}
+
+// TestGenerationInput sends a fixed, non-user-content probe to the selected
+// model. It accepts either a draft key or an explicitly selected saved
+// credential and never returns generated text.
+type TestGenerationInput struct {
+	ProviderID          ProviderID `json:"providerID"`
+	ModelID             string     `json:"modelID"`
+	APIKey              string     `json:"apiKey"`
+	UseStoredCredential bool       `json:"useStoredCredential"`
 }
 
 // ModelInfo is provider-neutral metadata. Nil token limits mean that the
@@ -341,8 +360,11 @@ const (
 	ErrorCodeCredentialCleanup          ErrorCode = "AI_CREDENTIAL_CLEANUP_REQUIRED"
 	ErrorCodeReauthenticationRequired   ErrorCode = "AI_REAUTHENTICATION_REQUIRED"
 	ErrorCodeAuthFailed                 ErrorCode = "AI_AUTH_FAILED"
+	ErrorCodeProviderConfiguration      ErrorCode = "AI_PROVIDER_CONFIGURATION_REQUIRED"
 	ErrorCodeModelUnavailable           ErrorCode = "AI_MODEL_UNAVAILABLE"
 	ErrorCodeModelCapabilityUnavailable ErrorCode = "AI_MODEL_CAPABILITY_UNAVAILABLE"
+	ErrorCodeOutputLimit                ErrorCode = "AI_OUTPUT_LIMIT"
+	ErrorCodeContentBlocked             ErrorCode = "AI_CONTENT_BLOCKED"
 	ErrorCodeInputTooLarge              ErrorCode = "AI_INPUT_TOO_LARGE"
 	ErrorCodeInputInvalid               ErrorCode = "AI_INPUT_INVALID"
 	ErrorCodeRateLimited                ErrorCode = "AI_RATE_LIMITED"
@@ -381,8 +403,11 @@ var (
 	ErrCredentialCleanup          = &SafeError{Code: ErrorCodeCredentialCleanup}
 	ErrReauthenticationRequired   = &SafeError{Code: ErrorCodeReauthenticationRequired}
 	ErrAuthFailed                 = &SafeError{Code: ErrorCodeAuthFailed}
+	ErrProviderConfiguration      = &SafeError{Code: ErrorCodeProviderConfiguration}
 	ErrModelUnavailable           = &SafeError{Code: ErrorCodeModelUnavailable}
 	ErrModelCapabilityUnavailable = &SafeError{Code: ErrorCodeModelCapabilityUnavailable}
+	ErrOutputLimit                = &SafeError{Code: ErrorCodeOutputLimit}
+	ErrContentBlocked             = &SafeError{Code: ErrorCodeContentBlocked}
 	ErrInputTooLarge              = &SafeError{Code: ErrorCodeInputTooLarge}
 	ErrInputInvalid               = &SafeError{Code: ErrorCodeInputInvalid}
 	ErrRateLimited                = &SafeError{Code: ErrorCodeRateLimited}

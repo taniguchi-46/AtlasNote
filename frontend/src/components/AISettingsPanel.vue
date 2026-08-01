@@ -2,7 +2,7 @@
   <section class="ai-settings">
     <h3>AI</h3>
     <p class="field-help">
-      API Key は表示・再表示されず、この画面を閉じると入力中の値も破棄されます。接続確認とモデル取得では保存されません。
+      API Key は表示・再表示されず、この画面を閉じると入力中の値も破棄されます。認証確認・モデル取得・生成確認では保存されません。
     </p>
 
     <div class="setting-group">
@@ -27,20 +27,20 @@
         :disabled="aiStore.isSettingsBusy"
       />
       <p class="field-help">
-        保存済みの API Key は表示しません。接続確認後にモデル一覧を手動で更新し、適用または OK でのみ保存します。
+        保存済みの API Key は表示しません。空欄のままなら、この端末に保存済みのキーを利用します。新しいキーを入力した場合だけ、適用または OK で置き換えます。
       </p>
     </div>
 
     <div class="connection-actions">
       <button type="button" :disabled="!aiStore.canCheckConnection" @click="handleCheckConnection">
-        {{ aiStore.isSettingsBusy ? '確認中…' : '接続を確認' }}
+        {{ aiStore.isSettingsBusy ? '確認中…' : '認証を確認' }}
       </button>
       <button type="button" :disabled="!aiStore.canRefreshModels" @click="handleRefreshModels">
         モデル一覧を更新
       </button>
     </div>
     <p v-if="aiStore.connectionState === 'success'" class="check-result success" role="status">
-      接続を確認しました。モデル一覧を手動で更新してください。
+      認証を確認しました。モデル一覧を手動で更新してください。
     </p>
     <p v-else-if="aiStore.connectionError" class="check-result error" role="alert">
       {{ aiStore.connectionError.message }}
@@ -70,6 +70,20 @@
         role="alert"
       >
         現在のモデルは利用できません。別のモデルを選択してから適用してください。
+      </p>
+      <div class="connection-actions generation-test-actions">
+        <button type="button" :disabled="!aiStore.canTestGeneration" @click="handleTestGeneration">
+          {{ aiStore.isSettingsBusy ? '確認中…' : '生成を確認' }}
+        </button>
+      </div>
+      <p class="field-help">
+        生成確認は、選択中のモデルへ短い固定テキストを一度だけ送ります。結果は保存せず、無料枠の利用量だけ消費する場合があります。
+      </p>
+      <p v-if="aiStore.generationTestState === 'success'" class="check-result success" role="status">
+        選択中のモデルで生成できることを確認しました。生成結果は保存していません。
+      </p>
+      <p v-else-if="aiStore.generationTestError" class="check-result error" role="alert">
+        {{ aiStore.generationTestError.message }}
       </p>
     </div>
 
@@ -159,6 +173,10 @@ async function handleRefreshModels() {
   await aiStore.refreshModels()
 }
 
+async function handleTestGeneration() {
+  await aiStore.testGeneration()
+}
+
 async function handleApply(): Promise<boolean> {
   return aiStore.applyConfiguration()
 }
@@ -194,6 +212,7 @@ button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 4px;
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 .primary-button { background: var(--brand-primary); color: white; border-color: var(--brand-primary); }
 .connection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.generation-test-actions { margin-top: 12px; }
 .field-help { color: var(--text-secondary); font-size: 13px; line-height: 1.5; margin: 6px 0; max-width: 600px; }
 .check-result, .warning { font-size: 13px; line-height: 1.5; }
 .check-result.success { color: var(--success-color, #18794e); }

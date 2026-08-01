@@ -45,10 +45,10 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 			},
 		},
 		{
-			name:     "Gemini",
+			name:     "Gemini 3.6 Flash",
 			provider: ProviderGemini,
-			modelID:  "gemini-2.5-flash",
-			endpoint: geminiSummaryEndpoint + "gemini-2.5-flash:streamGenerateContent?alt=sse",
+			modelID:  "gemini-3.6-flash",
+			endpoint: geminiSummaryEndpoint + "gemini-3.6-flash:streamGenerateContent?alt=sse",
 			response: "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"candidates\\\":\"}]}}]}\n\ndata: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"[]}\"}]},\"finishReason\":\"STOP\"}]}\n",
 			validate: func(t *testing.T, payload map[string]any) {
 				t.Helper()
@@ -58,6 +58,10 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 				config, ok := payload["generationConfig"].(map[string]any)
 				if !ok || config["maxOutputTokens"] != float64(summaryOutputTokenLimit) || config["responseMimeType"] != "application/json" {
 					t.Fatalf("Gemini librarian generation config = %#v", config)
+				}
+				thinkingConfig, ok := config["thinkingConfig"].(map[string]any)
+				if !ok || thinkingConfig["thinkingLevel"] != "minimal" {
+					t.Fatalf("Gemini librarian thinking config = %#v", config["thinkingConfig"])
 				}
 				if _, ok := config["responseSchema"].(map[string]any); !ok {
 					t.Fatalf("Gemini librarian response schema = %#v", config["responseSchema"])
@@ -133,28 +137,32 @@ func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {
 	}
 
 	for _, testCase := range []struct {
-		name     string
-		provider ProviderID
-		modelID  string
-		response string
+		name      string
+		provider  ProviderID
+		modelID   string
+		response  string
+		wantError error
 	}{
 		{
-			name:     "OpenRouter output limit",
-			provider: ProviderOpenRouter,
-			modelID:  "openai/gpt-test",
-			response: "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"candidates\\\":[]}\"},\"finish_reason\":\"length\"}]}\n",
+			name:      "OpenRouter output limit",
+			provider:  ProviderOpenRouter,
+			modelID:   "openai/gpt-test",
+			response:  "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"candidates\\\":[]}\"},\"finish_reason\":\"length\"}]}\n",
+			wantError: ErrInvalidResponse,
 		},
 		{
-			name:     "Gemini output limit",
-			provider: ProviderGemini,
-			modelID:  "gemini-2.5-flash",
-			response: "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"candidates\\\":[]}\"}]},\"finishReason\":\"MAX_TOKENS\"}]}\n",
+			name:      "Gemini output limit",
+			provider:  ProviderGemini,
+			modelID:   "gemini-2.5-flash",
+			response:  "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"candidates\\\":[]}\"}]},\"finishReason\":\"MAX_TOKENS\"}]}\n",
+			wantError: ErrOutputLimit,
 		},
 		{
-			name:     "unexpected EOF",
-			provider: ProviderOpenRouter,
-			modelID:  "openai/gpt-test",
-			response: "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"candidates\\\":[]}\"}}]}\n",
+			name:      "unexpected EOF",
+			provider:  ProviderOpenRouter,
+			modelID:   "openai/gpt-test",
+			response:  "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"candidates\\\":[]}\"}}]}\n",
+			wantError: ErrInvalidResponse,
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -171,7 +179,7 @@ func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {
 				Prompt:    "bounded librarian prompt",
 				Schema:    json.RawMessage(`{"type":"object"}`),
 			}, nil)
-			if !errors.Is(err, ErrInvalidResponse) {
+			if !errors.Is(err, testCase.wantError) {
 				t.Fatalf("incomplete librarian stream error = %v", err)
 			}
 		})

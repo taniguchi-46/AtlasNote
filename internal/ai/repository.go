@@ -81,6 +81,26 @@ ON CONFLICT(provider_id) DO UPDATE SET
 	return nil
 }
 
+func (r *Repository) updateModel(ctx context.Context, providerID ProviderID, modelID string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := r.db.ExecContext(ctx, `
+UPDATE ai_provider_settings
+SET model_id = ?, updated_at = ?
+WHERE provider_id = ?
+`, modelID, now, providerID)
+	if err != nil {
+		return fmt.Errorf("update AI provider model: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check AI provider model update: %w", err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("AI provider settings not found")
+	}
+	return nil
+}
+
 func (r *Repository) delete(ctx context.Context, providerID ProviderID) error {
 	if _, err := r.db.ExecContext(ctx, "DELETE FROM ai_provider_settings WHERE provider_id = ?", providerID); err != nil {
 		return fmt.Errorf("delete AI provider settings: %w", err)

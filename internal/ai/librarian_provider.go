@@ -100,9 +100,10 @@ func (a *HTTPProviderAdapter) generateGeminiLibrarian(ctx context.Context, apiKe
 			} `json:"parts"`
 		} `json:"contents"`
 		GenerationConfig struct {
-			MaxOutputTokens  int             `json:"maxOutputTokens"`
-			ResponseMIMEType string          `json:"responseMimeType"`
-			ResponseSchema   json.RawMessage `json:"responseSchema"`
+			MaxOutputTokens  int                   `json:"maxOutputTokens"`
+			ResponseMIMEType string                `json:"responseMimeType"`
+			ResponseSchema   json.RawMessage       `json:"responseSchema"`
+			ThinkingConfig   *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 		} `json:"generationConfig"`
 		Store bool `json:"store"`
 	}{Store: false}
@@ -120,6 +121,7 @@ func (a *HTTPProviderAdapter) generateGeminiLibrarian(ctx context.Context, apiKe
 	payload.GenerationConfig.MaxOutputTokens = summaryOutputTokenLimit
 	payload.GenerationConfig.ResponseMIMEType = "application/json"
 	payload.GenerationConfig.ResponseSchema = input.Schema
+	payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -233,7 +235,10 @@ func parseOpenRouterLibrarianChunk(data []byte) (string, bool, error) {
 
 func parseGeminiLibrarianChunk(data []byte) (string, bool, error) {
 	var payload struct {
-		Error      json.RawMessage `json:"error"`
+		Error          json.RawMessage `json:"error"`
+		PromptFeedback struct {
+			BlockReason string `json:"blockReason"`
+		} `json:"promptFeedback"`
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
@@ -250,6 +255,9 @@ func parseGeminiLibrarianChunk(data []byte) (string, bool, error) {
 		return "", false, ErrProviderUnavailable
 	}
 	if len(payload.Candidates) == 0 {
+		if strings.TrimSpace(payload.PromptFeedback.BlockReason) != "" {
+			return "", false, ErrContentBlocked
+		}
 		return "", false, nil
 	}
 	candidate := payload.Candidates[0]
@@ -263,7 +271,7 @@ func parseGeminiLibrarianChunk(data []byte) (string, bool, error) {
 		return parts.String(), false, nil
 	}
 	if strings.TrimSpace(candidate.FinishReason) != "STOP" {
-		return "", false, ErrInvalidResponse
+		return "", false, geminiFinishReasonError(candidate.FinishReason)
 	}
 	return parts.String(), true, nil
 }

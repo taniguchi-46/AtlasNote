@@ -131,10 +131,10 @@ func TestHTTPProviderAdapterGeneratesBoundedPrivateSummary(t *testing.T) {
 			},
 		},
 		{
-			name:     "Gemini",
+			name:     "Gemini 3.6 Flash",
 			provider: ProviderGemini,
-			modelID:  "gemini-2.5-flash",
-			endpoint: geminiSummaryEndpoint + "gemini-2.5-flash:generateContent",
+			modelID:  "gemini-3.6-flash",
+			endpoint: geminiSummaryEndpoint + "gemini-3.6-flash:generateContent",
 			response: `{"candidates":[{"content":{"parts":[{"text":"summary"},{"text":" result"}]},"finishReason":"STOP"}]}`,
 			wantText: "summary result",
 			validate: func(t *testing.T, payload map[string]any) {
@@ -145,6 +145,10 @@ func TestHTTPProviderAdapterGeneratesBoundedPrivateSummary(t *testing.T) {
 				config, ok := payload["generationConfig"].(map[string]any)
 				if !ok || config["maxOutputTokens"] != float64(summaryOutputTokenLimit) {
 					t.Fatalf("Gemini generation config = %#v", config)
+				}
+				thinkingConfig, ok := config["thinkingConfig"].(map[string]any)
+				if !ok || thinkingConfig["thinkingLevel"] != "minimal" {
+					t.Fatalf("Gemini thinking config = %#v", config["thinkingConfig"])
 				}
 				instruction, ok := payload["systemInstruction"].(map[string]any)
 				if !ok || !strings.Contains(instructionText(instruction), "要約") {
@@ -266,6 +270,18 @@ func TestHTTPProviderAdapterRejectsUnsafeInputAndRedactsProviderErrors(t *testin
 	}
 }
 
+func TestGeminiSummaryThinkingConfigIsScopedToGemini36Flash(t *testing.T) {
+	config := geminiSummaryThinkingConfig("gemini-3.6-flash")
+	if config == nil || config.ThinkingLevel != "minimal" {
+		t.Fatalf("Gemini 3.6 Flash thinking config = %#v", config)
+	}
+	for _, modelID := range []string{"gemini-2.5-flash", "gemini-3.1-pro-preview"} {
+		if config := geminiSummaryThinkingConfig(modelID); config != nil {
+			t.Fatalf("unsupported model %q received thinking config %#v", modelID, config)
+		}
+	}
+}
+
 func TestStatusErrorSeparatesMissingModelFromUnsupportedGenerationCapability(t *testing.T) {
 	if err := statusError(jsonResponse(http.StatusNotFound, "not found"), true); !errors.Is(err, ErrModelUnavailable) {
 		t.Fatalf("not found generation error = %v, want ErrModelUnavailable", err)
@@ -277,24 +293,47 @@ func TestStatusErrorSeparatesMissingModelFromUnsupportedGenerationCapability(t *
 	}
 }
 
+func TestStatusErrorClassifiesConfigurationWithoutLeakingProviderMessage(t *testing.T) {
+	secretMarker := "provider-configuration-secret-marker"
+	err := statusError(jsonResponse(http.StatusBadRequest, `{
+"error":{"status":"FAILED_PRECONDITION","message":"`+secretMarker+`"}
+}`), true)
+	if !errors.Is(err, ErrProviderConfiguration) {
+		t.Fatalf("configuration error = %v, want ErrProviderConfiguration", err)
+	}
+	if strings.Contains(err.Error(), secretMarker) {
+		t.Fatal("provider configuration message leaked from status error")
+	}
+}
+
 func TestHTTPProviderAdapterRejectsIncompleteSummaryResponses(t *testing.T) {
 	testCases := []struct {
-		name     string
-		provider ProviderID
-		modelID  string
-		response string
+		name      string
+		provider  ProviderID
+		modelID   string
+		response  string
+		wantError error
 	}{
 		{
-			name:     "OpenRouter output limit",
-			provider: ProviderOpenRouter,
-			modelID:  "openai/gpt-test",
-			response: `{"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]}`,
+			name:      "OpenRouter output limit",
+			provider:  ProviderOpenRouter,
+			modelID:   "openai/gpt-test",
+			response:  `{"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]}`,
+			wantError: ErrInvalidResponse,
 		},
 		{
-			name:     "Gemini incomplete candidate",
-			provider: ProviderGemini,
-			modelID:  "gemini-2.5-flash",
-			response: `{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}`,
+			name:      "Gemini incomplete candidate",
+			provider:  ProviderGemini,
+			modelID:   "gemini-2.5-flash",
+			response:  `{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}`,
+			wantError: ErrOutputLimit,
+		},
+		{
+			name:      "Gemini blocked prompt",
+			provider:  ProviderGemini,
+			modelID:   "gemini-2.5-flash",
+			response:  `{"promptFeedback":{"blockReason":"SAFETY"}}`,
+			wantError: ErrContentBlocked,
 		},
 	}
 
@@ -310,7 +349,7 @@ func TestHTTPProviderAdapterRejectsIncompleteSummaryResponses(t *testing.T) {
 				ModelID:    testCase.modelID,
 				Content:    "safe input",
 			})
-			if !errors.Is(err, ErrInvalidResponse) {
+			if !errors.Is(err, testCase.wantError) {
 				t.Fatalf("incomplete summary error = %v", err)
 			}
 			if calls != 1 {

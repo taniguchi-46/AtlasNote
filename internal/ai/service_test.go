@@ -61,6 +61,7 @@ type testChecker struct {
 	err      error
 	calls    int
 	provider ProviderID
+	apiKey   string
 }
 
 type testProviderAdapter struct {
@@ -74,6 +75,7 @@ type testProviderAdapter struct {
 	summaryFunc    func(context.Context, ProviderID, string, GenerateSummaryInput) (SummaryResult, error)
 
 	mu                sync.Mutex
+	checkCalls        int
 	listCalls         int
 	summaryCalls      int
 	receivedProvider  ProviderID
@@ -81,7 +83,12 @@ type testProviderAdapter struct {
 	receivedSummaryIn GenerateSummaryInput
 }
 
-func (a *testProviderAdapter) CheckConnection(context.Context, ProviderID, string) error {
+func (a *testProviderAdapter) CheckConnection(_ context.Context, providerID ProviderID, apiKey string) error {
+	a.mu.Lock()
+	a.checkCalls++
+	a.receivedProvider = providerID
+	a.receivedAPIKey = apiKey
+	a.mu.Unlock()
 	return a.checkErr
 }
 
@@ -119,9 +126,10 @@ func (a *testProviderAdapter) GenerateSummary(ctx context.Context, providerID Pr
 	return a.summaryResult, nil
 }
 
-func (c *testChecker) Check(_ context.Context, providerID ProviderID, _ string) error {
+func (c *testChecker) Check(_ context.Context, providerID ProviderID, apiKey string) error {
 	c.calls++
 	c.provider = providerID
+	c.apiKey = apiKey
 	return c.err
 }
 
@@ -386,6 +394,114 @@ func TestListModelsUsesDraftCredentialWithoutPersistingIt(t *testing.T) {
 		t.Fatal("listing models persisted a draft API key")
 	}
 	assertAIExecutionHasNoPersistentSideEffects(t, db)
+}
+
+func TestSavedCredentialCanBeReusedForSetupOperations(t *testing.T) {
+	store := newMemoryCredentialStore()
+	adapter := &testProviderAdapter{
+		listResult: ModelListResult{Models: []ModelInfo{{
+			ID: "gemini-2.5-flash", SupportsSummary: true, Available: true,
+		}}},
+		summaryResult: SummaryResult{Text: "probe-result-marker"},
+	}
+	service, _ := newTestServiceWithAdapter(t, store, adapter)
+	secret := "saved-gemini-key-marker"
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderGemini,
+		APIKey:     secret,
+		ModelID:    "gemini-2.5-flash",
+	}); err != nil {
+		t.Fatalf("configure saved Gemini credential: %v", err)
+	}
+	before, err := service.repository.get(t.Context(), ProviderGemini)
+	if err != nil || before == nil {
+		t.Fatal("read saved Gemini provider record")
+	}
+
+	if _, err := service.TestConnection(t.Context(), TestConnectionInput{
+		ProviderID: ProviderGemini, UseStoredCredential: true,
+	}); err != nil {
+		t.Fatalf("test saved credential connection: %v", err)
+	}
+	adapter.mu.Lock()
+	checkCalls := adapter.checkCalls
+	checkKey := adapter.receivedAPIKey
+	adapter.mu.Unlock()
+	if checkCalls != 1 || checkKey != secret {
+		t.Fatalf("saved credential connection call did not use the configured credential: calls=%d", checkCalls)
+	}
+
+	if _, err := service.ListModels(t.Context(), ListModelsInput{
+		ProviderID: ProviderGemini, UseStoredCredential: true,
+	}); err != nil {
+		t.Fatalf("list models with saved credential: %v", err)
+	}
+	adapter.mu.Lock()
+	listCalls := adapter.listCalls
+	listKey := adapter.receivedAPIKey
+	adapter.mu.Unlock()
+	if listCalls != 1 || listKey != secret {
+		t.Fatalf("saved credential model list call did not use the configured credential: calls=%d", listCalls)
+	}
+
+	if _, err := service.TestGeneration(t.Context(), TestGenerationInput{
+		ProviderID: ProviderGemini, ModelID: "gemini-2.5-flash", UseStoredCredential: true,
+	}); err != nil {
+		t.Fatalf("test generation with saved credential: %v", err)
+	}
+	adapter.mu.Lock()
+	summaryCalls := adapter.summaryCalls
+	summaryKey := adapter.receivedAPIKey
+	summaryInput := adapter.receivedSummaryIn
+	adapter.mu.Unlock()
+	if summaryCalls != 1 || summaryKey != secret || summaryInput.Content != generationProbeContent {
+		t.Fatalf("saved credential generation call did not use the fixed probe: calls=%d", summaryCalls)
+	}
+
+	after, err := service.repository.get(t.Context(), ProviderGemini)
+	if err != nil || after == nil {
+		t.Fatal("read provider record after setup operations")
+	}
+	if after.CredentialRef != before.CredentialRef || after.ModelID != before.ModelID || store.setCalls != 1 {
+		t.Fatalf("setup operations changed saved credential record: before=%#v after=%#v saves=%d", before, after, store.setCalls)
+	}
+}
+
+func TestUpdateProviderModelKeepsSavedCredential(t *testing.T) {
+	store := newMemoryCredentialStore()
+	service, _ := newTestService(t, store, &testChecker{})
+	secret := "model-only-update-key-marker"
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderGemini,
+		APIKey:     secret,
+		ModelID:    "gemini-2.5-flash",
+	}); err != nil {
+		t.Fatalf("configure Gemini: %v", err)
+	}
+	before, err := service.repository.get(t.Context(), ProviderGemini)
+	if err != nil || before == nil {
+		t.Fatal("read Gemini provider record before model update")
+	}
+	settings, err := service.UpdateProviderModel(t.Context(), UpdateProviderModelInput{
+		ProviderID: ProviderGemini,
+		ModelID:    "gemini-2.5-pro",
+	})
+	if err != nil {
+		t.Fatalf("update Gemini model: %v", err)
+	}
+	if got := findSettings(t, settings, ProviderGemini); got.ModelID != "gemini-2.5-pro" || got.CredentialStatus != CredentialStatusPersistent {
+		t.Fatalf("updated Gemini setting = %#v", got)
+	}
+	after, err := service.repository.get(t.Context(), ProviderGemini)
+	if err != nil || after == nil {
+		t.Fatal("read Gemini provider record after model update")
+	}
+	if after.CredentialRef != before.CredentialRef || after.CredentialStorage != before.CredentialStorage || store.setCalls != 1 || store.deleteCalls != 0 {
+		t.Fatalf("model-only update changed credential storage: before=%#v after=%#v saves=%d deletes=%d", before, after, store.setCalls, store.deleteCalls)
+	}
+	if value, err := service.GetCredential(t.Context(), ProviderGemini); err != nil || value != secret {
+		t.Fatalf("model-only update changed stored key")
+	}
 }
 
 func TestGenerateSummaryIsSingleFlightAndKeepsResultEphemeral(t *testing.T) {

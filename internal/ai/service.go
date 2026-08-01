@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 )
 
 const modelMetadataCacheTTL = 10 * time.Minute
+
+const generationProbeContent = "生成確認用の短いテキストです。"
 
 type cachedModelMetadata struct {
 	models      []ModelInfo
@@ -184,42 +187,114 @@ func (s *Service) Configure(ctx context.Context, input ConfigureProviderInput) (
 	return settings, nil
 }
 
-// TestConnection verifies a draft API key without touching credential storage
-// or SQLite settings. Provider failures are converted to safe, stable errors.
+// TestConnection verifies either a draft key or an explicitly selected saved
+// credential without changing credential storage or SQLite settings. Provider
+// failures are converted to safe, stable errors.
 func (s *Service) TestConnection(ctx context.Context, input TestConnectionInput) (ConnectionTestResult, error) {
 	providerID, err := normalizeProviderID(input.ProviderID)
 	if err != nil {
 		return ConnectionTestResult{}, err
 	}
-	if err := validateAPIKey(input.APIKey); err != nil {
+	apiKey, err := s.operationCredential(ctx, providerID, input.APIKey, input.UseStoredCredential)
+	if err != nil {
 		return ConnectionTestResult{}, err
 	}
 	operationCtx, cancel := s.operationContext(ctx)
 	defer cancel()
-	if err := s.checker.Check(operationCtx, providerID, input.APIKey); err != nil {
+	if err := s.checker.Check(operationCtx, providerID, apiKey); err != nil {
 		return ConnectionTestResult{}, toSafeError(err)
 	}
 	return ConnectionTestResult{Success: true}, nil
 }
 
-// ListModels verifies and uses a draft API key without persisting either the
-// key or the returned model metadata.
+// ListModels uses either a draft key or an explicitly selected saved
+// credential without persisting either the request key or returned metadata.
 func (s *Service) ListModels(ctx context.Context, input ListModelsInput) (ModelListResult, error) {
 	providerID, err := normalizeProviderID(input.ProviderID)
 	if err != nil {
 		return ModelListResult{}, err
 	}
-	if err := validateAPIKey(input.APIKey); err != nil {
+	apiKey, err := s.operationCredential(ctx, providerID, input.APIKey, input.UseStoredCredential)
+	if err != nil {
 		return ModelListResult{}, err
 	}
 	operationCtx, cancel := s.operationContext(ctx)
 	defer cancel()
-	result, err := s.adapter.ListModels(operationCtx, providerID, input.APIKey)
+	result, err := s.adapter.ListModels(operationCtx, providerID, apiKey)
 	if err != nil {
 		return ModelListResult{}, toSafeError(err)
 	}
 	s.cacheModelMetadata(providerID, result)
 	return result, nil
+}
+
+// TestGeneration performs one explicit, fixed-content generation request for
+// the selected model. The response text is discarded and no model setting or
+// credential is written by this method.
+func (s *Service) TestGeneration(ctx context.Context, input TestGenerationInput) (ConnectionTestResult, error) {
+	providerID, err := normalizeProviderID(input.ProviderID)
+	if err != nil {
+		return ConnectionTestResult{}, err
+	}
+	modelID, err := normalizeSummaryModelID(providerID, input.ModelID)
+	if err != nil {
+		return ConnectionTestResult{}, err
+	}
+	apiKey, err := s.operationCredential(ctx, providerID, input.APIKey, input.UseStoredCredential)
+	if err != nil {
+		return ConnectionTestResult{}, err
+	}
+	if !s.tryStartGeneration() {
+		return ConnectionTestResult{}, ErrBusy
+	}
+	defer s.finishGeneration()
+
+	operationCtx, cancel := s.operationContext(ctx)
+	defer cancel()
+	result, err := s.adapter.GenerateSummary(operationCtx, providerID, apiKey, GenerateSummaryInput{
+		ProviderID: providerID,
+		ModelID:    modelID,
+		Content:    generationProbeContent,
+	})
+	if err != nil {
+		return ConnectionTestResult{}, toSafeError(err)
+	}
+	if strings.TrimSpace(result.Text) == "" {
+		return ConnectionTestResult{}, ErrInvalidResponse
+	}
+	return ConnectionTestResult{Success: true}, nil
+}
+
+// UpdateProviderModel changes only the selected model for a provider that
+// already has an available saved credential. It intentionally does not rotate
+// or expose that credential.
+func (s *Service) UpdateProviderModel(ctx context.Context, input UpdateProviderModelInput) ([]ProviderSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	providerID, err := normalizeProviderID(input.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	modelID, err := normalizeSummaryModelID(providerID, input.ModelID)
+	if err != nil {
+		return nil, err
+	}
+	record, err := s.repository.get(ctx, providerID)
+	if err != nil {
+		return nil, ErrConfigurationUnavailable
+	}
+	if record == nil {
+		return nil, ErrReauthenticationRequired
+	}
+	available, err := s.credentials.Has(record.CredentialRef)
+	if err != nil || !available {
+		return nil, ErrReauthenticationRequired
+	}
+	if err := s.repository.updateModel(ctx, providerID, modelID); err != nil {
+		return nil, ErrConfigurationUnavailable
+	}
+	return s.listSettings(ctx)
 }
 
 // GenerateSummary resolves a saved credential internally. It never mutates
@@ -274,6 +349,19 @@ func (s *Service) GetCredential(ctx context.Context, providerID ProviderID) (str
 	apiKey, err := s.credentials.Get(record.CredentialRef)
 	if err != nil {
 		return "", ErrReauthenticationRequired
+	}
+	return apiKey, nil
+}
+
+func (s *Service) operationCredential(ctx context.Context, providerID ProviderID, apiKey string, useStoredCredential bool) (string, error) {
+	if useStoredCredential {
+		if apiKey != "" {
+			return "", ErrAPIKeyInvalid
+		}
+		return s.GetCredential(ctx, providerID)
+	}
+	if err := validateAPIKey(apiKey); err != nil {
+		return "", err
 	}
 	return apiKey, nil
 }
