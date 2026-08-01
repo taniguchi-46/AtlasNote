@@ -76,6 +76,7 @@ v3の保存基盤、AIアシスタント／ライティングの基本経路、�
 - [x] 【実装済み】`test:ai-assistant`相当のmock Wails APIテストを追加する（`test:ai-v3`）。
 - [x] 【実装済み】`test:ai-history`相当の保存、削除、再生成、stale／orphaned境界テストを追加する。
 - [x] 【実装済み】AI機能を単一チャットtimelineの下部共通コンポーザーへ統合する。`＋`メニューからノート／Notebook、要約、文章作成6種、AI司書、Web検索を選択でき、Ask／Agent切替、入力欄内右下の送信、tool trace直後の結果カード、保存済み履歴・成果物・要約履歴への導線を実装した。履歴読込・削除、モデル設定、UI配置、ドラッグ寸法、狭幅表示を`test:ai-workspace`／`test:ai-chat`で確認した（2026-08-01）。
+- [x] 【実装済み】AI自由記述のMarkdown出力契約と、既存HTMLを含む回答を安全に見出し・リストへ変換するAI専用DOMサニタイズ表示を追加した。通常ノートのraw HTML無効化、原文保存、危険なURL・外部リソース遮断を維持し、`test:ai-markup-safety`、既存AIテスト、Goテスト、Frontend typecheck/buildで確認した（2026-08-01）。
 - [x] 【実装済み】Ask、Agent、文章作成、Web検索はChatGPTライクな共通下書きを正とする。機能別下書きは保持・永続化せず、固定scopeツールは追加context・下書きを使用しない。
 - [ ] 【未検証】GoでRepository、Service、Wails API、migration、rollbackをtest doubleと一時DBで通し検証する。
 - [ ] 【未検証】AI失敗後もローカル保存、編集、検索、既存同期が継続することを手動・統合で検証する。

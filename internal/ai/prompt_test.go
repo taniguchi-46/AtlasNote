@@ -86,6 +86,25 @@ func TestPromptBuildersPreserveTaskOutputContracts(t *testing.T) {
 		}
 	}
 
+	for name, instruction := range map[string]string{
+		"summary":    summary,
+		"ask":        buildAskInstruction(),
+		"brainstorm": buildBrainstormInstruction(),
+		"writing":    buildWritingInstruction(WritingKindDocument),
+	} {
+		t.Run(name+" markdown output", func(t *testing.T) {
+			for _, fragment := range []string{
+				"Markdownで出力",
+				"raw HTMLタグやHTML属性を出力せず",
+				"回答全体をコードフェンスで囲まない",
+			} {
+				if !strings.Contains(instruction, fragment) {
+					t.Fatalf("instruction is missing markdown output rule %q: %q", fragment, instruction)
+				}
+			}
+		})
+	}
+
 	writingCases := map[WritingKind]string{
 		WritingKindPrompt:            "プロンプト",
 		WritingKindPromptImprovement: "改善済みプロンプト",

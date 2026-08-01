@@ -136,6 +136,7 @@ Askは読み取り専用であり続ける。Agentの書き込み権限は上記
 - 既存の会話・成果物は利用者の明示操作時だけ端末ローカルSQLiteへ保存する。構造化tool traceは保存対象に含めない。
 - 複数ターンで参照contextを変更した場合、会話履歴のsource snapshotはターンをまたいで和集合を保持し、最初に回答へ使ったrevisionを保存する。
 - AIチャット刷新に伴うDB schema、migration、Markdown形式、WebDAV manifest/object/outboxの変更は行わない。
+- 自由記述AI（要約、Ask、Brainstorm、Writing）の正規出力はMarkdownとする。Providerや既存履歴がHTMLを含む場合、AIプレビュー専用のDOMサニタイズを通して見出し・リストなどへ変換し、raw HTMLをそのままDOMへ挿入しない。保存済みの原文は書き換えず、通常ノートのMarkdownセキュリティ設定は変更しない。
 - API Keyとcredential referenceの扱いは既存契約を維持する。
 
 ## 7. 配置と狭幅

@@ -11,7 +11,7 @@ import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { Link } from '@tiptap/extension-link'
 import { Markdown } from 'tiptap-markdown'
-import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
+import { AI_MARKDOWN_OPTIONS, sanitizeAIHtml } from '../utils/aiMarkupSecurity'
 import { parseNoteLinkHref } from '../utils/noteLink'
 
 const props = withDefaults(defineProps<{
@@ -28,7 +28,8 @@ function updateMarkdown(markdown: string) {
   if (!editor.value) return
   try {
     const html = (editor.value.storage as any).markdown.parser.parse(markdown)
-    ;(editor.value.commands as any).setContent(html, { emitUpdate: false })
+    const sanitizedHtml = sanitizeAIHtml(html)
+    ;(editor.value.commands as any).setContent(sanitizedHtml, { emitUpdate: false })
     parseFailed.value = false
   } catch {
     // AI output is still useful as escaped plain text if it contains malformed
@@ -42,7 +43,7 @@ onMounted(() => {
     editable: false,
     extensions: [
       StarterKit.configure({ link: false }),
-      Markdown.configure(RICH_MARKDOWN_OPTIONS),
+      Markdown.configure(AI_MARKDOWN_OPTIONS),
       Link.configure({
         openOnClick: false,
         protocols: ['atlasnote'],

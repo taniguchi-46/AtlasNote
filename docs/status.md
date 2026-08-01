@@ -118,6 +118,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Phase 4 v3の保存仕様（明示保存する会話・成果物、生成成功時に自動保存する要約履歴、SQLiteローカル管理データ、アプリケーション上の完全削除、参照元ノート削除後の保持、CI例外の扱い）は確定しています。schema version 12〜13の詳細は `docs/development/ai-integration.md` を正とします。
 - Phase 4 v3の実装進捗は `docs/todo/todo-phese4-v3.md` で【実装済み】【未検証】【決定済み・未実装】に分類しています。基本実装と自動テストは追加済みですが、制限付きAgentの変更提案・差分確認・明示適用、手動受け入れ、Wails API通し検証、追加異常系が残っています。
 - CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功しました（2026-07-30）。AI司書キャンセル時の生成ロックに関する既知CI例外は解消しましたが、Phase 4完了には残る手動受け入れと追加検証が必要です。
+- AI自由記述のMarkdown出力契約とAI専用DOMサニタイズ表示を実装し、通常ノートのraw HTML無効化・AI原文保存・危険なURL／外部リソース遮断を維持しました。`test:ai-markup-safety`、既存AIテスト、Go全体テスト、Frontend typecheck/buildはローカル成功済みです（2026-08-01）。Wails CLIのローカル未導入により統合ビルドは未確認で、CIでの再確認が必要です。
 
 ## 保留事項
 

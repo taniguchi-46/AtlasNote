@@ -20,6 +20,7 @@
     "test:ai-v3": "node scripts/test-ai-v3.mjs",
     "test:ai-chat": "node scripts/test-ai-chat.mjs",
     "test:ai-workspace": "node scripts/test-ai-workspace.mjs",
+    "test:ai-markup-safety": "node scripts/test-ai-markup-safety.mjs",
     "test:tags": "node scripts/test-tag-store.mjs",
     "test:operation-logger": "node scripts/test-operation-logger.mjs",
     "test:note-links": "node scripts/test-note-links.mjs",
@@ -48,6 +49,7 @@
     "@tiptap/pm": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
     "@tiptap/vue-3": "^3.27.1",
+    "dompurify": "^3.4.12",
     "lowlight": "^3.3.0",
     "pinia": "^3.0.4",
     "reka-ui": "^2.10.1",
@@ -56,6 +58,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
+    "jsdom": "^29.1.1",
     "typescript": "^5.8.3",
     "unocss": "^66.7.4",
     "vite": "^8.1.3",

@@ -116,10 +116,12 @@ Go Backend
 ### 外部Markdownのraw HTML
 
 - Markdown本文は正本のまま保存し、raw HTMLを保存時に削除・書換しない。
-- MarkdownからRichエディタへ変換するときはMarkdownパーサーのHTML解釈を無効にし、raw HTMLを実行可能なDOM要素へ変換しない。
+- 通常ノートのMarkdownからRichエディタへ変換するときはMarkdownパーサーのHTML解釈を無効にし、raw HTMLを実行可能なDOM要素へ変換しない。
 - `<script>`などの要素、`onclick`などのイベント属性、raw HTML内の`javascript:` URLはすべてHTMLとして許可しない。
 - 通常のMarkdownリンクと画像URLにもパーサーのURL検証を適用し、危険なURLをリンクまたは画像として生成しない。
-- 将来raw HTMLの表示が必要になった場合は、許可する要素・属性・URL schemeを先に定義し、regexではなくDOMベースの専用サニタイザーを採用する。
+- 通常ノートのRichエディタは引き続きraw HTMLを無効にする。AIの回答プレビューだけは、Markdownと既存履歴のHTML混在を受け付けるが、DOMベースの専用サニタイザーで許可タグ・属性・URL schemeを限定してからTiptapへ渡す。
+- AIプレビューで許可する要素は見出し、段落、改行、リスト、引用、強調、コード、区切り線、リンクに限定する。`script`、`style`、イベント属性、外部リソース要素、画像、SVG、フォーム、`javascript:`・`data:`・`file:` URLは許可しない。
+- AIの保存済み回答は原文を保持し、表示時に毎回サニタイズする。プロンプトのMarkdown出力規則はユーザビリティ向けであり、セキュリティ境界は表示時サニタイズとする。
 
 ## 未確定事項
 
