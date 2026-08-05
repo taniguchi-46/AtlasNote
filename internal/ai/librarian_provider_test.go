@@ -99,11 +99,12 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 				}, nil
 			})})
 
-			result, err := adapter.GenerateLibrarian(context.Background(), testCase.provider, "librarian-key", LibrarianProviderInput{
-				Operation: LibrarianOperationRelated,
-				ModelID:   testCase.modelID,
-				Prompt:    "bounded librarian prompt",
-				Schema:    json.RawMessage(`{"type":"object","additionalProperties":false}`),
+			result, err := adapter.GenerateStructured(context.Background(), testCase.provider, "librarian-key", StructuredGenerationInput{
+				Name:            "atlas_note_librarian",
+				ModelID:         testCase.modelID,
+				Prompt:          "bounded librarian prompt",
+				Schema:          json.RawMessage(`{"type":"object","additionalProperties":false}`),
+				MaxOutputTokens: summaryOutputTokenLimit,
 			}, func(chunk string) error {
 				chunks = append(chunks, chunk)
 				return nil
@@ -126,11 +127,12 @@ func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader("data: {not-json}\n")),
 		}, nil
 	})})
-	_, err := adapter.GenerateLibrarian(context.Background(), ProviderOpenRouter, "librarian-key", LibrarianProviderInput{
-		Operation: LibrarianOperationTitle,
-		ModelID:   "openai/gpt-test",
-		Prompt:    "bounded librarian prompt",
-		Schema:    json.RawMessage(`{"type":"object"}`),
+	_, err := adapter.GenerateStructured(context.Background(), ProviderOpenRouter, "librarian-key", StructuredGenerationInput{
+		Name:            "atlas_note_librarian",
+		ModelID:         "openai/gpt-test",
+		Prompt:          "bounded librarian prompt",
+		Schema:          json.RawMessage(`{"type":"object"}`),
+		MaxOutputTokens: summaryOutputTokenLimit,
 	}, nil)
 	if !errors.Is(err, ErrInvalidResponse) {
 		t.Fatalf("invalid librarian stream error = %v", err)
@@ -173,11 +175,12 @@ func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {
 					Body:       io.NopCloser(strings.NewReader(testCase.response)),
 				}, nil
 			})})
-			_, err := adapter.GenerateLibrarian(context.Background(), testCase.provider, "librarian-key", LibrarianProviderInput{
-				Operation: LibrarianOperationRelated,
-				ModelID:   testCase.modelID,
-				Prompt:    "bounded librarian prompt",
-				Schema:    json.RawMessage(`{"type":"object"}`),
+			_, err := adapter.GenerateStructured(context.Background(), testCase.provider, "librarian-key", StructuredGenerationInput{
+				Name:            "atlas_note_librarian",
+				ModelID:         testCase.modelID,
+				Prompt:          "bounded librarian prompt",
+				Schema:          json.RawMessage(`{"type":"object"}`),
+				MaxOutputTokens: summaryOutputTokenLimit,
 			}, nil)
 			if !errors.Is(err, testCase.wantError) {
 				t.Fatalf("incomplete librarian stream error = %v", err)

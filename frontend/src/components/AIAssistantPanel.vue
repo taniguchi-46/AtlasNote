@@ -221,6 +221,16 @@ function contextInput() {
     searchQuery: searchQuery.value.trim(),
     includeBacklinks: includeBacklinks.value,
     webSearch: props.webSearch,
+    ...(
+      props.chatMode === 'agent' && !props.webSearch && noteStore.activeNote
+        ? {
+            agentTarget: {
+              noteID: noteStore.activeNote.id,
+              baseRevision: noteStore.activeNote.revision,
+            },
+          }
+        : {}
+    ),
   }
 }
 
@@ -275,18 +285,23 @@ async function confirmAndAsk() {
   const webSearchSummary = props.webSearch
     ? '\nWeb検索: 有効（OpenRouter Web Search / Exaを必須化します。各検索・合計とも最大3件で、実行回数が1回でない応答は表示しません。追加料金が発生します。質問・参照内容から生成された検索クエリはOpenRouterとExaへ外部送信されます。）'
     : '\nWeb検索: 無効'
+  const agentProposalSummary = props.chatMode === 'agent' && !props.webSearch
+    ? '\nAgent変更提案: 開いているノート本文に対する差分を1件だけ生成します。保存・適用は行わず、回答後に内容を確認して明示的に適用します。'
+    : ''
   if (!window.confirm(
-    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
+    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}${agentProposalSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
   )) return false
 
+  const context = contextInput()
   const asked = await assistantStore.ask({
     kind: kind.value,
     mode: props.chatMode,
     question: question.value,
-    noteIDs: contextInput().noteIDs,
+    noteIDs: context.noteIDs,
     searchQuery: searchQuery.value,
     includeBacklinks: includeBacklinks.value,
     webSearch: props.webSearch,
+    ...(context.agentTarget ? { agentTarget: context.agentTarget } : {}),
   })
   if (asked) question.value = ''
   return asked

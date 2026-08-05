@@ -95,7 +95,16 @@
         </div>
 
         <template v-for="entry in chatStore.timeline" :key="entry.id">
-          <article :class="['ai-chat-entry', `is-${entry.role}`, `is-${entry.kind}`]">
+          <AIAgentProposalCard
+            v-if="entry.kind === 'agent-proposal'"
+            :content="entry.content"
+            :proposal="entry.proposal"
+            :state="entry.proposalState ?? 'generating'"
+            :busy="isAnyBusy"
+            @apply="applyAgentProposal(entry.id)"
+            @discard="discardAgentProposal(entry.id)"
+          />
+          <article v-else :class="['ai-chat-entry', `is-${entry.role}`, `is-${entry.kind}`]">
             <div class="ai-chat-entry-heading">
               <span class="ai-chat-entry-avatar" aria-hidden="true">
                 <UserIcon v-if="entry.role === 'user'" :size="14" />
@@ -599,6 +608,7 @@ import AILibrarianPanel from './AILibrarianPanel.vue'
 import AIAssistantPanel from './AIAssistantPanel.vue'
 import AIWritingPanel from './AIWritingPanel.vue'
 import AIRecordsPanel from './AIRecordsPanel.vue'
+import AIAgentProposalCard from './AIAgentProposalCard.vue'
 
 type ContextPickerKind = 'note' | 'notebook'
 type SummaryPanelHandle = { startSummary: () => Promise<boolean> }
@@ -750,12 +760,20 @@ const workspacePanelStyle = computed(() => {
     ? { width: size, flexBasis: size }
     : { height: size, flexBasis: size }
 })
+const isApplyingAgentProposal = computed(() => chatStore.timeline.some((entry) => (
+  entry.kind === 'agent-proposal' && entry.proposalState === 'applying'
+)))
+const hasPendingAgentProposal = computed(() => chatStore.timeline.some((entry) => (
+  entry.kind === 'agent-proposal'
+  && (entry.proposalState === 'generating' || entry.proposalState === 'awaiting-review' || entry.proposalState === 'applying' || entry.proposalState === 'conflict' || entry.proposalState === 'save-failure')
+)))
 const isAnyBusy = computed(() => (
   isSubmitting.value
   || aiStore.isGenerating
   || librarianStore.isGenerating
   || assistantStore.isBusy
   || writingStore.isBusy
+  || isApplyingAgentProposal.value
 ))
 const hasUsableNote = computed(() => Boolean(
   noteStore.activeNote && !noteStore.activeNote.isTrashed,
@@ -818,6 +836,7 @@ const canSubmitComposer = computed(() => {
     || !isSelectedToolAllowed.value
     || hasUnresolvedResultConflict.value
     || hasUnreadyNotebookContext.value
+    || (chatStore.mode === 'agent' && !chatStore.selectedTool && hasPendingAgentProposal.value)
   ) return false
 
   const promptRequired = (
@@ -877,6 +896,9 @@ const submitBlockedMessage = computed(() => {
   if (hasUnresolvedResultConflict.value) {
     return '表示中の候補を採用・破棄するか、結果カードを閉じてから同じツールを再実行してください。'
   }
+  if (chatStore.mode === 'agent' && !chatStore.selectedTool && hasPendingAgentProposal.value) {
+    return '現在の変更提案を適用または破棄してから、次のAgent依頼を送信してください。'
+  }
   return ''
 })
 const assistantStateWarning = computed(() => {
@@ -897,6 +919,7 @@ const composerStatus = computed(() => {
   if (writingStore.state === 'generating') return '文章を生成しています…'
   if (aiStore.summaryState === 'generating') return '要約を生成しています…'
   if (librarianStore.isGenerating) return '候補を生成しています…'
+  if (isApplyingAgentProposal.value) return '変更提案を本文へ適用しています…'
   return ''
 })
 const hasVisibleResult = computed(() => (
@@ -904,6 +927,7 @@ const hasVisibleResult = computed(() => (
   || librarianStore.state !== 'idle'
   || writingStore.state !== 'idle'
   || Boolean(writingStore.content)
+  || chatStore.timeline.some((entry) => entry.kind === 'agent-proposal')
 ))
 const contextPickerTitle = computed(() => (
   contextPickerOpen.value === 'notebook' ? 'ノートブックを追加' : 'ノートを追加'
@@ -1060,6 +1084,41 @@ async function saveConversation() {
   await assistantStore.save(`${noteTitle}との会話 ${new Date().toLocaleString('ja-JP')}`)
 }
 
+async function applyAgentProposal(entryID: string) {
+  const entry = chatStore.timeline.find((item) => item.id === entryID)
+  const proposal = entry?.proposal
+  if (
+    !proposal
+    || entry?.kind !== 'agent-proposal'
+    || (entry.proposalState !== 'awaiting-review' && entry.proposalState !== 'save-failure')
+    || isAnyBusy.value
+  ) return
+
+  if (!window.confirm(
+    `次のAgent変更提案を本文へ適用します。\n\n対象: ${proposal.targetTitle || '無題のノート'}\nrevision: ${proposal.baseRevision}\n変更箇所: 本文\n\n通常のノート保存およびWebDAV同期の対象になります。適用後は元に戻す操作で取り消してください。`,
+  )) return
+
+  chatStore.setAgentProposalState(entryID, 'applying')
+  try {
+    const outcome = await noteStore.applyAgentEditProposal(proposal)
+    if (outcome === 'applied') {
+      chatStore.setAgentProposalState(entryID, 'applied', '変更提案を本文へ適用しました。')
+    } else if (outcome === 'conflict') {
+      chatStore.setAgentProposalState(entryID, 'conflict', '対象ノートまたは本文が更新されたため、変更提案を適用できませんでした。内容を確認して再生成してください。')
+    } else {
+      chatStore.setAgentProposalState(entryID, 'save-failure', '本文の保存に失敗しました。ノートを確認してから再試行してください。')
+    }
+  } catch {
+    chatStore.setAgentProposalState(entryID, 'save-failure', '本文の保存に失敗しました。ノートを確認してから再試行してください。')
+  }
+  await nextTick()
+  scrollTimelineToEnd()
+}
+
+function discardAgentProposal(entryID: string) {
+  chatStore.discardAgentProposal(entryID)
+}
+
 async function openContextPicker(kind: ContextPickerKind) {
   contextPickerOpen.value = kind
   contextQuery.value = ''
@@ -1190,6 +1249,9 @@ async function runComposerSubmission() {
   const prompt = tool && fixedScopeTools.has(tool) ? '' : draftSnapshot.trim()
   const toolLabel = selectedToolLabel.value
   const userEntryID = chatStore.appendUserMessage(userSubmissionLabel(prompt, tool))
+  const agentProposalEntryID = !tool && chatStore.mode === 'agent'
+    ? chatStore.appendAgentProposalPlaceholder()
+    : null
   const traceID = tool
     ? chatStore.appendToolTrace(tool, `${toolLabel}を準備しています。`)
     : null
@@ -1243,7 +1305,15 @@ async function runComposerSubmission() {
       const response = [...assistantStore.messages]
         .reverse()
         .find((message) => message.role === 'assistant')
-      if (response) chatStore.appendAssistantMessage(response.content, assistantStore.citations)
+      if (agentProposalEntryID) {
+        chatStore.resolveAgentProposal(
+          agentProposalEntryID,
+          response?.content ?? '変更提案を生成できませんでした。',
+          assistantStore.proposal,
+        )
+      } else if (response) {
+        chatStore.appendAssistantMessage(response.content, assistantStore.citations)
+      }
       if (traceID) {
         chatStore.updateTimelineEntry(traceID, {
           content: `OpenRouter Web Search（Exa）を${assistantStore.webSearchRequests}回実行して回答しました。`,
@@ -1251,6 +1321,7 @@ async function runComposerSubmission() {
         })
       }
     } else if (assistantStore.error) {
+      if (agentProposalEntryID) chatStore.removeTimelineEntry(agentProposalEntryID)
       chatStore.appendError(assistantStore.error.message, tool ?? undefined)
       if (traceID) {
         chatStore.updateTimelineEntry(traceID, {
@@ -1265,6 +1336,7 @@ async function runComposerSubmission() {
     if (!executionFailed) {
       chatStore.removeTimelineEntry(userEntryID)
       if (traceID) chatStore.removeTimelineEntry(traceID)
+      if (agentProposalEntryID) chatStore.removeTimelineEntry(agentProposalEntryID)
       clearResultForTrace(traceID)
     }
     return
@@ -1427,6 +1499,15 @@ watch(
     recordsOpen.value = false
   },
   { immediate: true },
+)
+
+watch(
+  () => [noteStore.activeNote?.id ?? null, noteStore.activeNote?.revision ?? null] as const,
+  ([noteID, revision]) => {
+    if (noteID && typeof revision === 'number') {
+      chatStore.markAgentProposalStale(noteID, revision)
+    }
+  },
 )
 
 watch(

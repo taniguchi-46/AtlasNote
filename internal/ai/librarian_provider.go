@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func (a *HTTPProviderAdapter) GenerateLibrarian(ctx context.Context, providerID ProviderID, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error) {
+func (a *HTTPProviderAdapter) GenerateStructured(ctx context.Context, providerID ProviderID, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	providerID, err := normalizeProviderID(providerID)
 	if err != nil {
 		return "", err
@@ -19,7 +19,7 @@ func (a *HTTPProviderAdapter) GenerateLibrarian(ctx context.Context, providerID 
 	if err := validateAPIKey(apiKey); err != nil {
 		return "", err
 	}
-	if !isLibrarianOperation(input.Operation) || strings.TrimSpace(input.ModelID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Schema) == 0 {
+	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.ModelID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Schema) == 0 || input.MaxOutputTokens < 1 || input.MaxOutputTokens > textMaxOutputTokens {
 		return "", ErrInputInvalid
 	}
 	operationCtx, cancel := context.WithTimeout(nonNilContext(ctx), summaryGenerationTimeout)
@@ -27,15 +27,15 @@ func (a *HTTPProviderAdapter) GenerateLibrarian(ctx context.Context, providerID 
 
 	switch providerID {
 	case ProviderOpenRouter:
-		return a.generateOpenRouterLibrarian(operationCtx, apiKey, input, onChunk)
+		return a.generateOpenRouterStructured(operationCtx, apiKey, input, onChunk)
 	case ProviderGemini:
-		return a.generateGeminiLibrarian(operationCtx, apiKey, input, onChunk)
+		return a.generateGeminiStructured(operationCtx, apiKey, input, onChunk)
 	default:
 		return "", ErrProviderUnsupported
 	}
 }
 
-func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error) {
+func (a *HTTPProviderAdapter) generateOpenRouterStructured(ctx context.Context, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	payload := struct {
 		Model    string `json:"model"`
 		Messages []struct {
@@ -59,7 +59,7 @@ func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, a
 			} `json:"json_schema"`
 		} `json:"response_format"`
 	}{
-		Model: input.ModelID, Stream: true, MaxTokens: summaryOutputTokenLimit,
+		Model: input.ModelID, Stream: true, MaxTokens: input.MaxOutputTokens,
 	}
 	payload.Messages = append(payload.Messages, struct {
 		Role    string `json:"role"`
@@ -72,10 +72,10 @@ func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, a
 	payload.Provider.DataCollection = "deny"
 	payload.Provider.AllowFallbacks = false
 	// Avoid silently routing the structured request to a fallback that does not
-	// support the strict schema contract required by the librarian.
+	// support the strict schema contract required by the caller.
 	payload.Provider.RequireParameters = true
 	payload.ResponseFormat.Type = "json_schema"
-	payload.ResponseFormat.JSONSchema.Name = "atlas_note_librarian"
+	payload.ResponseFormat.JSONSchema.Name = input.Name
 	payload.ResponseFormat.JSONSchema.Strict = true
 	payload.ResponseFormat.JSONSchema.Schema = input.Schema
 
@@ -86,7 +86,7 @@ func (a *HTTPProviderAdapter) generateOpenRouterLibrarian(ctx context.Context, a
 	return a.streamLibrarianRequest(ctx, apiKey, ProviderOpenRouter, openRouterSummaryEndpoint, body, onChunk, parseOpenRouterLibrarianChunk)
 }
 
-func (a *HTTPProviderAdapter) generateGeminiLibrarian(ctx context.Context, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error) {
+func (a *HTTPProviderAdapter) generateGeminiStructured(ctx context.Context, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	payload := struct {
 		SystemInstruction struct {
 			Parts []struct {
@@ -118,7 +118,7 @@ func (a *HTTPProviderAdapter) generateGeminiLibrarian(ctx context.Context, apiKe
 	}{Role: "user", Parts: []struct {
 		Text string `json:"text"`
 	}{{Text: input.Prompt}}})
-	payload.GenerationConfig.MaxOutputTokens = summaryOutputTokenLimit
+	payload.GenerationConfig.MaxOutputTokens = input.MaxOutputTokens
 	payload.GenerationConfig.ResponseMIMEType = "application/json"
 	payload.GenerationConfig.ResponseSchema = input.Schema
 	payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)

@@ -18,8 +18,9 @@ const commonMarkdownOutputRules = `回答形式:
 - 回答全体をコードフェンスで囲まないでください。`
 
 const agentPromptSafetyRules = `Agentモード規則:
-- 明示的に許可された読み取りと候補生成だけを行い、許可されていない操作を実行しないでください。
-- ノートや設定の更新、保存、削除、外部公開を実行せず、変更候補は利用者が確認できる提案として返してください。`
+- 明示的に許可された読み取りと、開いているノート本文に対する単一の変更候補だけを扱ってください。
+- ノートや設定の更新、保存、削除、外部公開を実行せず、変更候補は利用者が確認・適用できる提案として返してください。
+- タイトル、タグ、ノートブック、他ノート、設定は変更対象にせず、追加コンテキストは読み取り専用です。`
 
 const webSearchPromptSafetyRules = `Web検索規則:
 - Web検索が有効な要求では、回答前に必ず1回だけWeb検索を実行してください。
@@ -165,6 +166,46 @@ func buildLibrarianPrompt(input LibrarianInput) (string, json.RawMessage, error)
 	if len([]byte(prompt)) > librarianInputLimitBytes {
 		return "", nil, ErrInputTooLarge
 	}
+	return prompt, schema, nil
+}
+
+func buildAgentEditPrompt(messages []AIConversationMessage, items []ContextNote, target AgentEditTarget) (string, json.RawMessage, error) {
+	payload := struct {
+		Target   AgentEditTarget         `json:"target"`
+		Messages []AIConversationMessage `json:"messages"`
+	}{
+		Target:   target,
+		Messages: messages,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", nil, ErrInputInvalid
+	}
+	schema := json.RawMessage(`{
+  "type":"object",
+  "additionalProperties":false,
+  "required":["message","hasProposal","reason","before","after"],
+  "properties":{
+    "message":{"type":"string"},
+    "hasProposal":{"type":"boolean"},
+    "reason":{"type":"string"},
+    "before":{"type":"string"},
+    "after":{"type":"string"}
+  }
+}`)
+	prompt := joinPromptSections(
+		"あなたはAtlas Noteの制限付きAgentです。JSON schemaに一致するJSONだけを返してください。",
+		commonPromptSafetyRules,
+		agentPromptSafetyRules,
+		`次の制約を守ってください:
+- 変更提案は target.noteID の本文だけに対する、1つの連続した before → after 置換です。
+- hasProposal が false の場合、reason、before、after はすべて空文字列にしてください。
+- hasProposal が true の場合、reason と before は空にせず、before は参照資料中の対象ノート本文にそのまま現れる文字列だけにしてください。after は削除時だけ空文字列にできます。
+- before と after を同じ内容にせず、タイトル・タグ・ノートブック・他ノートの変更を提案しないでください。
+- message には利用者向けの簡潔なMarkdown説明を書きますが、提案を保存済み・適用済みとは言わないでください。`,
+		"対象と会話JSON:\n"+string(data),
+		buildContextMessage(items),
+	)
 	return prompt, schema, nil
 }
 

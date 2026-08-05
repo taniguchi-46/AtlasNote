@@ -172,11 +172,12 @@ func (s *Service) runLibrarian(ctx context.Context, adapter StructuredStreamingP
 		return
 	}
 
-	raw, err := adapter.GenerateLibrarian(ctx, input.ProviderID, apiKey, LibrarianProviderInput{
-		Operation: input.Operation,
-		ModelID:   input.ModelID,
-		Prompt:    prompt,
-		Schema:    schema,
+	raw, err := adapter.GenerateStructured(ctx, input.ProviderID, apiKey, StructuredGenerationInput{
+		Name:            "atlas_note_librarian",
+		ModelID:         input.ModelID,
+		Prompt:          prompt,
+		Schema:          schema,
+		MaxOutputTokens: summaryOutputTokenLimit,
 	}, func(partial string) error {
 		if request.canceled() || ctx.Err() != nil {
 			return context.Canceled

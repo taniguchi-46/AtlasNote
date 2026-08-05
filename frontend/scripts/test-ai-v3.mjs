@@ -69,6 +69,7 @@ let source = {
   contentByte: 120,
 }
 let pendingAssistant
+let assistantProposal
 
 export function setSource(nextSource) {
   source = clone(nextSource)
@@ -79,6 +80,10 @@ export function deferAssistant() {
   const promise = new Promise((done) => { resolve = done })
   pendingAssistant = { promise, resolve }
   return pendingAssistant
+}
+
+export function setAssistantProposal(nextProposal) {
+  assistantProposal = nextProposal ? clone(nextProposal) : undefined
 }
 
 export async function prepareAIContext(input) {
@@ -104,6 +109,7 @@ export async function runAIAssistant(input) {
         { role: 'assistant', content: '回答マーカー' },
       ],
       sources: [clone(source)],
+      ...(assistantProposal ? { proposal: clone(assistantProposal) } : {}),
     },
   }
 }
@@ -216,6 +222,8 @@ try {
     assert.doesNotMatch(source, /localStorage/, `${name} must not persist AI state in localStorage`)
   }
   assert.match(assistantPanelSource, /window\.confirm/, 'assistant generation must require confirmation')
+  assert.match(assistantPanelSource, /Agent変更提案/, 'Agent confirmation must explain that it only creates a proposal')
+  assert.match(assistantPanelSource, /agentTarget/, 'Agent requests must identify the active-note revision')
   assert.match(writingPanelSource, /window\.confirm/, 'writing generation must require confirmation')
   assert.match(assistantPanelSource, /履歴を保存/, 'assistant history must be explicitly saveable')
   assert.match(writingPanelSource, /成果物を保存/, 'writing artifact must be explicitly saveable')
@@ -321,6 +329,36 @@ try {
   assert.equal(await assistant.save('古い履歴'), false, 'stale conversations must not be saved')
   assert.equal(await assistant.removeAllHistories(), true)
   assert.equal(mock.calls.historyDeleteAll, 1)
+
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 5,
+    contentByte: 120,
+  })
+  mock.setAssistantProposal({
+    targetNoteID: 'note-1',
+    targetTitle: '対象ノート',
+    baseRevision: 5,
+    reason: '重複を減らすため',
+    before: '変更前',
+    after: '変更後',
+    affectedFields: ['content'],
+  })
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    mode: 'agent',
+    question: '本文を整理して',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+    agentTarget: { noteID: 'note-1', baseRevision: 5 },
+  }), true)
+  assert.deepEqual(mock.calls.assistant.at(-1).agentTarget, { noteID: 'note-1', baseRevision: 5 })
+  assert.equal(assistant.proposal?.targetNoteID, 'note-1')
+  assistant.clearConversation()
+  assert.equal(assistant.proposal, null, 'clearing a conversation must also clear its proposed edit')
+  mock.setAssistantProposal(null)
 
   mock.setSource({
     noteID: 'note-1',

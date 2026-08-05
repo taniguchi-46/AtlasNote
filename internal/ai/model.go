@@ -210,6 +210,7 @@ type AssistantInput struct {
 	IncludeBacklinks bool                    `json:"includeBacklinks,omitempty"`
 	WebSearch        bool                    `json:"webSearch,omitempty"`
 	ExpectedSources  []AIHistorySource       `json:"expectedSources,omitempty"`
+	AgentTarget      *AgentEditTarget        `json:"agentTarget,omitempty"`
 }
 
 type AssistantResult struct {
@@ -221,6 +222,28 @@ type AssistantResult struct {
 	Sources           []AIContextSource       `json:"sources"`
 	Citations         []WebCitation           `json:"citations,omitempty"`
 	WebSearchRequests int                     `json:"webSearchRequests,omitempty"`
+	Proposal          *AgentEditProposal      `json:"proposal,omitempty"`
+}
+
+// AgentEditTarget identifies the active note snapshot that a restricted Agent
+// may propose a single body-only edit for. The service fills all returned
+// target fields from its validated snapshot rather than trusting the model.
+type AgentEditTarget struct {
+	NoteID       string `json:"noteID"`
+	BaseRevision int64  `json:"baseRevision"`
+}
+
+// AgentEditProposal is an exact one-hunk replacement for the target note
+// body. It is only a proposal; applying it remains an explicit UI action that
+// goes through the existing note revision/CAS save path.
+type AgentEditProposal struct {
+	TargetNoteID   string   `json:"targetNoteID"`
+	TargetTitle    string   `json:"targetTitle"`
+	BaseRevision   int64    `json:"baseRevision"`
+	Reason         string   `json:"reason"`
+	Before         string   `json:"before"`
+	After          string   `json:"after"`
+	AffectedFields []string `json:"affectedFields"`
 }
 
 type AssistantResponse struct {
@@ -512,19 +535,20 @@ type LibrarianEvent struct {
 	Error        *SafeError         `json:"error,omitempty"`
 }
 
-// LibrarianProviderInput is the provider-neutral request built by the Go
+// StructuredGenerationInput is the provider-neutral request built by the Go
 // service. Prompt construction and the JSON schema stay on the Go side.
-type LibrarianProviderInput struct {
-	Operation LibrarianOperation
-	ModelID   string
-	Prompt    string
-	Schema    json.RawMessage
+type StructuredGenerationInput struct {
+	Name            string
+	ModelID         string
+	Prompt          string
+	Schema          json.RawMessage
+	MaxOutputTokens int
 }
 
 // StructuredStreamingProviderAdapter is optional so existing v1 test doubles
 // and callers keep the ProviderAdapter contract unchanged.
 type StructuredStreamingProviderAdapter interface {
-	GenerateLibrarian(ctx context.Context, providerID ProviderID, apiKey string, input LibrarianProviderInput, onChunk func(string) error) (string, error)
+	GenerateStructured(ctx context.Context, providerID ProviderID, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error)
 }
 
 type TextMessage struct {

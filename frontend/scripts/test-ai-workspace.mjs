@@ -17,6 +17,7 @@ const [
   writingSource,
   recordsSource,
   markdownPreviewSource,
+  agentProposalCardSource,
 ] = await Promise.all([
   readFile(componentPath('AIWorkspace.vue'), 'utf8'),
   readFile(componentPath('NoteEditor.vue'), 'utf8'),
@@ -29,6 +30,7 @@ const [
   readFile(componentPath('AIWritingPanel.vue'), 'utf8'),
   readFile(componentPath('AIRecordsPanel.vue'), 'utf8'),
   readFile(componentPath('AIMarkdownPreview.vue'), 'utf8'),
+  readFile(componentPath('AIAgentProposalCard.vue'), 'utf8'),
 ])
 
 const workspaceTemplate = workspaceSource.slice(
@@ -106,6 +108,9 @@ const timelineLoopEnd = workspaceTemplate.indexOf('</template>', timelineLoopSta
 assert.ok(timelineLoopStart >= 0 && timelineLoopEnd > timelineLoopStart, 'timeline entries require one keyed render loop')
 const timelineLoopSource = workspaceTemplate.slice(timelineLoopStart, timelineLoopEnd)
 assert.match(timelineLoopSource, /<article[\s\S]*?<\/article>[\s\S]*?<AISummaryPanel/)
+assert.match(timelineLoopSource, /<AIAgentProposalCard\s+v-if="entry\.kind === 'agent-proposal'"/)
+assert.match(timelineLoopSource, /@apply="applyAgentProposal\(entry\.id\)"/)
+assert.match(timelineLoopSource, /@discard="discardAgentProposal\(entry\.id\)"/)
 assert.match(timelineLoopSource, /<AISummaryPanel\s+v-if="entry\.id === visibleSummaryTraceID"/)
 assert.match(timelineLoopSource, /<AILibrarianPanel\s+v-if="entry\.id === visibleLibrarianTraceID"/)
 assert.match(timelineLoopSource, /<AIWritingPanel\s+v-if="entry\.id === visibleWritingTraceID"/)
@@ -248,6 +253,18 @@ assert.match(workspaceTemplate, /@select="chatStore\.setMode\('agent'\)"[\s\S]*?
 assert.match(workspaceSource, /const modeLabel = computed\(\(\) => chatStore\.mode === 'agent' \? 'Agent' : 'Ask'\)/)
 assert.match(assistantSource, /chatMode\?: AIChatMode/)
 assert.match(assistantSource, /mode: props\.chatMode/)
+assert.match(assistantSource, /agentTarget/)
+assert.match(assistantSource, /Agent変更提案/)
+assert.match(workspaceSource, /appendAgentProposalPlaceholder/)
+assert.match(workspaceSource, /resolveAgentProposal/)
+assert.match(workspaceSource, /applyAgentEditProposal/)
+assert.match(workspaceSource, /markAgentProposalStale/)
+assert.match(workspaceSource, /window\.confirm\([\s\S]*?Agent変更提案/)
+assert.match(workspaceSource, /const hasPendingAgentProposal = computed/)
+assert.match(workspaceSource, /現在の変更提案を適用または破棄/)
+assert.doesNotMatch(agentProposalCardSource, /v-html/)
+assert.match(agentProposalCardSource, /<pre>\{\{ proposal\.before \}\}<\/pre>/)
+assert.match(agentProposalCardSource, /<pre>\{\{ proposal\.after \}\}<\/pre>/)
 
 // The send button is the last control in the toolbar at the bottom-right inside the input shell.
 const inputShellStart = workspaceTemplate.indexOf('<div class="ai-chat-input-shell"')

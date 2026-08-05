@@ -520,6 +520,10 @@ func (s *Service) validateSummaryInputLimit(ctx context.Context, input GenerateS
 }
 
 func (s *Service) validateLibrarianModel(providerID ProviderID, modelID string) error {
+	return s.validateStructuredModel(providerID, modelID)
+}
+
+func (s *Service) validateStructuredModel(providerID ProviderID, modelID string) error {
 	model, known := s.cachedModelInfo(providerID, modelID)
 	if !known {
 		// A model list is advisory metadata. When it is unavailable (for example
@@ -530,7 +534,7 @@ func (s *Service) validateLibrarianModel(providerID ProviderID, modelID string) 
 	if !model.Available {
 		return ErrModelUnavailable
 	}
-	if !model.SupportsLibrarian {
+	if !model.SupportsStructuredOutput || !model.SupportsStreaming {
 		return ErrModelCapabilityUnavailable
 	}
 	return nil

@@ -1,6 +1,6 @@
 # AIチャット
 
-ステータス: 単一チャット、Provider管理Web検索、共通下書きは実装済み・自動テスト追加済み（2026-08-01、手動受け入れは未完了）。制限付きAgentによる変更提案・差分確認・明示適用は決定済み・未実装。
+ステータス: 単一チャット、Provider管理Web検索、共通下書き、制限付きAgentの本文差分提案・明示適用は実装済み・自動テスト追加済み（2026-08-02、手動受け入れは未完了）。
 
 この文書は、AI機能を単一のチャット体験へ統合するUI、コンテキスト、モード、スキル・ツール実行の契約を定めます。AI設定、Provider adapter、資格情報、履歴・成果物の保存境界は引き続き [`ai-integration.md`](ai-integration.md) を正とします。
 
@@ -9,7 +9,7 @@
 - この文書は、単一チャットの現行実装と、Phase 4 v2／v3で正式決定したUI・実行境界を扱う。Phase単位の完了条件は [`scopes/scope-phese4-v2.md`](scopes/scope-phese4-v2.md)、[`scopes/scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と各TODOを正とする。
 - `実装済み` はコードと自動テストで確認済みの挙動、`決定済み・未実装` は実装前に合意済みでTODOに残す挙動を表す。未実装の仕様を、現在利用できる機能として説明しない。
 - Web検索は明示確認付きのProvider管理ツールとして正式範囲に含める。任意の外部サービス連携や任意コマンド実行は許可しない。
-- Agentは無制限な自律エージェントではない。現在は読み取り・候補生成だけを行い、将来の書き込み・編集も差分確認と利用者の明示適用を必須にする。
+- Agentは無制限な自律エージェントではない。開いているノート本文の単一差分を提案できるが、書き込みは差分確認と利用者の明示適用を必須にする。
 
 ## 1. 目的
 
@@ -36,6 +36,7 @@
 - モデル表示から既存のAI設定画面を開く導線は維持する。
 - AIWorkspaceの開閉や配置変更で、進行中のメモリ状態を意図せず破棄しない。
 - 送信操作はコンポーザー単位で同期lockし、同一tickの連続Enter／クリックを重複実行しない。応答待ち中に入力された次の下書きは、先行要求の完了時に消去しない。
+- 確認待ち、適用中、競合、保存失敗のAgent本文提案がある間は、次の通常Agent送信を止める。Askと既存ツールはこの提案を自動適用しない。
 
 ### `＋`メニュー
 
@@ -79,17 +80,18 @@ Notebook scopeはノート一覧の読み込みが成功した場合だけ追加
 #### 現行実装
 
 - 承認済みのローカル読み取り、コンテキスト検索、候補生成ツールだけを実行できる。
-- ノート本文、タイトル、所属Notebook、タグ、リンクを自動変更しない。
+- 通常のAgent送信は、開いているノートの本文だけを対象とする単一の`before → after`差分提案を構造化出力で生成する。追加ノートとNotebook scopeは読み取り専用であり、タイトル、所属Notebook、タグ、リンクは変更対象にしない。
+- Agentはノート本文を自動変更しない。モデルが返す対象ID・revisionは使わず、バックエンドが検証した対象ノートのsnapshotから提案情報を設定する。Agent + Web検索は既存の回答経路を使い、本文差分提案を同時に生成しない。
 - 実行できるツールはmodeごとの`allowedToolsByMode`、`AIChatTool`、固定dispatchに登録した安全なツールだけに限定する。現時点のAsk／Agentは同じ安全なツール集合を共有する。
 
-#### 決定済みの書き込み・編集契約（未実装）
+#### 本文の書き込み・編集契約
 
 - Agentは、利用者が明示的に対象として選んだ1ノートの本文変更案だけを作成できる。タイトル・タグ・所属Notebook・リンクは既存の個別候補採用フローを維持し、Agentの本文差分適用対象に含めない。全ノートへの自動バッチ処理は行わない。
-- Agentは変更を直接保存しない。UIは変更理由、対象ノート、基準revision、変更前後またはdiff、影響するフィールドを表示し、利用者が「適用」または「破棄」を選ぶ。
-- 適用時だけ既存のNote／Tag／Link Service、revision/CAS、ノート単位の操作laneを通す。stale、競合、保存失敗、キャンセルでは変更を保存せず、再生成または再確認を要求する。
+- Agentは変更を直接保存しない。UIは変更理由、対象ノート、基準revision、変更前後、影響するフィールドを表示し、利用者が「適用」または「破棄」を選ぶ。
+- 適用時だけ既存のノート更新API、revision/CAS、ノート単位の操作laneを通す。適用前にactive note、revision、ゴミ箱状態、未保存draft、`before`の一意一致を確認する。stale、競合、保存失敗、キャンセルでは変更を保存せず、再生成または再確認を要求する。
 - 未登録ツール、任意の外部通信、任意コマンド実行は許可しない。Web検索は下記の明示確認付きProvider管理ツールに限定する。
 
-Askは読み取り専用であり続ける。Agentの書き込み権限は上記の変更提案UIと明示適用が実装された時点でのみ有効にする。
+Askは読み取り専用であり続ける。Agentの書き込みは上記の変更提案UIと明示適用を通る場合だけ有効にする。
 
 ## 4. コンテキスト契約
 
@@ -122,11 +124,11 @@ Askは読み取り専用であり続ける。Agentの書き込み権限は上記
 - 直接Gemini ProviderのGoogle Search groundingは利用しない。確認画面にはOpenRouterとExaへの外部送信、追加料金、検索件数上限を表示する。
 - 出典URLはHTTPSかつ公開hostnameだけを表示し、credential付きURL、localhost／private hostname、IP literal、重複URLを除外する。
 
-### Agent変更提案のUI契約（決定済み・未実装）
+### Agent変更提案のUI契約
 
 - Agentの応答は、通常回答とは別の変更提案カードとしてtimelineに表示する。カードには対象ノート、基準revision、変更理由、変更前後またはdiff、変更フィールドを表示する。
-- 「適用」は提案ごとに明示操作とし、適用前に対象ノートが基準revisionと一致することを確認する。競合時は現行本文を上書きせず、変更点を保持したまま再確認できるようにする。
-- 「破棄」は提案・tool traceだけをメモリから除去し、ノート・SQLite・Markdown・WebDAVを変更しない。
+- 「適用」は提案ごとに明示操作とし、適用前に対象ノートが基準revisionと一致することと、提案の`before`が本文中に一意に存在することを確認する。競合時は現行本文を上書きせず、変更点を保持したまま再確認できるようにする。
+- 「破棄」は提案payloadをメモリから除去して破棄済み状態を表示し、ノート・SQLite・Markdown・WebDAVを変更しない。
 - UIは生成中、差分確認待ち、適用中、適用成功、競合、保存失敗、破棄を区別して表示する。Agentが適用した変更は、通常のノート編集と同じundoではなく既存の保存・競合契約に従う。
 
 ## 6. 状態と保存境界
@@ -157,9 +159,9 @@ Askは読み取り専用であり続ける。Agentの書き込み権限は上記
 
 ## 9. テスト契約
 
-- `test:ai-workspace`: 単一timelineとtool trace直後の候補カードanchor、結果上書き防止、固定active-note context chip、`＋`メニュー全項目、文章作成6種と12,000文字上限、固定scopeツール、送信lockと下書き保持、mode別許可ツール、Ask／Agent、入力欄内右下送信、右側／下側resize、狭幅、Web検索の能力・明示確認境界、AI内容の`localStorage`非保存を確認する。
-- `test:ai-chat`: mode状態、固定context、重複排除、明示ノート上限拒否とエラー解除、catalog未準備時のNotebook拒否、Notebook scopeの最大10件解決と省略件数、文章作成を含む許可ツールの単一timeline上のtool trace、active note切替時のノート依存状態破棄、`localStorage`非保存を確認する。
-- `test:ai-store`、`test:ai-librarian`、`test:ai-v3`: 資格情報、保存前flush、revision、候補採用、明示保存、source snapshot累積、busy中の履歴切替拒否、stale、キャンセルの既存保証を維持する。
+- `test:ai-workspace`: 単一timelineとtool trace直後の候補カードanchor、Agent提案カード・明示適用確認、結果上書き防止、固定active-note context chip、`＋`メニュー全項目、文章作成6種と12,000文字上限、固定scopeツール、送信lockと下書き保持、mode別許可ツール、Ask／Agent、入力欄内右下送信、右側／下側resize、狭幅、Web検索の能力・明示確認境界、AI内容の`localStorage`非保存を確認する。
+- `test:ai-chat`: mode状態、固定context、重複排除、明示ノート上限拒否とエラー解除、catalog未準備時のNotebook拒否、Notebook scopeの最大10件解決と省略件数、文章作成を含む許可ツールの単一timeline上のtool trace、Agent提案の競合・破棄、active note切替時のノート依存状態破棄、`localStorage`非保存を確認する。
+- `test:agent-proposal`、`test:ai-store`、`test:ai-librarian`、`test:ai-v3`: 本文差分の一意適用、ノート保存queue/CAS境界、資格情報、保存前flush、revision、候補採用、明示保存、source snapshot累積、busy中の履歴切替拒否、stale、キャンセルの既存保証を維持する。
 - 手動確認では右側／下側、狭幅、キーボード操作、確認ダイアログ、送信中・失敗・空結果を確認する。
 
 ## 10. 対象外

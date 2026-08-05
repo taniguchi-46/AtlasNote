@@ -18,6 +18,8 @@ assert.match(storeSource, /kind:\s*'active-note'/, 'the active note must have a 
 assert.match(storeSource, /kind:\s*'notebook'/, 'notebooks must be represented as a context scope')
 assert.match(storeSource, /MAX_CONTEXT_NOTE_IDS\s*=\s*10/, 'resolved note context must respect the backend limit')
 assert.match(storeSource, /kind:\s*'tool-trace'/, 'structured tool progress must be represented in the in-memory timeline')
+assert.match(storeSource, /kind:\s*'agent-proposal'/, 'Agent body proposals must remain in the in-memory timeline')
+assert.match(storeSource, /function markAgentProposalStale/, 'Agent proposals must become conflicts when the target revision changes')
 assert.match(storeSource, /\|\s*'writing'/, 'writing must remain an allowlisted chat tool')
 
 await mkdir(outDir, { recursive: true })
@@ -105,6 +107,25 @@ try {
   )
   assert.equal(store.timeline[1].status, 'success')
   assert.equal(store.timeline[2].citations?.[0]?.url, 'https://example.com/source')
+
+  const proposalID = store.appendAgentProposalPlaceholder()
+  assert.equal(store.timeline.at(-1)?.proposalState, 'generating')
+  store.resolveAgentProposal(proposalID, '本文の変更を提案します。', {
+    targetNoteID: 'active-note',
+    targetTitle: '開いているノート',
+    baseRevision: 1,
+    reason: '重複を減らすため',
+    before: '変更前',
+    after: '変更後',
+    affectedFields: ['content'],
+  })
+  assert.equal(store.timeline.at(-1)?.proposalState, 'awaiting-review')
+  assert.equal(store.timeline.at(-1)?.proposal?.before, '変更前')
+  store.markAgentProposalStale('active-note', 2)
+  assert.equal(store.timeline.at(-1)?.proposalState, 'conflict')
+  store.discardAgentProposal(proposalID)
+  assert.equal(store.timeline.at(-1)?.proposalState, 'discarded')
+  assert.equal(store.timeline.at(-1)?.proposal, undefined, 'discard must clear the in-memory proposal payload')
 
   store.setActiveNoteContext({ id: 'next-note', title: '次のノート' })
   assert.equal(store.mode, 'agent', 'mode choice may remain while note-scoped content is reset')

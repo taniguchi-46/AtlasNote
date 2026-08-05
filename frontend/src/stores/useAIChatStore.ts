@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { note } from '../../wailsjs/go/models'
 import { listNotes } from '../api/notes'
-import type { AIChatMode, AIWebCitation } from '../api/ai'
+import type { AgentEditProposal, AIChatMode, AIWebCitation } from '../api/ai'
 
 export type AIChatTool =
   | 'summary'
@@ -33,14 +33,25 @@ export type AIChatContext =
 
 export type AIExplicitChatContext = Exclude<AIChatContext, { kind: 'active-note' }>
 
+export type AgentProposalState =
+  | 'generating'
+  | 'awaiting-review'
+  | 'applying'
+  | 'applied'
+  | 'conflict'
+  | 'save-failure'
+  | 'discarded'
+
 export type AIChatTimelineEntry = {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
-  kind: 'message' | 'tool-trace' | 'error'
+  kind: 'message' | 'tool-trace' | 'error' | 'agent-proposal'
   content: string
   tool?: AIChatTool
   status?: 'pending' | 'success' | 'error'
   citations?: AIWebCitation[]
+  proposal?: AgentEditProposal
+  proposalState?: AgentProposalState
   createdAt: number
 }
 
@@ -277,6 +288,67 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     })
   }
 
+  function appendAgentProposalPlaceholder() {
+    return appendTimelineEntry({
+      role: 'assistant',
+      kind: 'agent-proposal',
+      content: 'ノート本文の変更提案を生成しています…',
+      proposalState: 'generating',
+    })
+  }
+
+  function resolveAgentProposal(id: string, content: string, proposal: AgentEditProposal | null) {
+    if (!proposal) {
+      updateTimelineEntry(id, {
+        kind: 'message',
+        content,
+        proposal: undefined,
+        proposalState: undefined,
+      })
+      return
+    }
+    updateTimelineEntry(id, {
+      kind: 'agent-proposal',
+      content,
+      proposal,
+      proposalState: 'awaiting-review',
+    })
+  }
+
+  function setAgentProposalState(id: string, proposalState: AgentProposalState, content?: string) {
+    updateTimelineEntry(id, {
+      proposalState,
+      ...(typeof content === 'string' ? { content } : {}),
+    })
+  }
+
+  function discardAgentProposal(id: string) {
+    const entry = timeline.value.find((item) => item.id === id)
+    if (!entry || entry.kind !== 'agent-proposal' || entry.proposalState === 'applying') return
+    updateTimelineEntry(id, {
+      proposal: undefined,
+      proposalState: 'discarded',
+      content: '変更提案を破棄しました。ノートは変更されていません。',
+    })
+  }
+
+  function markAgentProposalStale(noteID: string, revision: number) {
+    timeline.value = timeline.value.map((entry) => {
+      if (
+        entry.kind !== 'agent-proposal'
+        || !entry.proposal
+        || entry.proposal.targetNoteID !== noteID
+        || entry.proposal.baseRevision === revision
+        || (entry.proposalState !== 'awaiting-review' && entry.proposalState !== 'save-failure')
+      ) return entry
+      return {
+        ...entry,
+        proposalState: 'conflict',
+        content: '対象ノートが更新されたため、この変更提案は適用できません。内容を確認して再生成してください。',
+      }
+    })
+  }
+
   function appendToolTrace(
     tool: AIChatTool,
     content: string,
@@ -355,9 +427,14 @@ export const useAIChatStore = defineStore('ai-chat', () => {
     selectTool,
     appendUserMessage,
     appendAssistantMessage,
+    appendAgentProposalPlaceholder,
     appendToolTrace,
     appendError,
     updateTimelineEntry,
+    resolveAgentProposal,
+    setAgentProposalState,
+    discardAgentProposal,
+    markAgentProposalStale,
     removeTimelineEntry,
     replaceTimelineFromConversation,
     clearConversation,

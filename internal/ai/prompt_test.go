@@ -48,12 +48,40 @@ func TestAssistantPromptDistinguishesAskBrainstormAndAgentModes(t *testing.T) {
 	agent := buildAssistantInstruction(AssistantKindQA, ChatModeAgent, false)
 	for _, fragment := range []string{
 		"Agentモード規則",
-		"許可された読み取りと候補生成",
+		"開いているノート本文に対する単一の変更候補",
 		"更新、保存、削除、外部公開を実行せず",
-		"提案として返してください",
+		"タイトル、タグ、ノートブック、他ノート、設定は変更対象にせず",
 	} {
 		if !strings.Contains(agent, fragment) {
 			t.Fatalf("agent instruction is missing %q: %q", fragment, agent)
+		}
+	}
+}
+
+func TestAgentEditPromptConstrainsOneBodyHunkAndStrictResponse(t *testing.T) {
+	prompt, schema, err := buildAgentEditPrompt(
+		[]AIConversationMessage{{Role: "user", Content: "本文を短くして"}},
+		[]ContextNote{{NoteID: "note-1", Title: "Target", Content: "current body", Revision: 4}},
+		AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+	)
+	if err != nil {
+		t.Fatalf("build agent edit prompt: %v", err)
+	}
+	for _, fragment := range []string{
+		"1つの連続した before → after 置換",
+		"hasProposal が false",
+		"保存済み・適用済みとは言わない",
+		`"noteID":"note-1"`,
+		`"baseRevision":4`,
+		"current body",
+	} {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("agent edit prompt is missing %q: %q", fragment, prompt)
+		}
+	}
+	for _, field := range []string{`"message"`, `"hasProposal"`, `"reason"`, `"before"`, `"after"`} {
+		if !strings.Contains(string(schema), field) {
+			t.Fatalf("agent edit schema is missing %q: %s", field, schema)
 		}
 	}
 }

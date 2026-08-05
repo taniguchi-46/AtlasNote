@@ -22,10 +22,10 @@ type testLibrarianAdapter struct {
 
 	mu                  sync.Mutex
 	librarianCalls      int
-	receivedLibrarianIn LibrarianProviderInput
+	receivedLibrarianIn StructuredGenerationInput
 }
 
-func (a *testLibrarianAdapter) GenerateLibrarian(ctx context.Context, _ ProviderID, _ string, input LibrarianProviderInput, onChunk func(string) error) (string, error) {
+func (a *testLibrarianAdapter) GenerateStructured(ctx context.Context, _ ProviderID, _ string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	a.mu.Lock()
 	a.librarianCalls++
 	a.receivedLibrarianIn = input
@@ -34,8 +34,10 @@ func (a *testLibrarianAdapter) GenerateLibrarian(ctx context.Context, _ Provider
 		a.librarianStarted <- struct{}{}
 	}
 	for _, chunk := range a.librarianChunks {
-		if err := onChunk(chunk); err != nil {
-			return "", err
+		if onChunk != nil {
+			if err := onChunk(chunk); err != nil {
+				return "", err
+			}
 		}
 	}
 	if a.librarianContinue != nil {
@@ -116,7 +118,7 @@ func TestServiceLibrarianStreamsStructuredResultAndSharesGenerationLock(t *testi
 	received := adapter.receivedLibrarianIn
 	calls := adapter.librarianCalls
 	adapter.mu.Unlock()
-	if calls != 1 || received.Operation != LibrarianOperationRelated || !strings.Contains(received.Prompt, "note-body-marker") {
+	if calls != 1 || received.Name != "atlas_note_librarian" || received.MaxOutputTokens != summaryOutputTokenLimit || !strings.Contains(received.Prompt, "note-body-marker") {
 		t.Fatalf("librarian adapter input = calls:%d input:%#v", calls, received)
 	}
 	var schema map[string]any

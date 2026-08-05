@@ -198,6 +198,7 @@ export type AssistantInput = {
   includeBacklinks?: boolean
   webSearch?: boolean
   expectedSources?: AIHistorySource[]
+  agentTarget?: AgentEditTarget
 }
 
 export type AssistantResult = {
@@ -209,6 +210,22 @@ export type AssistantResult = {
   sources: AIContextSource[]
   citations?: AIWebCitation[]
   webSearchRequests?: number
+  proposal?: AgentEditProposal
+}
+
+export type AgentEditTarget = {
+  noteID: string
+  baseRevision: number
+}
+
+export type AgentEditProposal = {
+  targetNoteID: string
+  targetTitle: string
+  baseRevision: number
+  reason: string
+  before: string
+  after: string
+  affectedFields: string[]
 }
 
 export type AssistantResponse = {

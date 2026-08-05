@@ -11,6 +11,8 @@ import {
   type AIContextSource,
   type AIChatMode,
   type AIConversationMessage,
+  type AgentEditProposal,
+  type AgentEditTarget,
   type AIHistory,
   type AIHistorySource,
   type AIWebCitation,
@@ -39,6 +41,7 @@ export type AssistantRequest = {
   webSearch?: boolean
   messages: AIConversationMessage[]
   expectedSources?: AIHistorySource[]
+  agentTarget?: AgentEditTarget
 }
 
 const safeMessages: Record<string, string> = {
@@ -106,7 +109,7 @@ function mergeConversationSources(
   return result
 }
 
-function sourceKey(input: Pick<AssistantRequest, 'kind' | 'mode' | 'question' | 'noteIDs' | 'searchQuery' | 'includeBacklinks' | 'webSearch'>) {
+function sourceKey(input: Pick<AssistantRequest, 'kind' | 'mode' | 'question' | 'noteIDs' | 'searchQuery' | 'includeBacklinks' | 'webSearch' | 'agentTarget'>) {
   return JSON.stringify({
     kind: input.kind,
     mode: input.mode ?? 'ask',
@@ -115,6 +118,7 @@ function sourceKey(input: Pick<AssistantRequest, 'kind' | 'mode' | 'question' | 
     searchQuery: input.searchQuery,
     includeBacklinks: input.includeBacklinks,
     webSearch: input.webSearch ?? false,
+    agentTarget: input.agentTarget ?? null,
   })
 }
 
@@ -124,6 +128,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const error = ref<AssistantError | null>(null)
   const messages = ref<AIConversationMessage[]>([])
   const citations = ref<AIWebCitation[]>([])
+  const proposal = ref<AgentEditProposal | null>(null)
   const webSearchRequests = ref(0)
   const sources = ref<AIContextSource[]>([])
   const contextSources = ref<AIContextSource[]>([])
@@ -211,6 +216,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     if (requestID !== latestGenerationRequest) return false
     clearError()
     state.value = 'generating'
+    proposal.value = null
     messages.value = [
       ...request.messages,
       { role: 'user', content: request.question },
@@ -228,6 +234,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         includeBacklinks: request.includeBacklinks,
         webSearch: request.webSearch ?? false,
         expectedSources: sourceRefs(contextSources.value),
+        ...(request.agentTarget ? { agentTarget: request.agentTarget } : {}),
       })
       if (requestID !== latestGenerationRequest) return false
       if (response.error || !response.result) {
@@ -237,6 +244,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }
       messages.value = response.result.messages
       citations.value = response.result.citations ?? []
+      proposal.value = response.result.proposal ?? null
       webSearchRequests.value = Math.max(0, response.result.webSearchRequests ?? 0)
       completedMessages = [...response.result.messages]
       sources.value = mergeConversationSources(sources.value, response.result.sources)
@@ -304,6 +312,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       const history = response.history
       messages.value = history.messages ?? []
       citations.value = []
+      proposal.value = null
       webSearchRequests.value = 0
       completedMessages = [...messages.value]
       sources.value = history.sources.map((source) => ({
@@ -379,6 +388,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     error.value = null
     messages.value = []
     citations.value = []
+    proposal.value = null
     webSearchRequests.value = 0
     sources.value = []
     contextSources.value = []
@@ -404,6 +414,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     error,
     messages,
     citations,
+    proposal,
     webSearchRequests,
     sources,
     contextSources,

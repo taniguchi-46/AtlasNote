@@ -15,6 +15,8 @@ import { createNoteOperationQueue } from '../utils/noteOperationQueue'
 import { createRequestCounter } from '../utils/requestCounter'
 import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { updateNotesSequentially } from '../utils/updateNotesSequentially'
+import { applyAgentEditHunk } from '../utils/agentEditProposal'
+import type { AgentEditProposal } from '../api/ai'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 import { parseNoteSortOption, useAppStore } from './useAppStore'
@@ -36,6 +38,7 @@ export type NoteDraft = NoteSaveSnapshot & {
 }
 
 export type AIWritingApplyMode = 'append' | 'replace'
+export type AgentEditProposalApplyOutcome = 'applied' | 'conflict' | 'save-failure'
 
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   const markers: Record<EditorFirstLineStyle, string> = {
@@ -652,6 +655,56 @@ export const useNoteStore = defineStore('notes', () => {
     })
   }
 
+  async function applyAgentEditProposal(
+    proposal: AgentEditProposal,
+  ): Promise<AgentEditProposalApplyOutcome> {
+    const noteId = proposal.targetNoteID.trim()
+    const current = activeNote.value
+    if (
+      !noteId
+      || proposal.baseRevision < 1
+      || !proposal.before
+      || proposal.before === proposal.after
+      || !current
+      || current.id !== noteId
+      || current.isTrashed
+      || current.revision !== proposal.baseRevision
+      || activeDraft.value
+    ) return 'conflict'
+
+    return noteOperations.enqueue(noteId, async () => {
+      const latest = activeNote.value
+      if (
+        !latest
+        || latest.id !== noteId
+        || latest.isTrashed
+        || latest.revision !== proposal.baseRevision
+        || activeDraft.value
+      ) return 'conflict'
+
+      const patched = applyAgentEditHunk(latest.content, proposal)
+      if (patched.status !== 'ok') return 'conflict'
+
+      const endSaving = savingRequests.begin()
+      error.value = null
+      try {
+        const updated = await updateNote(noteId, {
+          content: patched.content,
+          expectedRevision: proposal.baseRevision,
+        })
+        applyPersistedNote(updated)
+        return 'applied'
+      } catch (e) {
+        if (e instanceof NoteRevisionConflictError) return 'conflict'
+        setErrorContext({ code: 'AI_AGENT_PROPOSAL_APPLY_FAILED' })
+        error.value = e instanceof Error ? e.message : 'Agentの変更提案をノートへ反映できませんでした'
+        return 'save-failure'
+      } finally {
+        endSaving()
+      }
+    })
+  }
+
   function discardAllDrafts() {
     autoSave.cancel()
     drafts.value = {}
@@ -806,6 +859,7 @@ export const useNoteStore = defineStore('notes', () => {
     newNote,
     persistNote,
     applyAIWritingContent,
+    applyAgentEditProposal,
     applyPersistedNote,
     getDraft,
     scheduleDraft,
