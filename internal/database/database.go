@@ -399,6 +399,25 @@ CREATE INDEX idx_ai_artifacts_status_updated_at
 CREATE INDEX idx_ai_artifact_sources_note_id
 	ON ai_artifact_sources(note_id);
 	`,
+	`
+ALTER TABLE ai_provider_settings
+	ADD COLUMN is_selected BOOLEAN NOT NULL DEFAULT 0 CHECK(is_selected IN (0, 1));
+
+-- Earlier versions stored credentials and models per provider but did not
+-- retain which configured provider the user had applied most recently.
+UPDATE ai_provider_settings
+SET is_selected = 1
+WHERE provider_id = (
+	SELECT provider_id
+	FROM ai_provider_settings
+	ORDER BY updated_at DESC, provider_id ASC
+	LIMIT 1
+);
+
+CREATE UNIQUE INDEX idx_ai_provider_settings_one_selected
+	ON ai_provider_settings(is_selected)
+	WHERE is_selected = 1;
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
@@ -598,9 +617,13 @@ CREATE TABLE IF NOT EXISTS ai_provider_settings (
 	model_id TEXT NOT NULL DEFAULT '',
 	credential_ref TEXT NOT NULL,
 	credential_storage TEXT NOT NULL CHECK(credential_storage IN ('persistent', 'session-only')),
+	is_selected BOOLEAN NOT NULL DEFAULT 0 CHECK(is_selected IN (0, 1)),
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_provider_settings_one_selected
+	ON ai_provider_settings(is_selected)
+	WHERE is_selected = 1;
 `); err != nil {
 		return fmt.Errorf("ensure AI provider settings schema: %w", err)
 	}

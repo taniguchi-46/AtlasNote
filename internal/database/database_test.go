@@ -94,13 +94,22 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read AI provider settings columns: %v", err)
 	}
-	for _, requiredColumn := range []string{"provider_id", "model_id", "credential_ref", "credential_storage"} {
+	for _, requiredColumn := range []string{"provider_id", "model_id", "credential_ref", "credential_storage", "is_selected"} {
 		if !aiColumns[requiredColumn] {
 			t.Fatalf("AI provider settings missing %s", requiredColumn)
 		}
 	}
 	if aiColumns["api_key"] || aiColumns["secret"] {
 		t.Fatal("AI provider settings schema contains a secret column")
+	}
+	if err := db.QueryRowContext(
+		t.Context(),
+		"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_ai_provider_settings_one_selected'",
+	).Scan(&tableName); err != nil {
+		t.Fatalf("read selected AI provider index: %v", err)
+	}
+	if tableName != "idx_ai_provider_settings_one_selected" {
+		t.Fatalf("selected AI provider index = %q", tableName)
 	}
 }
 
@@ -578,6 +587,85 @@ SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ai_provider_sett
 	}
 	if tableName != "ai_provider_settings" {
 		t.Fatalf("AI provider settings table = %q", tableName)
+	}
+}
+
+func TestMigrateVersionThirteenAIProviderSettingsAddsSelectedProvider(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	for index, migration := range migrations[:13] {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("apply version thirteen migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := db.Exec(`
+INSERT INTO ai_provider_settings(provider_id, model_id, credential_ref, credential_storage, created_at, updated_at)
+VALUES
+	('openrouter', 'openrouter-model', 'openrouter-ref', 'persistent', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+	('gemini', 'gemini-model', 'gemini-ref', 'persistent', '2026-08-01T00:00:00Z', '2026-08-01T00:01:00Z');
+PRAGMA user_version = 13;
+`); err != nil {
+		t.Fatalf("insert version thirteen AI provider settings: %v", err)
+	}
+
+	if err := migrate(t.Context(), db, migrations); err != nil {
+		t.Fatalf("migrate version thirteen AI provider settings: %v", err)
+	}
+
+	var selectedProvider string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT provider_id
+FROM ai_provider_settings
+WHERE is_selected = 1
+`).Scan(&selectedProvider); err != nil {
+		t.Fatalf("read selected AI provider: %v", err)
+	}
+	if selectedProvider != "gemini" {
+		t.Fatalf("selected provider = %q, want gemini", selectedProvider)
+	}
+
+	var selectedCount int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_provider_settings WHERE is_selected = 1").Scan(&selectedCount); err != nil {
+		t.Fatalf("count selected AI providers: %v", err)
+	}
+	if selectedCount != 1 {
+		t.Fatalf("selected provider count = %d, want 1", selectedCount)
+	}
+	if _, err := db.ExecContext(t.Context(), `
+UPDATE ai_provider_settings
+SET is_selected = 1
+WHERE provider_id = 'openrouter'
+`); err == nil {
+		t.Fatal("AI provider settings allowed multiple selected providers")
+	}
+
+	for providerID, want := range map[string]struct {
+		ref   string
+		model string
+	}{
+		"openrouter": {ref: "openrouter-ref", model: "openrouter-model"},
+		"gemini":     {ref: "gemini-ref", model: "gemini-model"},
+	} {
+		var gotRef string
+		var gotModel string
+		if err := db.QueryRowContext(t.Context(), `
+SELECT credential_ref, model_id
+FROM ai_provider_settings
+WHERE provider_id = ?
+`, providerID).Scan(&gotRef, &gotModel); err != nil {
+			t.Fatalf("read migrated %s settings: %v", providerID, err)
+		}
+		if gotRef != want.ref || gotModel != want.model {
+			t.Fatalf("migrated %s settings = ref %q, model %q", providerID, gotRef, gotModel)
+		}
 	}
 }
 

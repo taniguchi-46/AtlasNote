@@ -178,7 +178,7 @@ func TestConfigureSeparatesProviderCredentialsAndDoesNotPersistSecrets(t *testin
 	if err != nil {
 		t.Fatalf("configure OpenRouter: %v", err)
 	}
-	if got := findSettings(t, settings, ProviderOpenRouter); got.CredentialStatus != CredentialStatusPersistent || got.ModelID != "openrouter/model" {
+	if got := findSettings(t, settings, ProviderOpenRouter); got.CredentialStatus != CredentialStatusPersistent || got.ModelID != "openrouter/model" || !got.IsSelected {
 		t.Fatalf("OpenRouter settings = %#v", got)
 	}
 
@@ -190,8 +190,11 @@ func TestConfigureSeparatesProviderCredentialsAndDoesNotPersistSecrets(t *testin
 	if err != nil {
 		t.Fatalf("configure Gemini: %v", err)
 	}
-	if got := findSettings(t, settings, ProviderGemini); got.CredentialStatus != CredentialStatusPersistent || got.ModelID != "gemini-2.5-flash" {
+	if got := findSettings(t, settings, ProviderGemini); got.CredentialStatus != CredentialStatusPersistent || got.ModelID != "gemini-2.5-flash" || !got.IsSelected {
 		t.Fatalf("Gemini settings = %#v", got)
+	}
+	if got := findSettings(t, settings, ProviderOpenRouter); got.IsSelected {
+		t.Fatalf("OpenRouter remained selected after Gemini configuration: %#v", got)
 	}
 
 	if strings.Contains(fmt.Sprintf("%#v", settings), openRouterSecret) || strings.Contains(fmt.Sprintf("%#v", settings), geminiSecret) {
@@ -228,6 +231,17 @@ func TestConfigureSeparatesProviderCredentialsAndDoesNotPersistSecrets(t *testin
 	}
 	if len(refs) != 2 || len(store.values) != 2 {
 		t.Fatal("provider credentials did not receive distinct references")
+	}
+	restarted := NewService(NewRepository(db), credential.NewManager(store), &testChecker{})
+	restartedSettings, err := restarted.GetSettings(t.Context())
+	if err != nil {
+		t.Fatalf("read settings after restart: %v", err)
+	}
+	if got := findSettings(t, restartedSettings, ProviderGemini); !got.IsSelected {
+		t.Fatalf("Gemini selection was not retained after restart: %#v", got)
+	}
+	if got := findSettings(t, restartedSettings, ProviderOpenRouter); got.IsSelected {
+		t.Fatalf("OpenRouter selection was restored after Gemini: %#v", got)
 	}
 
 	var outboxCount int
@@ -482,6 +496,13 @@ func TestUpdateProviderModelKeepsSavedCredential(t *testing.T) {
 	if err != nil || before == nil {
 		t.Fatal("read Gemini provider record before model update")
 	}
+	if _, err := service.Configure(t.Context(), ConfigureProviderInput{
+		ProviderID: ProviderOpenRouter,
+		APIKey:     "other-provider-key-marker",
+		ModelID:    "openrouter/test-model",
+	}); err != nil {
+		t.Fatalf("configure OpenRouter before Gemini model update: %v", err)
+	}
 	settings, err := service.UpdateProviderModel(t.Context(), UpdateProviderModelInput{
 		ProviderID: ProviderGemini,
 		ModelID:    "gemini-2.5-pro",
@@ -489,14 +510,17 @@ func TestUpdateProviderModelKeepsSavedCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update Gemini model: %v", err)
 	}
-	if got := findSettings(t, settings, ProviderGemini); got.ModelID != "gemini-2.5-pro" || got.CredentialStatus != CredentialStatusPersistent {
+	if got := findSettings(t, settings, ProviderGemini); got.ModelID != "gemini-2.5-pro" || got.CredentialStatus != CredentialStatusPersistent || !got.IsSelected {
 		t.Fatalf("updated Gemini setting = %#v", got)
+	}
+	if got := findSettings(t, settings, ProviderOpenRouter); got.IsSelected {
+		t.Fatalf("OpenRouter remained selected after Gemini model update: %#v", got)
 	}
 	after, err := service.repository.get(t.Context(), ProviderGemini)
 	if err != nil || after == nil {
 		t.Fatal("read Gemini provider record after model update")
 	}
-	if after.CredentialRef != before.CredentialRef || after.CredentialStorage != before.CredentialStorage || store.setCalls != 1 || store.deleteCalls != 0 {
+	if after.CredentialRef != before.CredentialRef || after.CredentialStorage != before.CredentialStorage || store.setCalls != 2 || store.deleteCalls != 0 {
 		t.Fatalf("model-only update changed credential storage: before=%#v after=%#v saves=%d deletes=%d", before, after, store.setCalls, store.deleteCalls)
 	}
 	if value, err := service.GetCredential(t.Context(), ProviderGemini); err != nil || value != secret {

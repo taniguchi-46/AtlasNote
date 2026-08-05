@@ -180,20 +180,24 @@ export const useAIStore = defineStore('ai', () => {
   const summaryHistoryError = ref<AIErrorState | null>(null)
   const isGenerating = ref(false)
 
-  let verifiedProviderID: AIProviderID | null = null
-  let verifiedAPIKey = ''
-  let verifiedCredentialSource: CredentialSource | null = null
-  let listedProviderID: AIProviderID | null = null
+  const verifiedProviderID = ref<AIProviderID | null>(null)
+  const verifiedAPIKey = ref('')
+  const verifiedCredentialSource = ref<CredentialSource | null>(null)
+  const listedProviderID = ref<AIProviderID | null>(null)
   let nextSummaryRequestID = 0
   let activeSummaryRequest: ActiveSummaryRequest | null = null
 
+  const selectedProviderSetting = computed(() => settings.value.find(
+    (setting) => setting.isSelected,
+  ) ?? null)
+
   const configuredSetting = computed(() => {
-    const isConfigured = (setting: ProviderSettings) => (
-      isConfiguredCredential(setting.credentialStatus) && setting.modelID.trim() !== ''
-    )
-    return settings.value.find((setting) => (
-      setting.providerID === draft.value.providerID && isConfigured(setting)
-    )) ?? settings.value.find(isConfigured) ?? null
+    const setting = selectedProviderSetting.value
+    return setting
+      && isConfiguredCredential(setting.credentialStatus)
+      && setting.modelID.trim() !== ''
+      ? setting
+      : null
   })
 
   const activeProviderSetting = computed(() => settings.value.find(
@@ -218,9 +222,9 @@ export const useAIStore = defineStore('ai', () => {
   })
 
   const isCurrentCredentialVerified = computed(() => (
-    verifiedProviderID === draft.value.providerID
-    && verifiedCredentialSource === currentCredentialSource.value
-    && (verifiedCredentialSource !== 'draft' || verifiedAPIKey === draft.value.apiKey)
+    verifiedProviderID.value === draft.value.providerID
+    && verifiedCredentialSource.value === currentCredentialSource.value
+    && (verifiedCredentialSource.value !== 'draft' || verifiedAPIKey.value === draft.value.apiKey)
     && connectionState.value === 'success'
   ))
 
@@ -236,7 +240,7 @@ export const useAIStore = defineStore('ai', () => {
 
   const canApply = computed(() => (
     !isSettingsBusy.value
-    && listedProviderID === draft.value.providerID
+    && listedProviderID.value === draft.value.providerID
     && (currentCredentialSource.value === 'stored' || isCurrentCredentialVerified.value)
     && draft.value.modelID.trim() !== ''
     && selectedModelAvailable.value
@@ -263,10 +267,10 @@ export const useAIStore = defineStore('ai', () => {
   ))
 
   function clearVerification() {
-    verifiedProviderID = null
-    verifiedAPIKey = ''
-    verifiedCredentialSource = null
-    listedProviderID = null
+    verifiedProviderID.value = null
+    verifiedAPIKey.value = ''
+    verifiedCredentialSource.value = null
+    listedProviderID.value = null
     models.value = []
     modelsRetrievedAt.value = null
     connectionState.value = 'idle'
@@ -294,12 +298,15 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   function resetDraft() {
-    const preferred = configuredSetting.value
+    const preferred = selectedProviderSetting.value
+      ?? settings.value.find((setting) => (
+        isConfiguredCredential(setting.credentialStatus) && setting.modelID.trim() !== ''
+      ))
       ?? settings.value.find((setting) => setting.modelID.trim() !== '')
       ?? settings.value[0]
     const providerID = preferred && isProviderID(preferred.providerID) ? preferred.providerID : 'openrouter'
     draft.value = emptyDraft(providerID, preferred?.modelID ?? '')
-    if (verifiedProviderID && verifiedProviderID !== providerID) clearVerification()
+    if (verifiedProviderID.value && verifiedProviderID.value !== providerID) clearVerification()
     settingsError.value = null
   }
 
@@ -357,10 +364,10 @@ export const useAIStore = defineStore('ai', () => {
         connectionState.value = 'error'
         return false
       }
-      verifiedProviderID = input.providerID
-      verifiedAPIKey = input.apiKey
-      verifiedCredentialSource = input.useStoredCredential ? 'stored' : 'draft'
-      listedProviderID = null
+      verifiedProviderID.value = input.providerID
+      verifiedAPIKey.value = input.apiKey
+      verifiedCredentialSource.value = input.useStoredCredential ? 'stored' : 'draft'
+      listedProviderID.value = null
       models.value = []
       modelsRetrievedAt.value = null
       modelsError.value = null
@@ -395,7 +402,7 @@ export const useAIStore = defineStore('ai', () => {
       }
       models.value = response.models.filter((model) => model.supportsSummary)
       modelsRetrievedAt.value = response.retrievedAt ?? null
-      listedProviderID = input.providerID
+      listedProviderID.value = input.providerID
       return true
     } catch (error) {
       if (!matchesCurrentCredentialInput(input)) return false
@@ -767,8 +774,8 @@ export const useAIStore = defineStore('ai', () => {
     (apiKey) => {
       const source = currentCredentialSource.value
       if (
-        source !== verifiedCredentialSource
-        || (source === 'draft' && (apiKey !== verifiedAPIKey || draft.value.providerID !== verifiedProviderID))
+        source !== verifiedCredentialSource.value
+        || (source === 'draft' && (apiKey !== verifiedAPIKey.value || draft.value.providerID !== verifiedProviderID.value))
       ) {
         clearVerification()
       }

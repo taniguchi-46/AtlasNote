@@ -114,6 +114,7 @@ func (s *Service) listSettings(ctx context.Context) ([]ProviderSettings, error) 
 			continue
 		}
 		setting.ModelID = record.ModelID
+		setting.IsSelected = record.IsSelected
 		available, availabilityErr := s.credentials.Has(record.CredentialRef)
 		if availabilityErr != nil || !available {
 			setting.CredentialStatus = CredentialStatusReauthenticationRequired
@@ -128,8 +129,9 @@ func (s *Service) listSettings(ctx context.Context) ([]ProviderSettings, error) 
 }
 
 // Configure stores only a generated credential reference and non-secret model
-// setting in SQLite. The API key itself is written to the OS store or the
-// process-local fallback and is never returned from this method.
+// setting in SQLite, and selects that provider after the update succeeds. The
+// API key itself is written to the OS store or the process-local fallback and
+// is never returned from this method.
 func (s *Service) Configure(ctx context.Context, input ConfigureProviderInput) ([]ProviderSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -266,8 +268,9 @@ func (s *Service) TestGeneration(ctx context.Context, input TestGenerationInput)
 }
 
 // UpdateProviderModel changes only the selected model for a provider that
-// already has an available saved credential. It intentionally does not rotate
-// or expose that credential.
+// already has an available saved credential, and selects that provider after
+// the update succeeds. It intentionally does not rotate or expose that
+// credential.
 func (s *Service) UpdateProviderModel(ctx context.Context, input UpdateProviderModelInput) ([]ProviderSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

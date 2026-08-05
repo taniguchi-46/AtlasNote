@@ -57,6 +57,7 @@ type ProviderSettings struct {
 	ProviderID       ProviderID       `json:"providerID"`
 	ModelID          string           `json:"modelID"`
 	CredentialStatus CredentialStatus `json:"credentialStatus"`
+	IsSelected       bool             `json:"isSelected"`
 }
 
 type ConfigureProviderInput struct {

@@ -50,8 +50,8 @@ export function useNotificationStore() {
 await writeFile(path.join(outDir, 'mock-ai.mjs'), `
 export const calls = { getSettings: 0, configure: [], updateModel: [], test: [], testGeneration: [], list: [], generate: [], saveArtifact: [], listArtifacts: 0, getArtifact: [], deleteArtifact: [], deleteProvider: [], deleteAll: 0 }
 let settings = [
-  { providerID: 'openrouter', modelID: 'retired-model', credentialStatus: 'persistent' },
-  { providerID: 'gemini', modelID: '', credentialStatus: 'not-configured' },
+  { providerID: 'openrouter', modelID: 'retired-model', credentialStatus: 'persistent', isSelected: true },
+  { providerID: 'gemini', modelID: '', credentialStatus: 'not-configured', isSelected: false },
 ]
 let nextTestError
 let nextModelResponse
@@ -70,6 +70,7 @@ export function rejectNextConnectionCheck(error) { nextTestError = error }
 export function setNextModelResponse(response) { nextModelResponse = response }
 export function deferSummary() { generateDeferred = deferred(); return generateDeferred }
 export function queueSummaryResponse(response) { summaryResponses.push(response) }
+export function setSettings(nextSettings) { settings = clone(nextSettings) }
 
 export async function getAISettings() {
   calls.getSettings += 1
@@ -78,15 +79,15 @@ export async function getAISettings() {
 export async function configureAIProvider(input) {
   calls.configure.push(clone(input))
   settings = settings.map((setting) => setting.providerID === input.providerID
-    ? { providerID: input.providerID, modelID: input.modelID, credentialStatus: 'persistent' }
-    : setting)
+    ? { providerID: input.providerID, modelID: input.modelID, credentialStatus: 'persistent', isSelected: true }
+    : { ...setting, isSelected: false })
   return clone(settings)
 }
 export async function updateAIProviderModel(input) {
   calls.updateModel.push(clone(input))
   settings = settings.map((setting) => setting.providerID === input.providerID
-    ? { ...setting, modelID: input.modelID }
-    : setting)
+    ? { ...setting, modelID: input.modelID, isSelected: true }
+    : { ...setting, isSelected: false })
   return clone(settings)
 }
 export async function testAIConnection(input) {
@@ -164,13 +165,13 @@ export async function deleteAIArtifact(id) {
 export async function deleteAIProviderCredential(providerID) {
   calls.deleteProvider.push(providerID)
   settings = settings.map((setting) => setting.providerID === providerID
-    ? { providerID, modelID: '', credentialStatus: 'not-configured' }
+    ? { providerID, modelID: '', credentialStatus: 'not-configured', isSelected: false }
     : setting)
   return clone(settings)
 }
 export async function deleteAllAICredentials() {
   calls.deleteAll += 1
-  settings = settings.map((setting) => ({ ...setting, modelID: '', credentialStatus: 'not-configured' }))
+  settings = settings.map((setting) => ({ ...setting, modelID: '', credentialStatus: 'not-configured', isSelected: false }))
   return clone(settings)
 }
 `, 'utf8')
@@ -224,6 +225,7 @@ try {
 
   assert.equal(await store.checkConnection(), true)
   assert.equal(mockAI.calls.test.length, 2)
+  assert.equal(store.canRefreshModels, true, 'a successful connection check must enable model refresh for the same draft credential')
   mockAI.setNextModelResponse({ models: [], error: { code: 'raw-provider-detail-marker' } })
   assert.equal(await store.refreshModels(), false)
   assert.equal(store.modelsError.code, 'AI_PROVIDER_UNAVAILABLE')
@@ -342,6 +344,37 @@ try {
   assert.equal(await store.applyConfiguration(), true, 'a saved credential must permit a model-only update')
   assert.equal(mockAI.calls.configure.length, 1, 'a model-only update must not replace the API key')
   assert.deepEqual(mockAI.calls.updateModel, [{ providerID: 'openrouter', modelID: 'unknown-limit-model' }])
+
+  mockAI.setSettings([
+    { providerID: 'openrouter', modelID: 'unknown-limit-model', credentialStatus: 'persistent', isSelected: false },
+    { providerID: 'gemini', modelID: 'gemini-3.6-flash', credentialStatus: 'persistent', isSelected: true },
+  ])
+  await store.initialize()
+  assert.equal(store.draft.providerID, 'gemini', 'restart must restore the provider applied most recently')
+  assert.equal(store.draft.modelID, 'gemini-3.6-flash')
+  assert.equal(store.configuredSetting?.providerID, 'gemini')
+
+  store.draft.providerID = 'openrouter'
+  assert.equal(store.configuredSetting?.providerID, 'gemini', 'an unapplied dropdown change must not change the execution provider')
+  store.discardDraft()
+  assert.equal(store.draft.providerID, 'gemini', 'discarding a provider draft must restore the applied provider')
+
+  store.draft.providerID = 'openrouter'
+  assert.equal(await store.refreshModels(), true)
+  store.draft.modelID = 'summarizer-model'
+  assert.equal(await store.applyConfiguration(), true)
+  assert.equal(store.configuredSetting?.providerID, 'openrouter', 'Apply must select the new provider for AI execution')
+  await store.initialize()
+  assert.equal(store.draft.providerID, 'openrouter', 'a newly applied provider must survive the next restart')
+
+  mockAI.setSettings([
+    { providerID: 'openrouter', modelID: 'summarizer-model', credentialStatus: 'persistent', isSelected: false },
+    { providerID: 'gemini', modelID: 'gemini-3.6-flash', credentialStatus: 'reauthentication-required', isSelected: true },
+  ])
+  await store.initialize()
+  assert.equal(store.draft.providerID, 'gemini', 'a selected provider that needs reauthentication must remain selected')
+  assert.equal(store.configuredSetting, null, 'a reauthentication-required selected provider must not fall back to another provider')
+  assert.equal(store.isSummaryReady, false)
 
   assert.equal(await store.deleteProvider('openrouter'), true)
   assert.deepEqual(mockAI.calls.deleteProvider, ['openrouter'])

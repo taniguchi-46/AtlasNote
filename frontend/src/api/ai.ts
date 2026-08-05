@@ -19,6 +19,7 @@ export type ProviderSettings = {
   providerID: AIProviderID
   modelID: string
   credentialStatus: CredentialStatus
+  isSelected: boolean
 }
 
 export type ConfigureProviderInput = {
