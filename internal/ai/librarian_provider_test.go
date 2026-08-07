@@ -63,8 +63,12 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 				if !ok || thinkingConfig["thinkingLevel"] != "minimal" {
 					t.Fatalf("Gemini librarian thinking config = %#v", config["thinkingConfig"])
 				}
-				if _, ok := config["responseSchema"].(map[string]any); !ok {
-					t.Fatalf("Gemini librarian response schema = %#v", config["responseSchema"])
+				responseJSONSchema, ok := config["responseJsonSchema"].(map[string]any)
+				if !ok || responseJSONSchema["additionalProperties"] != false {
+					t.Fatalf("Gemini librarian response JSON schema = %#v", config["responseJsonSchema"])
+				}
+				if _, exists := config["responseSchema"]; exists {
+					t.Fatalf("Gemini librarian must not send legacy responseSchema = %#v", config["responseSchema"])
 				}
 			},
 		},

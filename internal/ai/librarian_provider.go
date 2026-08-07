@@ -100,10 +100,10 @@ func (a *HTTPProviderAdapter) generateGeminiStructured(ctx context.Context, apiK
 			} `json:"parts"`
 		} `json:"contents"`
 		GenerationConfig struct {
-			MaxOutputTokens  int                   `json:"maxOutputTokens"`
-			ResponseMIMEType string                `json:"responseMimeType"`
-			ResponseSchema   json.RawMessage       `json:"responseSchema"`
-			ThinkingConfig   *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+			MaxOutputTokens    int                   `json:"maxOutputTokens"`
+			ResponseMIMEType   string                `json:"responseMimeType"`
+			ResponseJSONSchema json.RawMessage       `json:"responseJsonSchema"`
+			ThinkingConfig     *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 		} `json:"generationConfig"`
 		Store bool `json:"store"`
 	}{Store: false}
@@ -120,7 +120,7 @@ func (a *HTTPProviderAdapter) generateGeminiStructured(ctx context.Context, apiK
 	}{{Text: input.Prompt}}})
 	payload.GenerationConfig.MaxOutputTokens = input.MaxOutputTokens
 	payload.GenerationConfig.ResponseMIMEType = "application/json"
-	payload.GenerationConfig.ResponseSchema = input.Schema
+	payload.GenerationConfig.ResponseJSONSchema = input.Schema
 	payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)
 
 	body, err := json.Marshal(payload)
