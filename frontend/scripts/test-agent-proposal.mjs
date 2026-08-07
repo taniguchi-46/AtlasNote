@@ -22,6 +22,9 @@ assert.match(noteStoreSource, /noteOperations\.enqueue\(noteId/)
 assert.match(noteStoreSource, /expectedRevision: proposal\.baseRevision/)
 assert.match(noteStoreSource, /NoteRevisionConflictError/)
 assert.match(noteStoreSource, /applyAgentEditHunk\(latest\.content, proposal\)/)
+assert.match(noteStoreSource, /proposal\.targetNoteID\.trim\(\)/)
+assert.match(noteStoreSource, /return 'applied'/)
+assert.match(noteStoreSource, /return 'save-failure'/)
 assert.doesNotMatch(proposalCardSource, /v-html/)
 assert.match(proposalCardSource, /<pre>\{\{ proposal\.before \}\}<\/pre>/)
 assert.match(proposalCardSource, /<pre>\{\{ proposal\.after \}\}<\/pre>/)
@@ -56,6 +59,14 @@ try {
   assert.deepEqual(
     applyAgentEditHunk('', { before: '', after: '新規本文' }),
     { status: 'conflict', reason: 'invalid-empty-target' },
+  )
+  assert.deepEqual(
+    applyAgentEditHunk('同じ本文', { before: '同じ本文', after: '同じ本文' }),
+    { status: 'conflict', reason: 'unchanged' },
+  )
+  assert.deepEqual(
+    applyAgentEditHunk('見出し\n本文\n末尾', { before: '本文\n', after: '<安全な置換>\n' }),
+    { status: 'ok', content: '見出し\n<安全な置換>\n末尾' },
   )
 
   console.log('Agent proposal tests passed')

@@ -95,6 +95,9 @@ jobs:
       - name: Run AI v3 tests
         run: npm --prefix frontend run test:ai-v3
 
+      - name: Run Agent proposal tests
+        run: npm --prefix frontend run test:agent-proposal
+
       - name: Run AI workspace tests
         run: npm --prefix frontend run test:ai-workspace
 

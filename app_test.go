@@ -30,10 +30,14 @@ func (c *appTestAIConnectionChecker) Check(context.Context, aiservice.ProviderID
 }
 
 type appTestAIProviderAdapter struct {
-	listResult    aiservice.ModelListResult
-	listErr       error
-	summaryResult aiservice.SummaryResult
-	summaryErr    error
+	listResult       aiservice.ModelListResult
+	listErr          error
+	summaryResult    aiservice.SummaryResult
+	summaryErr       error
+	structuredResult string
+	structuredErr    error
+	structuredInput  aiservice.StructuredGenerationInput
+	structuredCalls  int
 }
 
 func (a *appTestAIProviderAdapter) CheckConnection(context.Context, aiservice.ProviderID, string) error {
@@ -52,6 +56,35 @@ func (a *appTestAIProviderAdapter) GenerateSummary(context.Context, aiservice.Pr
 		return aiservice.SummaryResult{}, a.summaryErr
 	}
 	return a.summaryResult, nil
+}
+
+func (a *appTestAIProviderAdapter) GenerateStructured(_ context.Context, _ aiservice.ProviderID, _ string, input aiservice.StructuredGenerationInput, _ func(string) error) (string, error) {
+	a.structuredCalls++
+	a.structuredInput = input
+	if a.structuredErr != nil {
+		return "", a.structuredErr
+	}
+	return a.structuredResult, nil
+}
+
+type appTestAIContextProvider struct {
+	notes map[string]aiservice.ContextNote
+}
+
+func (p appTestAIContextProvider) Get(_ context.Context, noteID string) (aiservice.ContextNote, error) {
+	item, ok := p.notes[noteID]
+	if !ok {
+		return aiservice.ContextNote{}, errors.New("missing AI context note")
+	}
+	return item, nil
+}
+
+func (appTestAIContextProvider) Search(context.Context, string, int) ([]aiservice.ContextNote, error) {
+	return []aiservice.ContextNote{}, nil
+}
+
+func (appTestAIContextProvider) ListBacklinks(context.Context, string, int) ([]aiservice.ContextNote, error) {
+	return []aiservice.ContextNote{}, nil
 }
 
 type appTestAIInvariantSnapshot struct {
@@ -377,6 +410,166 @@ func TestAppAIExecutionAPIsReturnOnlySafeResponses(t *testing.T) {
 	}
 	if strings.Contains(string(serializedSummary), secretMarker) {
 		t.Fatal("Wails summary response exposed an API key or provider message")
+	}
+}
+
+func TestAppAIProviderSelectionAndModelUpdatePreserveCredential(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	adapter := &appTestAIProviderAdapter{}
+	aiService := aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+	app := &App{ctx: t.Context(), aiService: aiService}
+	const openRouterKey = "wails-openrouter-selection-key-marker"
+	const geminiKey = "wails-gemini-selection-key-marker"
+
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     openRouterKey,
+		ModelID:    "openrouter/initial-model",
+	}); err != nil {
+		t.Fatalf("configure OpenRouter: %v", err)
+	}
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderGemini,
+		APIKey:     geminiKey,
+		ModelID:    "gemini-2.5-flash",
+	}); err != nil {
+		t.Fatalf("configure Gemini: %v", err)
+	}
+
+	var beforeCredentialRef string
+	if err := db.QueryRowContext(t.Context(), `SELECT credential_ref FROM ai_provider_settings WHERE provider_id = ?`, aiservice.ProviderOpenRouter).Scan(&beforeCredentialRef); err != nil {
+		t.Fatalf("read OpenRouter credential reference before model update: %v", err)
+	}
+	beforeKey, err := aiService.GetCredential(t.Context(), aiservice.ProviderOpenRouter)
+	if err != nil {
+		t.Fatalf("read OpenRouter credential before model update: %v", err)
+	}
+
+	settings, err := app.UpdateAIProviderModel(aiservice.UpdateProviderModelInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openrouter/updated-model",
+	})
+	if err != nil {
+		t.Fatalf("update OpenRouter model: %v", err)
+	}
+	var openRouterSetting aiservice.ProviderSettings
+	var geminiSetting aiservice.ProviderSettings
+	for _, setting := range settings {
+		switch setting.ProviderID {
+		case aiservice.ProviderOpenRouter:
+			openRouterSetting = setting
+		case aiservice.ProviderGemini:
+			geminiSetting = setting
+		}
+	}
+	if openRouterSetting.ModelID != "openrouter/updated-model" || !openRouterSetting.IsSelected {
+		t.Fatalf("updated OpenRouter setting = %#v", openRouterSetting)
+	}
+	if geminiSetting.IsSelected {
+		t.Fatalf("Gemini remained selected after OpenRouter model update: %#v", geminiSetting)
+	}
+	afterKey, err := aiService.GetCredential(t.Context(), aiservice.ProviderOpenRouter)
+	if err != nil {
+		t.Fatalf("read OpenRouter credential after model update: %v", err)
+	}
+	if afterKey != beforeKey || afterKey != openRouterKey {
+		t.Fatal("model-only provider selection replaced the saved credential")
+	}
+	var afterCredentialRef string
+	if err := db.QueryRowContext(t.Context(), `SELECT credential_ref FROM ai_provider_settings WHERE provider_id = ?`, aiservice.ProviderOpenRouter).Scan(&afterCredentialRef); err != nil {
+		t.Fatalf("read OpenRouter credential reference after model update: %v", err)
+	}
+	if afterCredentialRef != beforeCredentialRef {
+		t.Fatalf("model-only provider selection changed credential reference from %q to %q", beforeCredentialRef, afterCredentialRef)
+	}
+	var selectedCount int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM ai_provider_settings WHERE is_selected = 1`).Scan(&selectedCount); err != nil {
+		t.Fatalf("count selected AI providers: %v", err)
+	}
+	if selectedCount != 1 {
+		t.Fatalf("selected AI provider count = %d, want 1", selectedCount)
+	}
+	serialized, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("serialize provider settings: %v", err)
+	}
+	if strings.Contains(string(serialized), openRouterKey) || strings.Contains(string(serialized), geminiKey) {
+		t.Fatal("provider selection response exposed an API key")
+	}
+}
+
+func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const secretMarker = "wails-agent-secret-marker"
+	adapter := &appTestAIProviderAdapter{
+		structuredResult: `{"message":"本文を簡潔にします。確認してから適用してください。","hasProposal":true,"reason":"重複を減らすため","before":"current body","after":"revised body"}`,
+	}
+	aiService := aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+	aiService.SetNoteContextProvider(appTestAIContextProvider{notes: map[string]aiservice.ContextNote{
+		"note-1": {NoteID: "note-1", Title: "Current", Content: "current body", Revision: 4},
+	}})
+	app := &App{ctx: t.Context(), aiService: aiService}
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     secretMarker,
+		ModelID:    "openai/agent-test",
+	}); err != nil {
+		t.Fatalf("configure AI provider: %v", err)
+	}
+
+	response := app.RunAIAssistant(aiservice.AssistantInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/agent-test",
+		Kind:       aiservice.AssistantKindQA,
+		Mode:       aiservice.ChatModeAgent,
+		Question:   "本文を短くして",
+		NoteIDs:    []string{"note-1"},
+		ExpectedSources: []aiservice.AIHistorySource{
+			{NoteID: "note-1", InputRevision: 4},
+		},
+		AgentTarget: &aiservice.AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+	})
+	if response.Error != nil || response.Result == nil || response.Result.Proposal == nil {
+		t.Fatalf("safe Agent response = %#v", response)
+	}
+	proposal := response.Result.Proposal
+	if proposal.TargetNoteID != "note-1" || proposal.TargetTitle != "Current" || proposal.BaseRevision != 4 || proposal.Before != "current body" || proposal.After != "revised body" {
+		t.Fatalf("Agent proposal = %#v", proposal)
+	}
+	if adapter.structuredCalls != 1 || adapter.structuredInput.Name != "atlas_note_agent_edit" || adapter.structuredInput.MaxOutputTokens < 1 || len(adapter.structuredInput.Schema) == 0 {
+		t.Fatalf("Agent structured request = calls:%d input:%#v", adapter.structuredCalls, adapter.structuredInput)
+	}
+	serialized, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("serialize Agent response: %v", err)
+	}
+	if strings.Contains(string(serialized), secretMarker) {
+		t.Fatal("Agent response exposed an API key")
+	}
+	var histories int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_histories").Scan(&histories); err != nil {
+		t.Fatalf("count Agent histories: %v", err)
+	}
+	if histories != 0 {
+		t.Fatalf("Agent proposal unexpectedly persisted %d histories", histories)
 	}
 }
 

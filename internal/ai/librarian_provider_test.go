@@ -123,6 +123,68 @@ func TestHTTPProviderAdapterStreamsStrictLibrarianRequests(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderAdapterStreamsStrictGeminiAgentRequests(t *testing.T) {
+	const endpoint = geminiSummaryEndpoint + "gemini-3.6-flash:streamGenerateContent?alt=sse"
+	chunks := make([]string, 0, 1)
+	adapter := NewHTTPProviderAdapterWithClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.String() != endpoint {
+			t.Fatalf("Gemini Agent request = %s %s", request.Method, request.URL)
+		}
+		if request.Header.Get("Content-Type") != "application/json" || request.Header.Get("X-Goog-Api-Key") != "agent-key" {
+			t.Fatal("Gemini Agent request headers were incomplete")
+		}
+		assertDeadline(t, request, summaryGenerationTimeout)
+		payload := make(map[string]any)
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode Gemini Agent request: %v", err)
+		}
+		if payload["store"] != false {
+			t.Fatalf("Gemini Agent request must set store=false: %#v", payload)
+		}
+		config, ok := payload["generationConfig"].(map[string]any)
+		if !ok || config["maxOutputTokens"] != float64(summaryOutputTokenLimit) || config["responseMimeType"] != "application/json" {
+			t.Fatalf("Gemini Agent generation config = %#v", config)
+		}
+		thinkingConfig, ok := config["thinkingConfig"].(map[string]any)
+		if !ok || thinkingConfig["thinkingLevel"] != "minimal" {
+			t.Fatalf("Gemini Agent thinking config = %#v", config["thinkingConfig"])
+		}
+		responseJSONSchema, ok := config["responseJsonSchema"].(map[string]any)
+		if !ok || responseJSONSchema["additionalProperties"] != false {
+			t.Fatalf("Gemini Agent response JSON schema = %#v", config["responseJsonSchema"])
+		}
+		required, ok := responseJSONSchema["required"].([]any)
+		if !ok || len(required) != 1 || required[0] != "message" {
+			t.Fatalf("Gemini Agent required fields = %#v", responseJSONSchema["required"])
+		}
+		if _, exists := config["responseSchema"]; exists {
+			t.Fatalf("Gemini Agent must not send legacy responseSchema = %#v", config["responseSchema"])
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"{\\\"message\\\":\\\"ok\\\"}\"}]},\"finishReason\":\"STOP\"}]}\n")),
+		}, nil
+	})})
+
+	result, err := adapter.GenerateStructured(context.Background(), ProviderGemini, "agent-key", StructuredGenerationInput{
+		Name:            "atlas_note_agent_edit",
+		ModelID:         "gemini-3.6-flash",
+		Prompt:          "bounded Agent prompt",
+		Schema:          json.RawMessage(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		MaxOutputTokens: summaryOutputTokenLimit,
+	}, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("generate Gemini Agent structured response: %v", err)
+	}
+	if result != `{"message":"ok"}` || len(chunks) != 1 || chunks[0] != result {
+		t.Fatalf("Gemini Agent stream = result:%q chunks:%#v", result, chunks)
+	}
+}
+
 func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {
 	adapter := NewHTTPProviderAdapterWithClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{
