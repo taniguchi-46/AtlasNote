@@ -89,22 +89,6 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 		return s.runAgentEditProposal(ctx, input, providerID, modelID, kind, mode, messages, contextNotes)
 	}
 
-	if !s.tryStartGeneration() {
-		return AssistantResult{}, ErrBusy
-	}
-	defer s.finishGeneration()
-
-	apiKey, err := s.credentialForSummary(ctx, providerID, modelID)
-	if err != nil {
-		return AssistantResult{}, err
-	}
-	adapter, ok := s.adapter.(TextGenerationProviderAdapter)
-	if !ok {
-		return AssistantResult{}, ErrProviderUnavailable
-	}
-	operationCtx, cancel := s.operationContext(ctx)
-	defer cancel()
-
 	providerMessages := make([]TextMessage, 0, len(messages)+1)
 	if contextMessage := buildContextMessage(contextNotes); contextMessage != "" {
 		providerMessages = append(providerMessages, TextMessage{Role: "user", Content: contextMessage})
@@ -112,7 +96,7 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 	for _, message := range messages {
 		providerMessages = append(providerMessages, TextMessage{Role: message.Role, Content: message.Content})
 	}
-	result, err := adapter.GenerateText(operationCtx, providerID, apiKey, TextGenerationInput{
+	result, err := s.generateText(ctx, providerID, modelID, TextGenerationInput{
 		ModelID:           modelID,
 		SystemInstruction: buildAssistantInstruction(kind, mode, input.WebSearch),
 		Messages:          providerMessages,
@@ -120,7 +104,7 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 		WebSearch:         input.WebSearch,
 	})
 	if err != nil {
-		return AssistantResult{}, toSafeError(err)
+		return AssistantResult{}, err
 	}
 	if input.WebSearch && result.WebSearchRequests != 1 {
 		return AssistantResult{}, ErrInvalidResponse
@@ -174,30 +158,15 @@ func (s *Service) RunWriting(ctx context.Context, input WritingInput) (WritingRe
 		return WritingResult{}, err
 	}
 
-	if !s.tryStartGeneration() {
-		return WritingResult{}, ErrBusy
-	}
-	defer s.finishGeneration()
-
-	apiKey, err := s.credentialForSummary(ctx, providerID, modelID)
-	if err != nil {
-		return WritingResult{}, err
-	}
-	adapter, ok := s.adapter.(TextGenerationProviderAdapter)
-	if !ok {
-		return WritingResult{}, ErrProviderUnavailable
-	}
-	operationCtx, cancel := s.operationContext(ctx)
-	defer cancel()
 	userContent := buildWritingUserMessage(kind, instruction, contextNotes)
-	result, err := adapter.GenerateText(operationCtx, providerID, apiKey, TextGenerationInput{
+	result, err := s.generateText(ctx, providerID, modelID, TextGenerationInput{
 		ModelID:           modelID,
 		SystemInstruction: buildWritingInstruction(kind),
 		Messages:          []TextMessage{{Role: "user", Content: userContent}},
 		MaxOutputTokens:   aiWritingOutputTokens,
 	})
 	if err != nil {
-		return WritingResult{}, toSafeError(err)
+		return WritingResult{}, err
 	}
 	content := strings.TrimSpace(result.Text)
 	if content == "" {

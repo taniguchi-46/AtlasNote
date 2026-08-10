@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type testV3TextAdapter struct {
@@ -19,12 +20,24 @@ type testV3TextAdapter struct {
 	lastStructuredInput StructuredGenerationInput
 	structuredCalls     int
 	textCalls           int
+	started             chan<- struct{}
+	release             <-chan struct{}
 }
 
-func (a *testV3TextAdapter) GenerateText(_ context.Context, providerID ProviderID, _ string, input TextGenerationInput) (TextGenerationResult, error) {
+func (a *testV3TextAdapter) GenerateText(ctx context.Context, providerID ProviderID, _ string, input TextGenerationInput) (TextGenerationResult, error) {
 	a.textCalls++
 	a.lastProvider = providerID
 	a.lastInput = input
+	if a.started != nil {
+		a.started <- struct{}{}
+	}
+	if a.release != nil {
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+			return TextGenerationResult{}, ctx.Err()
+		}
+	}
 	if a.text == "" {
 		return TextGenerationResult{}, ErrInvalidResponse
 	}
@@ -163,6 +176,61 @@ func TestServiceRunsAssistantAndWritingOnlyPersistAfterExplicitSave(t *testing.T
 		t.Fatalf("saved artifact = %#v", savedArtifact)
 	}
 	assertAIExecutionHasNoPersistentSideEffects(t, db)
+}
+
+func TestServiceSharesGenerationSlotAcrossAssistantAndWriting(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{},
+		text:                "generated",
+		started:             started,
+		release:             release,
+	}
+	service, _ := newV3Service(t, adapter)
+
+	assistantDone := make(chan error, 1)
+	go func() {
+		_, err := service.RunAssistant(t.Context(), AssistantInput{
+			ProviderID: ProviderOpenRouter,
+			ModelID:    "openai/test",
+			Kind:       AssistantKindQA,
+			Question:   "Question",
+			NoteIDs:    []string{"note-1"},
+		})
+		assistantDone <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("assistant did not start text generation")
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+
+	if _, err := service.RunWriting(t.Context(), WritingInput{
+		ProviderID:  ProviderOpenRouter,
+		ModelID:     "openai/test",
+		Kind:        WritingKindDocument,
+		Instruction: "Create a document",
+		NoteIDs:     []string{"note-1"},
+	}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("writing while assistant is running error = %v, want ErrBusy", err)
+	}
+	if adapter.textCalls != 1 {
+		t.Fatalf("text calls while assistant is running = %d, want 1", adapter.textCalls)
+	}
+
+	close(release)
+	released = true
+	if err := <-assistantDone; err != nil {
+		t.Fatalf("assistant completion error = %v", err)
+	}
 }
 
 func TestServiceRejectsAssistantWithoutContextAndMarksSavedDataStale(t *testing.T) {
