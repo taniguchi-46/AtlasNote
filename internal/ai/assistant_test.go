@@ -253,6 +253,10 @@ func TestServiceReturnsValidatedAgentEditProposalWithoutPersistence(t *testing.T
 		Mode:       ChatModeAgent,
 		Question:   "本文を短くして",
 		NoteIDs:    []string{"note-1", "note-2"},
+		ExpectedSources: []AIHistorySource{
+			{NoteID: "note-1", InputRevision: 4},
+			{NoteID: "note-2", InputRevision: 2},
+		},
 		AgentTarget: &AgentEditTarget{
 			NoteID:       "note-1",
 			BaseRevision: 4,
@@ -282,28 +286,53 @@ func TestServiceRejectsInvalidOrStaleAgentEditProposal(t *testing.T) {
 		input  AssistantInput
 		output string
 		want   error
+		calls  int
 	}{
 		{
 			name:  "missing target",
-			input: AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}},
+			input: AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, ExpectedSources: []AIHistorySource{{NoteID: "note-1", InputRevision: 4}}},
 			want:  ErrInputInvalid,
 		},
 		{
 			name:  "target is not active note",
-			input: AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1", "note-2"}, AgentTarget: &AgentEditTarget{NoteID: "note-2", BaseRevision: 2}},
+			input: AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1", "note-2"}, ExpectedSources: []AIHistorySource{{NoteID: "note-1", InputRevision: 4}, {NoteID: "note-2", InputRevision: 2}}, AgentTarget: &AgentEditTarget{NoteID: "note-2", BaseRevision: 2}},
+			want:  ErrInputInvalid,
+		},
+		{
+			name:  "missing prepared sources",
+			input: AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4}},
 			want:  ErrInputInvalid,
 		},
 		{
 			name:   "hunk is not in target body",
-			input:  AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4}},
+			input:  AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, ExpectedSources: []AIHistorySource{{NoteID: "note-1", InputRevision: 4}}, AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4}},
 			output: `{"message":"提案です","hasProposal":true,"reason":"理由","before":"missing","after":"replacement"}`,
 			want:   ErrInvalidResponse,
+			calls:  1,
 		},
 		{
 			name:   "missing required response field",
-			input:  AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4}},
+			input:  AssistantInput{ProviderID: ProviderOpenRouter, ModelID: "openai/test", Kind: AssistantKindQA, Mode: ChatModeAgent, Question: "Change it", NoteIDs: []string{"note-1"}, ExpectedSources: []AIHistorySource{{NoteID: "note-1", InputRevision: 4}}, AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4}},
 			output: `{"message":"提案です","hasProposal":false}`,
 			want:   ErrInvalidResponse,
+			calls:  1,
+		},
+		{
+			name: "oversized conversation before provider request",
+			input: AssistantInput{
+				ProviderID: ProviderOpenRouter,
+				ModelID:    "openai/test",
+				Kind:       AssistantKindQA,
+				Mode:       ChatModeAgent,
+				Question:   "Change it",
+				Messages:   []AIConversationMessage{{Role: "user", Content: strings.Repeat("x", textMessageLimitBytes)}},
+				NoteIDs:    []string{"note-1"},
+				ExpectedSources: []AIHistorySource{
+					{NoteID: "note-1", InputRevision: 4},
+				},
+				AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+			},
+			want: ErrInputTooLarge,
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -312,6 +341,9 @@ func TestServiceRejectsInvalidOrStaleAgentEditProposal(t *testing.T) {
 			_, err := service.RunAssistant(t.Context(), testCase.input)
 			if !errors.Is(err, testCase.want) {
 				t.Fatalf("agent proposal error = %v, want %v", err, testCase.want)
+			}
+			if adapter.structuredCalls != testCase.calls {
+				t.Fatalf("structured provider calls = %d, want %d", adapter.structuredCalls, testCase.calls)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -83,6 +84,17 @@ func TestAgentEditPromptConstrainsOneBodyHunkAndStrictResponse(t *testing.T) {
 		if !strings.Contains(string(schema), field) {
 			t.Fatalf("agent edit schema is missing %q: %s", field, schema)
 		}
+	}
+}
+
+func TestAgentEditPromptRejectsOversizedPayload(t *testing.T) {
+	_, _, err := buildAgentEditPrompt(
+		[]AIConversationMessage{{Role: "user", Content: strings.Repeat("x", structuredPromptLimitBytes)}},
+		nil,
+		AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+	)
+	if !errors.Is(err, ErrInputTooLarge) {
+		t.Fatalf("oversized Agent prompt error = %v, want ErrInputTooLarge", err)
 	}
 }
 

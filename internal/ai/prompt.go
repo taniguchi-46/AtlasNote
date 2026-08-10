@@ -206,6 +206,9 @@ func buildAgentEditPrompt(messages []AIConversationMessage, items []ContextNote,
 		"対象と会話JSON:\n"+string(data),
 		buildContextMessage(items),
 	)
+	if len([]byte(prompt)) > structuredPromptLimitBytes {
+		return "", nil, ErrInputTooLarge
+	}
 	return prompt, schema, nil
 }
 

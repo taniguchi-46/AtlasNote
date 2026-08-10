@@ -145,9 +145,8 @@ func TestHTTPProviderAdapterStreamsStrictGeminiAgentRequests(t *testing.T) {
 		if !ok || config["maxOutputTokens"] != float64(summaryOutputTokenLimit) || config["responseMimeType"] != "application/json" {
 			t.Fatalf("Gemini Agent generation config = %#v", config)
 		}
-		thinkingConfig, ok := config["thinkingConfig"].(map[string]any)
-		if !ok || thinkingConfig["thinkingLevel"] != "minimal" {
-			t.Fatalf("Gemini Agent thinking config = %#v", config["thinkingConfig"])
+		if _, exists := config["thinkingConfig"]; exists {
+			t.Fatalf("Gemini Agent request must not override thinkingConfig = %#v", config["thinkingConfig"])
 		}
 		responseJSONSchema, ok := config["responseJsonSchema"].(map[string]any)
 		if !ok || responseJSONSchema["additionalProperties"] != false {
@@ -183,6 +182,104 @@ func TestHTTPProviderAdapterStreamsStrictGeminiAgentRequests(t *testing.T) {
 	if result != `{"message":"ok"}` || len(chunks) != 1 || chunks[0] != result {
 		t.Fatalf("Gemini Agent stream = result:%q chunks:%#v", result, chunks)
 	}
+}
+
+func TestHTTPProviderAdapterRejectsUnsafeStructuredInputBeforeHTTP(t *testing.T) {
+	base := StructuredGenerationInput{
+		Name:            "atlas_note_librarian",
+		ModelID:         "openai/gpt-test",
+		Prompt:          "bounded structured prompt",
+		Schema:          json.RawMessage(`{"type":"object","additionalProperties":false}`),
+		MaxOutputTokens: summaryOutputTokenLimit,
+	}
+	for _, testCase := range []struct {
+		name  string
+		input StructuredGenerationInput
+		want  error
+	}{
+		{
+			name:  "unknown structured request name",
+			input: StructuredGenerationInput{Name: "untrusted_request", ModelID: base.ModelID, Prompt: base.Prompt, Schema: base.Schema, MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputInvalid,
+		},
+		{
+			name:  "oversized structured request name",
+			input: StructuredGenerationInput{Name: strings.Repeat("x", structuredNameLimitBytes+1), ModelID: base.ModelID, Prompt: base.Prompt, Schema: base.Schema, MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputTooLarge,
+		},
+		{
+			name:  "invalid UTF-8 prompt",
+			input: StructuredGenerationInput{Name: base.Name, ModelID: base.ModelID, Prompt: string([]byte{0xff}), Schema: base.Schema, MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputInvalid,
+		},
+		{
+			name:  "oversized prompt",
+			input: StructuredGenerationInput{Name: base.Name, ModelID: base.ModelID, Prompt: strings.Repeat("x", structuredPromptLimitBytes+1), Schema: base.Schema, MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputTooLarge,
+		},
+		{
+			name:  "malformed schema",
+			input: StructuredGenerationInput{Name: base.Name, ModelID: base.ModelID, Prompt: base.Prompt, Schema: json.RawMessage(`{"type":`), MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputInvalid,
+		},
+		{
+			name:  "schema is not an object",
+			input: StructuredGenerationInput{Name: base.Name, ModelID: base.ModelID, Prompt: base.Prompt, Schema: json.RawMessage(`[]`), MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputInvalid,
+		},
+		{
+			name:  "oversized schema",
+			input: StructuredGenerationInput{Name: base.Name, ModelID: base.ModelID, Prompt: base.Prompt, Schema: json.RawMessage(`{"description":"` + strings.Repeat("x", structuredSchemaLimitBytes) + `"}`), MaxOutputTokens: base.MaxOutputTokens},
+			want:  ErrInputTooLarge,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			requests := 0
+			adapter := NewHTTPProviderAdapterWithClient(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				requests++
+				return nil, errors.New("structured request must not reach the provider")
+			})})
+			_, err := adapter.GenerateStructured(t.Context(), ProviderOpenRouter, "librarian-key", testCase.input, nil)
+			if !errors.Is(err, testCase.want) {
+				t.Fatalf("structured input error = %v, want %v", err, testCase.want)
+			}
+			if requests != 0 {
+				t.Fatalf("unsafe structured input made %d provider requests", requests)
+			}
+		})
+	}
+}
+
+func TestReadLibrarianSSERejectsOversizedStreams(t *testing.T) {
+	t.Run("cumulative parsed output", func(t *testing.T) {
+		callbacks := 0
+		result, err := readLibrarianSSE(
+			strings.NewReader("data: first\n\ndata: second\n\n"),
+			func(string) error {
+				callbacks++
+				return nil
+			},
+			func([]byte) (string, bool, error) {
+				return strings.Repeat("x", maxProviderResponseBytes/2+1), false, nil
+			},
+		)
+		if !errors.Is(err, ErrOutputLimit) || result != "" {
+			t.Fatalf("oversized cumulative stream = result:%q error:%v", result, err)
+		}
+		if callbacks != 1 {
+			t.Fatalf("oversized cumulative stream callbacks = %d, want 1", callbacks)
+		}
+	})
+
+	t.Run("raw SSE payload", func(t *testing.T) {
+		payload := strings.Repeat(": keepalive\n", maxProviderResponseBytes/len(": keepalive\n")+1)
+		result, err := readLibrarianSSE(strings.NewReader(payload), nil, func([]byte) (string, bool, error) {
+			return "", false, nil
+		})
+		if !errors.Is(err, ErrOutputLimit) || result != "" {
+			t.Fatalf("oversized raw stream = result:%q error:%v", result, err)
+		}
+	})
 }
 
 func TestHTTPProviderAdapterLibrarianRejectsInvalidStreamData(t *testing.T) {

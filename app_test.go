@@ -535,7 +535,7 @@ func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
 		t.Fatalf("configure AI provider: %v", err)
 	}
 
-	response := app.RunAIAssistant(aiservice.AssistantInput{
+	input := aiservice.AssistantInput{
 		ProviderID: aiservice.ProviderOpenRouter,
 		ModelID:    "openai/agent-test",
 		Kind:       aiservice.AssistantKindQA,
@@ -546,7 +546,8 @@ func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
 			{NoteID: "note-1", InputRevision: 4},
 		},
 		AgentTarget: &aiservice.AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
-	})
+	}
+	response := app.RunAIAssistant(input)
 	if response.Error != nil || response.Result == nil || response.Result.Proposal == nil {
 		t.Fatalf("safe Agent response = %#v", response)
 	}
@@ -570,6 +571,22 @@ func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
 	}
 	if histories != 0 {
 		t.Fatalf("Agent proposal unexpectedly persisted %d histories", histories)
+	}
+
+	input.ExpectedSources = nil
+	rejected := app.RunAIAssistant(input)
+	if rejected.Error == nil || rejected.Error.Code != aiservice.ErrorCodeInputInvalid || rejected.Result != nil {
+		t.Fatalf("missing Agent expected sources response = %#v", rejected)
+	}
+	if adapter.structuredCalls != 1 {
+		t.Fatalf("missing Agent expected sources made %d structured provider calls", adapter.structuredCalls)
+	}
+	serialized, err = json.Marshal(rejected)
+	if err != nil {
+		t.Fatalf("serialize rejected Agent response: %v", err)
+	}
+	if strings.Contains(string(serialized), secretMarker) {
+		t.Fatal("rejected Agent response exposed an API key")
 	}
 }
 

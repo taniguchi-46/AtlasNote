@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 func (a *HTTPProviderAdapter) GenerateStructured(ctx context.Context, providerID ProviderID, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
@@ -19,20 +20,69 @@ func (a *HTTPProviderAdapter) GenerateStructured(ctx context.Context, providerID
 	if err := validateAPIKey(apiKey); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.ModelID) == "" || strings.TrimSpace(input.Prompt) == "" || len(input.Schema) == 0 || input.MaxOutputTokens < 1 || input.MaxOutputTokens > textMaxOutputTokens {
-		return "", ErrInputInvalid
+	normalized, err := normalizeStructuredGenerationInput(providerID, input)
+	if err != nil {
+		return "", err
 	}
 	operationCtx, cancel := context.WithTimeout(nonNilContext(ctx), summaryGenerationTimeout)
 	defer cancel()
 
 	switch providerID {
 	case ProviderOpenRouter:
-		return a.generateOpenRouterStructured(operationCtx, apiKey, input, onChunk)
+		return a.generateOpenRouterStructured(operationCtx, apiKey, normalized, onChunk)
 	case ProviderGemini:
-		return a.generateGeminiStructured(operationCtx, apiKey, input, onChunk)
+		return a.generateGeminiStructured(operationCtx, apiKey, normalized, onChunk)
 	default:
 		return "", ErrProviderUnsupported
 	}
+}
+
+func normalizeStructuredGenerationInput(providerID ProviderID, input StructuredGenerationInput) (StructuredGenerationInput, error) {
+	name := strings.TrimSpace(input.Name)
+	if name == "" || !utf8.ValidString(name) {
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+	if len([]byte(name)) > structuredNameLimitBytes {
+		return StructuredGenerationInput{}, ErrInputTooLarge
+	}
+	switch name {
+	case "atlas_note_librarian", "atlas_note_agent_edit":
+	default:
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+
+	modelID, err := normalizeSummaryModelID(providerID, input.ModelID)
+	if err != nil {
+		return StructuredGenerationInput{}, err
+	}
+	prompt := strings.TrimSpace(input.Prompt)
+	if prompt == "" || !utf8.ValidString(prompt) {
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+	if len([]byte(prompt)) > structuredPromptLimitBytes {
+		return StructuredGenerationInput{}, ErrInputTooLarge
+	}
+	schema := bytes.TrimSpace(input.Schema)
+	if len(schema) == 0 || !utf8.Valid(schema) || !json.Valid(schema) {
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+	if len(schema) > structuredSchemaLimitBytes {
+		return StructuredGenerationInput{}, ErrInputTooLarge
+	}
+	var schemaObject map[string]json.RawMessage
+	if err := json.Unmarshal(schema, &schemaObject); err != nil || schemaObject == nil {
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+	if input.MaxOutputTokens < 1 || input.MaxOutputTokens > textMaxOutputTokens {
+		return StructuredGenerationInput{}, ErrInputInvalid
+	}
+	return StructuredGenerationInput{
+		Name:            name,
+		ModelID:         modelID,
+		Prompt:          prompt,
+		Schema:          append(json.RawMessage(nil), schema...),
+		MaxOutputTokens: input.MaxOutputTokens,
+	}, nil
 }
 
 func (a *HTTPProviderAdapter) generateOpenRouterStructured(ctx context.Context, apiKey string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
@@ -121,7 +171,9 @@ func (a *HTTPProviderAdapter) generateGeminiStructured(ctx context.Context, apiK
 	payload.GenerationConfig.MaxOutputTokens = input.MaxOutputTokens
 	payload.GenerationConfig.ResponseMIMEType = "application/json"
 	payload.GenerationConfig.ResponseJSONSchema = input.Schema
-	payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)
+	if input.Name == "atlas_note_librarian" {
+		payload.GenerationConfig.ThinkingConfig = geminiSummaryThinkingConfig(input.ModelID)
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -151,8 +203,9 @@ func (a *HTTPProviderAdapter) streamLibrarianRequest(ctx context.Context, apiKey
 }
 
 func readLibrarianSSE(body io.Reader, onChunk func(string) error, parser librarianChunkParser) (string, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), maxProviderResponseBytes)
+	limitedBody := &io.LimitedReader{R: body, N: int64(maxProviderResponseBytes + 1)}
+	scanner := bufio.NewScanner(limitedBody)
+	scanner.Buffer(make([]byte, 4096), maxProviderResponseBytes+1)
 	var content strings.Builder
 	streamFinished := false
 	for scanner.Scan() {
@@ -176,6 +229,9 @@ func readLibrarianSSE(body io.Reader, onChunk func(string) error, parser librari
 			return "", err
 		}
 		if part != "" {
+			if len(part) > maxProviderResponseBytes-content.Len() {
+				return "", ErrOutputLimit
+			}
 			content.WriteString(part)
 			if onChunk != nil {
 				if err := onChunk(part); err != nil {
@@ -187,6 +243,9 @@ func readLibrarianSSE(body io.Reader, onChunk func(string) error, parser librari
 			streamFinished = true
 			break
 		}
+	}
+	if limitedBody.N == 0 {
+		return "", ErrOutputLimit
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, context.Canceled) {

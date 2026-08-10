@@ -24,6 +24,9 @@ const (
 	textMessageLimitBytes              = 64 * 1024
 	textMaxMessages                    = 24
 	textMaxOutputTokens                = 4096
+	structuredNameLimitBytes           = 128
+	structuredPromptLimitBytes         = 128 * 1024
+	structuredSchemaLimitBytes         = 16 * 1024
 )
 
 type ProviderID string

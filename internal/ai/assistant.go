@@ -70,6 +70,9 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 	if len(messages) > aiMaxHistoryMessages {
 		return AssistantResult{}, ErrInputTooLarge
 	}
+	if conversationMessageBytes(messages) > textMessageLimitBytes {
+		return AssistantResult{}, ErrInputTooLarge
+	}
 
 	contextNotes, err := s.collectContext(ctx, AIContextInput{
 		NoteIDs:          input.NoteIDs,
@@ -86,6 +89,9 @@ func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (Assis
 		return AssistantResult{}, err
 	}
 	if mode == ChatModeAgent && !input.WebSearch {
+		if len(input.ExpectedSources) == 0 {
+			return AssistantResult{}, ErrInputInvalid
+		}
 		target, err := normalizeAgentEditTarget(input.AgentTarget)
 		if err != nil {
 			return AssistantResult{}, err
@@ -557,15 +563,28 @@ func normalizeConversationMessages(messages []AIConversationMessage) ([]AIConver
 		return nil, ErrInputTooLarge
 	}
 	result := make([]AIConversationMessage, 0, len(messages))
+	messageBytes := 0
 	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
 		content := strings.TrimSpace(message.Content)
 		if (role != "user" && role != "assistant") || content == "" || !utf8.ValidString(content) {
 			return nil, ErrInputInvalid
 		}
+		messageBytes += len([]byte(content))
+		if messageBytes > textMessageLimitBytes {
+			return nil, ErrInputTooLarge
+		}
 		result = append(result, AIConversationMessage{Role: role, Content: content})
 	}
 	return result, nil
+}
+
+func conversationMessageBytes(messages []AIConversationMessage) int {
+	total := 0
+	for _, message := range messages {
+		total += len([]byte(message.Content))
+	}
+	return total
 }
 
 func normalizeAssistantKind(kind AssistantKind) (AssistantKind, error) {
@@ -680,7 +699,10 @@ func normalizeSaveHistoryInput(input SaveAIHistoryInput) (SaveAIHistoryInput, er
 		return SaveAIHistoryInput{}, err
 	}
 	messages, err := normalizeConversationMessages(input.Messages)
-	if err != nil || len(messages) < 2 || len(messages)%2 != 0 {
+	if err != nil {
+		return SaveAIHistoryInput{}, err
+	}
+	if len(messages) < 2 || len(messages)%2 != 0 {
 		return SaveAIHistoryInput{}, ErrInputInvalid
 	}
 	for index, message := range messages {

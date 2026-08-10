@@ -697,7 +697,7 @@ export const useNoteStore = defineStore('notes', () => {
       } catch (e) {
         if (e instanceof NoteRevisionConflictError) return 'conflict'
         setErrorContext({ code: 'AI_AGENT_PROPOSAL_APPLY_FAILED' })
-        error.value = e instanceof Error ? e.message : 'Agentの変更提案をノートへ反映できませんでした'
+        error.value = 'Agentの変更提案をノートへ反映できませんでした'
         return 'save-failure'
       } finally {
         endSaving()

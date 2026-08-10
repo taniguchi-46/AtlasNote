@@ -660,10 +660,27 @@ const writingKinds: ReadonlyArray<{ value: WritingKind; label: string }> = [
   { value: 'requirements', label: '要件定義草案' },
 ]
 
-const allowedToolValues = toolDefinitions.map((tool) => tool.value)
 const allowedToolsByMode: Record<AIChatMode, ReadonlySet<AIChatTool>> = {
-  ask: new Set(allowedToolValues),
-  agent: new Set(allowedToolValues),
+  ask: new Set<AIChatTool>([
+    'summary',
+    'writing',
+    'title',
+    'tags',
+    'classification',
+    'related',
+    'duplicate',
+    'web-search',
+  ]),
+  agent: new Set<AIChatTool>([
+    'summary',
+    'writing',
+    'title',
+    'tags',
+    'classification',
+    'related',
+    'duplicate',
+    'web-search',
+  ]),
 }
 const fixedScopeTools: ReadonlySet<AIChatTool> = new Set([
   'summary',

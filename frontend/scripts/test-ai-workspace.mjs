@@ -242,8 +242,14 @@ assert.match(workspaceSource, /chatStore\.selectedTool === 'writing'/)
 assert.match(workspaceTemplate, /:disabled="!isWebSearchAvailable"[\s\S]*?@select="selectTool\('web-search'\)"/)
 assert.match(workspaceSource, /configuredSetting\?\.providerID === 'openrouter'/)
 assert.match(workspaceSource, /const allowedToolsByMode: Record<AIChatMode, ReadonlySet<AIChatTool>>/)
-assert.match(workspaceSource, /ask: new Set\(allowedToolValues\)/)
-assert.match(workspaceSource, /agent: new Set\(allowedToolValues\)/)
+assert.doesNotMatch(workspaceSource, /const allowedToolValues = toolDefinitions\.map/)
+for (const mode of ['ask', 'agent']) {
+  assert.match(
+    workspaceSource,
+    new RegExp(`${mode}: new Set<AIChatTool>\\(\\[\\s*'summary',\\s*'writing',\\s*'title',\\s*'tags',\\s*'classification',\\s*'related',\\s*'duplicate',\\s*'web-search',\\s*\\]\\)`),
+    `${mode} must use an explicit tool allowlist`,
+  )
+}
 assert.match(workspaceSource, /allowedToolsByMode\[chatStore\.mode\]\.has\(chatStore\.selectedTool\)/)
 assert.match(workspaceSource, /\|\| !isSelectedToolAllowed\.value/)
 
