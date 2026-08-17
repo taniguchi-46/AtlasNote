@@ -523,6 +523,23 @@ func (s *Service) validateLibrarianModel(providerID ProviderID, modelID string) 
 	return s.validateStructuredModel(providerID, modelID)
 }
 
+func (s *Service) validateAgentModel(providerID ProviderID, modelID string) error {
+	model, known := s.cachedModelInfo(providerID, modelID)
+	if !known {
+		// Provider model catalogs do not consistently expose strict structured
+		// output support. Let the provider make the authoritative decision when
+		// the local catalog is missing or inconclusive.
+		return nil
+	}
+	if !model.Available {
+		return ErrModelUnavailable
+	}
+	if normalizeAgentCapability(model.AgentCapability) == AgentCapabilityUnsupported {
+		return ErrModelCapabilityUnavailable
+	}
+	return nil
+}
+
 func (s *Service) validateStructuredModel(providerID ProviderID, modelID string) error {
 	model, known := s.cachedModelInfo(providerID, modelID)
 	if !known {
@@ -538,6 +555,15 @@ func (s *Service) validateStructuredModel(providerID ProviderID, modelID string)
 		return ErrModelCapabilityUnavailable
 	}
 	return nil
+}
+
+func normalizeAgentCapability(value AgentCapability) AgentCapability {
+	switch value {
+	case AgentCapabilitySupported, AgentCapabilityUnsupported:
+		return value
+	default:
+		return AgentCapabilityUnknown
+	}
 }
 
 func (s *Service) deleteRecord(ctx context.Context, record providerRecord) error {

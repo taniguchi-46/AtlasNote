@@ -542,7 +542,14 @@ func (a *HTTPProviderAdapter) listOpenRouterModels(ctx context.Context, apiKey s
 			displayName = modelID
 		}
 		supportsStructuredOutput := len(model.SupportedParameters) == 0 || includesAny(model.SupportedParameters, "response_format", "structured_outputs")
-		supportsStreaming := len(model.SupportedParameters) == 0 || includesAny(model.SupportedParameters, "stream")
+		// OpenRouter's supported_parameters describes request parameters, while
+		// streaming is a transport option available independently of that list.
+		// Do not look for a nonexistent "stream" model parameter here.
+		supportsStreaming := true
+		agentCapability := AgentCapabilityUnknown
+		if includesAny(model.SupportedParameters, "response_format", "structured_outputs") {
+			agentCapability = AgentCapabilitySupported
+		}
 		models = append(models, ModelInfo{
 			ID:                       modelID,
 			DisplayName:              displayName,
@@ -551,6 +558,7 @@ func (a *HTTPProviderAdapter) listOpenRouterModels(ctx context.Context, apiKey s
 			SupportsStructuredOutput: supportsStructuredOutput,
 			SupportsStreaming:        supportsStreaming,
 			SupportsLibrarian:        supportsStructuredOutput && supportsStreaming,
+			AgentCapability:          agentCapability,
 			InputTokenLimit:          copyInt64(model.ContextLength),
 			OutputTokenLimit:         copyInt64(model.TopProvider.MaxCompletionTokens),
 			Available:                true,
@@ -622,6 +630,7 @@ func (a *HTTPProviderAdapter) listGeminiModels(ctx context.Context, apiKey strin
 				SupportsStructuredOutput: true,
 				SupportsStreaming:        true,
 				SupportsLibrarian:        true,
+				AgentCapability:          AgentCapabilityUnknown,
 				InputTokenLimit:          copyInt64(model.InputTokenLimit),
 				OutputTokenLimit:         copyInt64(model.OutputTokenLimit),
 				Available:                true,

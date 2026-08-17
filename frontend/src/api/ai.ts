@@ -49,6 +49,8 @@ export type TestGenerationInput = TestConnectionInput & {
   modelID: string
 }
 
+export type AIAgentCapability = 'supported' | 'unsupported' | 'unknown'
+
 export type ModelInfo = {
   id: string
   displayName: string
@@ -57,6 +59,7 @@ export type ModelInfo = {
   supportsStructuredOutput: boolean
   supportsStreaming: boolean
   supportsLibrarian: boolean
+  agentCapability?: AIAgentCapability
   inputTokenLimit?: number
   outputTokenLimit?: number
   available: boolean
@@ -178,7 +181,12 @@ export type AIContextSource = {
   title: string
   revision: number
   snippet?: string
+  characterCount?: number
   contentByte: number
+  totalContentByte?: number
+  contentTruncated?: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type AIContextResponse = {

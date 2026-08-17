@@ -252,6 +252,9 @@ for (const mode of ['ask', 'agent']) {
 }
 assert.match(workspaceSource, /allowedToolsByMode\[chatStore\.mode\]\.has\(chatStore\.selectedTool\)/)
 assert.match(workspaceSource, /\|\| !isSelectedToolAllowed\.value/)
+assert.match(workspaceSource, /const agentCapabilityUnavailableMessage = computed/)
+assert.match(workspaceSource, /aiStore\.isAgentCapabilityUnavailable/)
+assert.match(workspaceSource, /Agentの本文差分提案に対応していません/)
 
 // Ask/Agent are explicit modes and the selected value reaches the request harness.
 assert.match(workspaceTemplate, /@select="chatStore\.setMode\('ask'\)"[\s\S]*?<strong>Ask<\/strong>/)

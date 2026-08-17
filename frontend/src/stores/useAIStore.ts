@@ -262,6 +262,13 @@ export const useAIStore = defineStore('ai', () => {
     return !model || (model.available && model.supportsLibrarian)
   })
 
+  const isAgentCapabilityUnavailable = computed(() => {
+    const setting = configuredSetting.value
+    if (!setting) return false
+    const model = models.value.find((candidate) => candidate.id === setting.modelID)
+    return model?.available === true && model.agentCapability === 'unsupported'
+  })
+
   const hasConfiguredProvider = computed(() => settings.value.some(
     (setting) => isConfiguredCredential(setting.credentialStatus),
   ))
@@ -820,6 +827,7 @@ export const useAIStore = defineStore('ai', () => {
     canTestGeneration,
     isSummaryReady,
     isLibrarianReady,
+    isAgentCapabilityUnavailable,
     hasConfiguredProvider,
     resetDraft,
     discardDraft,

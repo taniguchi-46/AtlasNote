@@ -104,19 +104,31 @@ type TestGenerationInput struct {
 	UseStoredCredential bool       `json:"useStoredCredential"`
 }
 
+// AgentCapability is deliberately tri-state because provider model catalogs
+// are advisory and do not expose the full structured-output contract for
+// every provider.
+type AgentCapability string
+
+const (
+	AgentCapabilityUnknown     AgentCapability = "unknown"
+	AgentCapabilitySupported   AgentCapability = "supported"
+	AgentCapabilityUnsupported AgentCapability = "unsupported"
+)
+
 // ModelInfo is provider-neutral metadata. Nil token limits mean that the
 // provider did not expose the value, rather than that the limit is zero.
 type ModelInfo struct {
-	ID                       string `json:"id"`
-	DisplayName              string `json:"displayName"`
-	SupportsSummary          bool   `json:"supportsSummary"`
-	SupportsTextGeneration   bool   `json:"supportsTextGeneration"`
-	SupportsStructuredOutput bool   `json:"supportsStructuredOutput"`
-	SupportsStreaming        bool   `json:"supportsStreaming"`
-	SupportsLibrarian        bool   `json:"supportsLibrarian"`
-	InputTokenLimit          *int64 `json:"inputTokenLimit,omitempty"`
-	OutputTokenLimit         *int64 `json:"outputTokenLimit,omitempty"`
-	Available                bool   `json:"available"`
+	ID                       string          `json:"id"`
+	DisplayName              string          `json:"displayName"`
+	SupportsSummary          bool            `json:"supportsSummary"`
+	SupportsTextGeneration   bool            `json:"supportsTextGeneration"`
+	SupportsStructuredOutput bool            `json:"supportsStructuredOutput"`
+	SupportsStreaming        bool            `json:"supportsStreaming"`
+	SupportsLibrarian        bool            `json:"supportsLibrarian"`
+	AgentCapability          AgentCapability `json:"agentCapability"`
+	InputTokenLimit          *int64          `json:"inputTokenLimit,omitempty"`
+	OutputTokenLimit         *int64          `json:"outputTokenLimit,omitempty"`
+	Available                bool            `json:"available"`
 }
 
 type ModelListResult struct {
@@ -189,11 +201,16 @@ type AIContextInput struct {
 }
 
 type AIContextSource struct {
-	NoteID      string `json:"noteID"`
-	Title       string `json:"title"`
-	Revision    int64  `json:"revision"`
-	Snippet     string `json:"snippet,omitempty"`
-	ContentByte int    `json:"contentByte"`
+	NoteID           string    `json:"noteID"`
+	Title            string    `json:"title"`
+	Revision         int64     `json:"revision"`
+	Snippet          string    `json:"snippet,omitempty"`
+	CharacterCount   int       `json:"characterCount"`
+	ContentByte      int       `json:"contentByte"`
+	TotalContentByte int       `json:"totalContentByte"`
+	ContentTruncated bool      `json:"contentTruncated"`
+	CreatedAt        time.Time `json:"createdAt,omitempty"`
+	UpdatedAt        time.Time `json:"updatedAt,omitempty"`
 }
 
 type AIContextResponse struct {

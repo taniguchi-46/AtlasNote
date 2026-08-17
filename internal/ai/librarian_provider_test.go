@@ -184,6 +184,52 @@ func TestHTTPProviderAdapterStreamsStrictGeminiAgentRequests(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderAdapterStreamsStrictOpenRouterAgentRequests(t *testing.T) {
+	const endpoint = openRouterSummaryEndpoint
+	adapter := NewHTTPProviderAdapterWithClient(&http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.String() != endpoint {
+			t.Fatalf("OpenRouter Agent request = %s %s", request.Method, request.URL)
+		}
+		if request.Header.Get("Content-Type") != "application/json" || request.Header.Get("Authorization") != "Bearer agent-key" {
+			t.Fatal("OpenRouter Agent request headers were incomplete")
+		}
+		payload := make(map[string]any)
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode OpenRouter Agent request: %v", err)
+		}
+		if payload["stream"] != true || payload["model"] != "openai/gpt-test" {
+			t.Fatalf("OpenRouter Agent request = %#v", payload)
+		}
+		provider, ok := payload["provider"].(map[string]any)
+		if !ok || provider["require_parameters"] != true || provider["allow_fallbacks"] != false {
+			t.Fatalf("OpenRouter Agent provider settings = %#v", payload["provider"])
+		}
+		format, ok := payload["response_format"].(map[string]any)
+		if !ok || format["type"] != "json_schema" {
+			t.Fatalf("OpenRouter Agent response format = %#v", payload["response_format"])
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"message\\\":\\\"ok\\\"}\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")),
+		}, nil
+	})})
+
+	result, err := adapter.GenerateStructured(context.Background(), ProviderOpenRouter, "agent-key", StructuredGenerationInput{
+		Name:            "atlas_note_agent_edit",
+		ModelID:         "openai/gpt-test",
+		Prompt:          "bounded Agent prompt",
+		Schema:          json.RawMessage(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		MaxOutputTokens: summaryOutputTokenLimit,
+	}, nil)
+	if err != nil {
+		t.Fatalf("generate OpenRouter Agent structured response: %v", err)
+	}
+	if result != `{"message":"ok"}` {
+		t.Fatalf("OpenRouter Agent result = %q", result)
+	}
+}
+
 func TestHTTPProviderAdapterRejectsUnsafeStructuredInputBeforeHTTP(t *testing.T) {
 	base := StructuredGenerationInput{
 		Name:            "atlas_note_librarian",
@@ -245,6 +291,31 @@ func TestHTTPProviderAdapterRejectsUnsafeStructuredInputBeforeHTTP(t *testing.T)
 			}
 			if requests != 0 {
 				t.Fatalf("unsafe structured input made %d provider requests", requests)
+			}
+		})
+	}
+}
+
+func TestStructuredStreamErrorClassifiesMachineReadableStatusWithoutLeakingMessage(t *testing.T) {
+	secretMarker := "stream-provider-secret-marker"
+	for _, testCase := range []struct {
+		name string
+		raw  string
+		want error
+	}{
+		{name: "OpenRouter capability code", raw: `{"code":400,"message":"` + secretMarker + `"}`, want: ErrModelCapabilityUnavailable},
+		{name: "Gemini capability status", raw: `{"status":"INVALID_ARGUMENT","message":"` + secretMarker + `"}`, want: ErrModelCapabilityUnavailable},
+		{name: "missing model", raw: `{"status":"NOT_FOUND","message":"` + secretMarker + `"}`, want: ErrModelUnavailable},
+		{name: "provider configuration", raw: `{"status":"FAILED_PRECONDITION","message":"` + secretMarker + `"}`, want: ErrProviderConfiguration},
+		{name: "rate limit", raw: `{"code":429,"message":"` + secretMarker + `"}`, want: ErrRateLimited},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := structuredStreamError(json.RawMessage(testCase.raw))
+			if !errors.Is(err, testCase.want) {
+				t.Fatalf("stream error = %v, want %v", err, testCase.want)
+			}
+			if strings.Contains(err.Error(), secretMarker) {
+				t.Fatal("stream provider message leaked")
 			}
 		})
 	}

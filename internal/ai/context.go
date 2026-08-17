@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
+	"unicode/utf16"
 
 	"atlasnote/internal/note"
 )
@@ -18,12 +20,18 @@ const (
 )
 
 type ContextNote struct {
-	NoteID    string
-	Title     string
-	Content   string
-	Revision  int64
-	Snippet   string
-	IsTrashed bool
+	NoteID           string
+	Title            string
+	Content          string
+	Revision         int64
+	Snippet          string
+	IsTrashed        bool
+	CharacterCount   int
+	ContentByte      int
+	TotalContentByte int
+	ContentTruncated bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type NoteContextProvider interface {
@@ -54,6 +62,8 @@ func (p noteServiceContextProvider) Get(ctx context.Context, noteID string) (Con
 		Content:   current.Content,
 		Revision:  current.Revision,
 		IsTrashed: current.IsTrashed,
+		CreatedAt: current.CreatedAt,
+		UpdatedAt: current.UpdatedAt,
 	}, nil
 }
 
@@ -146,10 +156,14 @@ func (s *Service) collectContext(ctx context.Context, input AIContextInput) ([]C
 		if remaining <= 0 {
 			return false
 		}
+		item = populateContextMetrics(item)
+		fullContentByte := item.TotalContentByte
 		item.Content = limitUTF8Bytes(item.Content, minInt(remaining, aiContextNoteBytes))
 		if strings.TrimSpace(item.Content) == "" {
 			return false
 		}
+		item.ContentByte = len([]byte(item.Content))
+		item.ContentTruncated = item.ContentByte < fullContentByte
 		seen[item.NoteID] = struct{}{}
 		items = append(items, item)
 		return true
@@ -279,15 +293,44 @@ func validateExpectedSources(expected []AIHistorySource, actual []ContextNote) e
 func contextSources(items []ContextNote) []AIContextSource {
 	result := make([]AIContextSource, 0, len(items))
 	for _, item := range items {
+		item = populateContextMetrics(item)
 		result = append(result, AIContextSource{
-			NoteID:      item.NoteID,
-			Title:       item.Title,
-			Revision:    item.Revision,
-			Snippet:     item.Snippet,
-			ContentByte: len([]byte(item.Content)),
+			NoteID:           item.NoteID,
+			Title:            item.Title,
+			Revision:         item.Revision,
+			Snippet:          item.Snippet,
+			CharacterCount:   item.CharacterCount,
+			ContentByte:      item.ContentByte,
+			TotalContentByte: item.TotalContentByte,
+			ContentTruncated: item.ContentTruncated,
+			CreatedAt:        item.CreatedAt,
+			UpdatedAt:        item.UpdatedAt,
 		})
 	}
 	return result
+}
+
+func populateContextMetrics(item ContextNote) ContextNote {
+	if item.TotalContentByte == 0 && item.Content != "" {
+		item.TotalContentByte = len([]byte(item.Content))
+	}
+	if item.CharacterCount == 0 && item.Content != "" {
+		item.CharacterCount = utf16CharacterCount(item.Content)
+	}
+	if item.ContentByte == 0 && item.Content != "" {
+		item.ContentByte = len([]byte(item.Content))
+	}
+	if item.TotalContentByte > 0 && item.ContentByte < item.TotalContentByte {
+		item.ContentTruncated = true
+	}
+	return item
+}
+
+// utf16CharacterCount matches the browser's String.length semantics used by
+// the note editor, so the AI metadata and the visible editor count agree for
+// Japanese text, emoji, and other supplementary-plane characters.
+func utf16CharacterCount(value string) int {
+	return len(utf16.Encode([]rune(value)))
 }
 
 func limitUTF8Bytes(value string, limit int) string {

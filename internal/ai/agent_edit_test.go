@@ -48,6 +48,79 @@ func TestServiceReturnsValidatedAgentEditProposalWithoutPersistence(t *testing.T
 	assertAIExecutionHasNoPersistentSideEffects(t, db)
 }
 
+func TestServiceAllowsAgentWhenCatalogCannotConfirmStructuredSupport(t *testing.T) {
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{
+			listResult: ModelListResult{Models: []ModelInfo{{
+				ID:              "openai/test",
+				SupportsSummary: true,
+				Available:       true,
+				AgentCapability: AgentCapabilityUnknown,
+			}}},
+		},
+		structured: `{"message":"ok","hasProposal":false,"reason":"","before":"","after":""}`,
+	}
+	service, _ := newV3Service(t, adapter)
+	if _, err := service.ListModels(t.Context(), ListModelsInput{ProviderID: ProviderOpenRouter, UseStoredCredential: true}); err != nil {
+		t.Fatalf("cache model catalog: %v", err)
+	}
+
+	result, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Mode:       ChatModeAgent,
+		Question:   "確認して",
+		NoteIDs:    []string{"note-1"},
+		ExpectedSources: []AIHistorySource{
+			{NoteID: "note-1", InputRevision: 4},
+		},
+		AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+	})
+	if err != nil {
+		t.Fatalf("agent with unknown catalog capability: %v", err)
+	}
+	if result.Proposal != nil || adapter.structuredCalls != 1 {
+		t.Fatalf("agent result = %#v, structured calls = %d", result, adapter.structuredCalls)
+	}
+}
+
+func TestServiceRejectsExplicitlyUnsupportedAgentModel(t *testing.T) {
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{
+			listResult: ModelListResult{Models: []ModelInfo{{
+				ID:              "openai/test",
+				SupportsSummary: true,
+				Available:       true,
+				AgentCapability: AgentCapabilityUnsupported,
+			}}},
+		},
+		structured: `{"message":"must not run","hasProposal":false,"reason":"","before":"","after":""}`,
+	}
+	service, _ := newV3Service(t, adapter)
+	if _, err := service.ListModels(t.Context(), ListModelsInput{ProviderID: ProviderOpenRouter, UseStoredCredential: true}); err != nil {
+		t.Fatalf("cache model catalog: %v", err)
+	}
+	_, err := service.RunAssistant(t.Context(), AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Mode:       ChatModeAgent,
+		Question:   "変更して",
+		NoteIDs:    []string{"note-1"},
+		ExpectedSources: []AIHistorySource{
+			{NoteID: "note-1", InputRevision: 4},
+		},
+		AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
+	})
+	if !errors.Is(err, ErrModelCapabilityUnavailable) {
+		t.Fatalf("unsupported agent model error = %v", err)
+	}
+	if adapter.structuredCalls != 0 {
+		t.Fatalf("unsupported agent made %d structured calls", adapter.structuredCalls)
+	}
+}
+
 func TestServiceRejectsInvalidOrStaleAgentEditProposal(t *testing.T) {
 	for _, testCase := range []struct {
 		name   string

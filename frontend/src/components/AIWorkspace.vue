@@ -810,6 +810,10 @@ const webSearchUnavailableMessage = computed(() => {
   }
   return 'Web検索はOpenRouterを設定した場合だけ利用できます。'
 })
+const agentCapabilityUnavailableMessage = computed(() => {
+  if (chatStore.mode !== 'agent' || chatStore.selectedTool || !aiStore.isAgentCapabilityUnavailable) return ''
+  return '選択したモデルはAgentの本文差分提案に対応していません。別のモデルを選択してください。'
+})
 const isSelectedToolAllowed = computed(() => (
   !chatStore.selectedTool
   || allowedToolsByMode[chatStore.mode].has(chatStore.selectedTool)
@@ -850,6 +854,7 @@ const canSubmitComposer = computed(() => {
     || isAnyBusy.value
     || !aiStore.configuredSetting?.modelID
     || Boolean(webSearchUnavailableMessage.value)
+    || Boolean(agentCapabilityUnavailableMessage.value)
     || !isSelectedToolAllowed.value
     || hasUnresolvedResultConflict.value
     || hasUnreadyNotebookContext.value
@@ -906,6 +911,7 @@ const submitBlockedMessage = computed(() => {
   if (!hasUsableNote.value) return 'AIを使うにはゴミ箱以外のノートを開いてください。'
   if (hasBlockingDraft.value) return 'ノートの保存競合または保存失敗を解消してから送信してください。'
   if (!aiStore.configuredSetting?.modelID) return '送信前にAI設定でモデルを選択してください。'
+  if (agentCapabilityUnavailableMessage.value) return agentCapabilityUnavailableMessage.value
   if (!isSelectedToolAllowed.value) return '現在のモードではこのツールを実行できません。'
   if (hasUnreadyNotebookContext.value) {
     return 'ノート一覧を再読み込みしてから、ノートブック参照を使って送信してください。'

@@ -114,7 +114,10 @@
       <ul>
         <li v-for="source in assistantStore.contextSources" :key="sourceKey(source)">
           <span>{{ source.title || '無題のノート' }}</span>
-          <small>revision {{ source.revision }} / {{ formatBytes(source.contentByte) }}</small>
+          <small>
+            revision {{ source.revision }} / {{ formatCharacterCount(source.characterCount) }} / {{ formatBytes(source.contentByte) }}
+            <span v-if="source.contentTruncated">（本文は一部省略）</span>
+          </small>
         </li>
       </ul>
     </div>
@@ -332,6 +335,11 @@ function sourceKey(source: AIContextSource) {
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   return `${(value / 1024).toFixed(1)} KiB`
+}
+
+function formatCharacterCount(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '文字数不明'
+  return `${value.toLocaleString('ja-JP')}文字`
 }
 
 watch(

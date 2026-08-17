@@ -45,7 +45,7 @@ func (s *Service) runAgentEditProposal(
 	if !ok {
 		return AssistantResult{}, ErrProviderUnavailable
 	}
-	if err := s.validateStructuredModel(providerID, modelID); err != nil {
+	if err := s.validateAgentModel(providerID, modelID); err != nil {
 		return AssistantResult{}, err
 	}
 	prompt, schema, err := buildAgentEditPrompt(messages, contextNotes, target)

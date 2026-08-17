@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -273,7 +274,7 @@ func parseOpenRouterLibrarianChunk(data []byte) (string, bool, error) {
 		return "", false, ErrInvalidResponse
 	}
 	if len(payload.Error) > 0 && string(payload.Error) != "null" {
-		return "", false, ErrProviderUnavailable
+		return "", false, structuredStreamError(payload.Error)
 	}
 	if len(payload.Choices) == 0 {
 		return "", false, nil
@@ -311,7 +312,7 @@ func parseGeminiLibrarianChunk(data []byte) (string, bool, error) {
 		return "", false, ErrInvalidResponse
 	}
 	if len(payload.Error) > 0 && string(payload.Error) != "null" {
-		return "", false, ErrProviderUnavailable
+		return "", false, structuredStreamError(payload.Error)
 	}
 	if len(payload.Candidates) == 0 {
 		if strings.TrimSpace(payload.PromptFeedback.BlockReason) != "" {
@@ -333,6 +334,53 @@ func parseGeminiLibrarianChunk(data []byte) (string, bool, error) {
 		return "", false, geminiFinishReasonError(candidate.FinishReason)
 	}
 	return parts.String(), true, nil
+}
+
+// structuredStreamError maps only machine-readable provider fields. The
+// provider message and details are intentionally ignored so an SSE error
+// cannot leak note content, credentials, or provider internals across Wails.
+func structuredStreamError(raw json.RawMessage) error {
+	var payload struct {
+		Code   json.RawMessage `json:"code"`
+		Status string          `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ErrProviderUnavailable
+	}
+	switch strings.ToUpper(strings.TrimSpace(payload.Status)) {
+	case "UNAUTHENTICATED", "PERMISSION_DENIED":
+		return ErrAuthFailed
+	case "NOT_FOUND":
+		return ErrModelUnavailable
+	case "INVALID_ARGUMENT", "UNSUPPORTED":
+		return ErrModelCapabilityUnavailable
+	case "FAILED_PRECONDITION":
+		return ErrProviderConfiguration
+	case "RESOURCE_EXHAUSTED":
+		return ErrRateLimited
+	}
+
+	statusCode := 0
+	if len(payload.Code) > 0 {
+		if err := json.Unmarshal(payload.Code, &statusCode); err != nil {
+			var codeText string
+			if textErr := json.Unmarshal(payload.Code, &codeText); textErr == nil {
+				statusCode, _ = strconv.Atoi(strings.TrimSpace(codeText))
+			}
+		}
+	}
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return ErrAuthFailed
+	case http.StatusNotFound:
+		return ErrModelUnavailable
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return ErrModelCapabilityUnavailable
+	case http.StatusTooManyRequests:
+		return ErrRateLimited
+	default:
+		return ErrProviderUnavailable
+	}
 }
 
 var _ StructuredStreamingProviderAdapter = (*HTTPProviderAdapter)(nil)

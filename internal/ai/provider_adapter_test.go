@@ -23,7 +23,7 @@ func TestHTTPProviderAdapterListsOnlySummaryCapableModels(t *testing.T) {
 			assertDeadline(t, request, modelListTimeout)
 			return jsonResponse(http.StatusOK, `{
   "data": [
-    {"id":"text/model","name":"Text Model","context_length":32000,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"top_provider":{"max_completion_tokens":512}},
+    {"id":"text/model","name":"Text Model","context_length":32000,"supported_parameters":["max_tokens","temperature","response_format"],"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"top_provider":{"max_completion_tokens":512}},
     {"id":"vision/model","architecture":{"input_modalities":["text"],"output_modalities":["image"]}},
     {"id":"text/model","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}
   ]
@@ -40,6 +40,9 @@ func TestHTTPProviderAdapterListsOnlySummaryCapableModels(t *testing.T) {
 		model := result.Models[0]
 		if model.ID != "text/model" || model.DisplayName != "Text Model" || !model.SupportsSummary || !model.Available {
 			t.Fatalf("model = %#v", model)
+		}
+		if !model.SupportsStreaming || model.AgentCapability != AgentCapabilitySupported {
+			t.Fatalf("OpenRouter capability metadata = %#v", model)
 		}
 		if model.InputTokenLimit == nil || *model.InputTokenLimit != 32000 || model.OutputTokenLimit == nil || *model.OutputTokenLimit != 512 {
 			t.Fatalf("model token limits = %#v", model)

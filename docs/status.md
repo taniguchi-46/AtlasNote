@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-02
+最終更新: 2026-08-15
 
 ## 現在のフェーズ
 
@@ -73,6 +73,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
 - Phase 4 v3のAIアシスタント／AIライティング基本経路、schema version 12のローカル履歴・成果物とversion 13の要約履歴、明示保存・個別／一括削除、stale／orphaned評価、WebDAV非同期境界テスト（手動受け入れ、Wails API通し検証、追加異常系は未完了）
 - Phase 4のAIワークスペースを単一チャットtimelineへ刷新。開いているノートの固定context chip、追加ノート／Notebook検索scope、要約・文章作成6種・タイトル・タグ・分類・関連・重複・Web検索の`＋`メニュー、Ask／Agent切替、入力欄右下の送信ボタン、候補の明示採用、構造化tool traceとtrace直後の候補カードを実装した。Web検索は実行ごとの明示確認を伴うOpenRouter Web Search／Exa固定のProvider管理ツールとする。Notebook scopeは直下ノートIDへ最大10件で解決し、本文・revisionは既存バックエンドでsnapshot化する。制限付きAgentは開いているノート本文の単一差分を構造化提案として表示し、revision/CAS・ノート単位保存queueを通る明示適用／破棄、競合・保存失敗状態を実装した。右側／下側配置・ドラッグ寸法、狭幅対応、履歴・成果物の既存保存境界を維持し、`test:agent-proposal`、`test:ai-chat`、`test:ai-v3`、`test:ai-workspace`を追加・更新した（手動受け入れは未完了）
+- AIコンテキストへ全文文字数、送信済み本文バイト数、全文バイト数、切り詰め有無、作成日時、更新日時を追加し、OpenRouterの`stream`誤判定によるAgent拒否を修正した。Geminiを含むモデル能力一覧は不明値を実行時判定へ委譲し、SSEの機械可読エラーを安全なAIエラーへ分類する回帰テストを追加した（2026-08-15）。
 
 ## Phase 2の完了範囲
 

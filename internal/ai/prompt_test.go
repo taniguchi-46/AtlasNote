@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPromptBuildersIncludeCommonSafetyRules(t *testing.T) {
@@ -209,6 +210,36 @@ func TestContextPromptTreatsNoteContentAsUntrustedData(t *testing.T) {
 	}
 	if empty := buildContextMessage(nil); empty != "" {
 		t.Fatalf("empty context message = %q, want empty", empty)
+	}
+}
+
+func TestContextPromptIncludesNoteMetadataAndTruncation(t *testing.T) {
+	createdAt := time.Date(2026, time.August, 15, 1, 2, 3, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	message := buildContextMessage([]ContextNote{{
+		NoteID:           "note-1",
+		Title:            "Metadata note",
+		Content:          "visible body",
+		Revision:         8,
+		CharacterCount:   12,
+		ContentByte:      12,
+		TotalContentByte: 20,
+		ContentTruncated: true,
+		CreatedAt:        createdAt,
+		UpdatedAt:        updatedAt,
+	}})
+
+	for _, fragment := range []string{
+		"character_count=12",
+		"content_byte=12",
+		"total_content_byte=20",
+		"content_truncated=true",
+		"created_at=2026-08-15T01:02:03Z",
+		"updated_at=2026-08-15T02:02:03Z",
+	} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("context metadata is missing %q: %q", fragment, message)
+		}
 	}
 }
 
