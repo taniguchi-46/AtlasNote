@@ -25,6 +25,7 @@ type SaveLane = {
   pendingSnapshot: NoteSaveSnapshot | null
   inFlightSave: Promise<boolean> | null
   blocked: boolean
+  cancelVersion: number
 }
 
 export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>) {
@@ -41,6 +42,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
       pendingSnapshot: null,
       inFlightSave: null,
       blocked: false,
+      cancelVersion: 0,
     }
     lanes.set(noteId, lane)
     return lane
@@ -98,6 +100,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     }
 
     const previousSave = lane.inFlightSave
+    const cancelVersion = lane.cancelVersion
     const save = (async () => {
       if (previousSave) {
         const previousSucceeded = await previousSave
@@ -106,7 +109,11 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
           return false
         }
       }
-      const operation = () => saveSnapshot(snapshot)
+      // execute may queue this operation behind another note mutation. A later
+      // cancel must invalidate it before the backend save actually starts.
+      const operation = () => lane.cancelVersion === cancelVersion
+        ? saveSnapshot(snapshot)
+        : Promise.resolve(true)
       return options.execute
         ? options.execute(snapshot.noteId, operation)
         : operation()
@@ -196,6 +203,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
       : [...lanes.entries()]
 
     for (const [laneNoteId, lane] of targetLanes) {
+      lane.cancelVersion += 1
       cancelTimer(lane)
       lane.pendingSnapshot = null
       lane.blocked = false

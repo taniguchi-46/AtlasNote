@@ -40,14 +40,92 @@
 
       <p class="ai-agent-proposal-reason"><strong>理由:</strong> {{ proposal.reason }}</p>
 
-      <div class="ai-agent-proposal-diff" aria-label="本文の変更差分">
-        <div>
-          <span>変更前</span>
-          <pre>{{ proposal.before }}</pre>
-        </div>
-        <div>
-          <span>変更後</span>
-          <pre>{{ proposal.after }}</pre>
+      <div class="ai-agent-proposal-diff">
+        <header class="ai-agent-proposal-diff-summary">
+          <strong>本文の差分</strong>
+          <span>1件の変更</span>
+        </header>
+        <div
+          class="ai-agent-proposal-diff-scroll"
+          role="region"
+          tabindex="0"
+          aria-label="本文の変更差分。削除される本文と追加される本文"
+        >
+          <div class="ai-agent-proposal-diff-grid">
+            <section class="ai-agent-proposal-diff-pane is-before" aria-label="削除される本文">
+              <header class="ai-agent-proposal-diff-pane-header">
+                <span class="ai-agent-proposal-diff-pane-title">
+                  <span class="ai-agent-proposal-diff-pane-marker" aria-hidden="true">−</span>
+                  <strong>変更前</strong>
+                </span>
+                <span class="ai-agent-proposal-diff-line-scope">相対行</span>
+              </header>
+              <ol class="ai-agent-proposal-diff-lines">
+                <li
+                  v-for="line in visualDiff.beforeLines"
+                  :key="`before-${line.rowNumber}`"
+                  :class="[
+                    'ai-agent-proposal-diff-line',
+                    { 'is-removed': line.changed, 'is-placeholder': line.placeholder },
+                  ]"
+                  :style="{ gridRow: line.rowNumber + 1 }"
+                  :aria-hidden="line.placeholder"
+                >
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-visually-hidden">
+                    {{ line.changed ? '削除行' : '変更なし' }}、相対{{ line.lineNumber }}行目:
+                  </span>
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-diff-line-number" aria-hidden="true">{{ line.lineNumber }}</span>
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-diff-line-marker" aria-hidden="true">{{ line.changed ? '−' : '' }}</span>
+                  <code v-if="!line.placeholder">
+                    <span
+                      v-for="(segment, segmentIndex) in line.segments"
+                      :key="segmentIndex"
+                      :class="{ 'is-word-change': segment.changed }"
+                    >{{ segment.text }}</span>
+                    <span v-if="line.text === ''" class="is-empty" aria-hidden="true">↵</span>
+                    <span v-if="line.text === ''" class="ai-agent-proposal-visually-hidden">空行</span>
+                  </code>
+                </li>
+              </ol>
+            </section>
+
+            <section class="ai-agent-proposal-diff-pane is-after" aria-label="追加される本文">
+              <header class="ai-agent-proposal-diff-pane-header">
+                <span class="ai-agent-proposal-diff-pane-title">
+                  <span class="ai-agent-proposal-diff-pane-marker" aria-hidden="true">+</span>
+                  <strong>変更後</strong>
+                </span>
+                <span class="ai-agent-proposal-diff-line-scope">相対行</span>
+              </header>
+              <ol class="ai-agent-proposal-diff-lines">
+                <li
+                  v-for="line in visualDiff.afterLines"
+                  :key="`after-${line.rowNumber}`"
+                  :class="[
+                    'ai-agent-proposal-diff-line',
+                    { 'is-added': line.changed, 'is-placeholder': line.placeholder },
+                  ]"
+                  :style="{ gridRow: line.rowNumber + 1 }"
+                  :aria-hidden="line.placeholder"
+                >
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-visually-hidden">
+                    {{ line.changed ? '追加行' : '変更なし' }}、相対{{ line.lineNumber }}行目:
+                  </span>
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-diff-line-number" aria-hidden="true">{{ line.lineNumber }}</span>
+                  <span v-if="!line.placeholder" class="ai-agent-proposal-diff-line-marker" aria-hidden="true">{{ line.changed ? '+' : '' }}</span>
+                  <code v-if="!line.placeholder">
+                    <span
+                      v-for="(segment, segmentIndex) in line.segments"
+                      :key="segmentIndex"
+                      :class="{ 'is-word-change': segment.changed }"
+                    >{{ segment.text }}</span>
+                    <span v-if="line.text === ''" class="is-empty" aria-hidden="true">↵</span>
+                    <span v-if="line.text === ''" class="ai-agent-proposal-visually-hidden">空行</span>
+                  </code>
+                </li>
+              </ol>
+            </section>
+          </div>
         </div>
       </div>
     </template>
@@ -79,6 +157,7 @@ import { computed } from 'vue'
 import { AlertCircleIcon, CheckIcon, LoaderCircleIcon, XIcon } from '@lucide/vue'
 import type { AgentEditProposal } from '../api/ai'
 import type { AgentProposalState } from '../stores/useAIChatStore'
+import { createAgentEditVisualDiff } from '../utils/agentEditProposal'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -110,6 +189,11 @@ const canApply = computed(() => (
 ))
 const canDiscard = computed(() => (
   Boolean(props.proposal) && props.state !== 'applying' && props.state !== 'applied'
+))
+const visualDiff = computed(() => (
+  props.proposal
+    ? createAgentEditVisualDiff(props.proposal.before, props.proposal.after)
+    : { beforeLines: [], afterLines: [] }
 ))
 </script>
 
@@ -186,34 +270,241 @@ const canDiscard = computed(() => (
 }
 
 .ai-agent-proposal-diff {
-  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-editor, var(--bg-input));
+}
+
+.ai-agent-proposal-diff-summary,
+.ai-agent-proposal-diff-pane-header,
+.ai-agent-proposal-diff-pane-title {
+  display: flex;
+  align-items: center;
+}
+
+.ai-agent-proposal-diff-summary {
+  justify-content: space-between;
   gap: 8px;
+  min-height: 31px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 86%, var(--brand-primary) 4%);
 }
 
-.ai-agent-proposal-diff > div {
-  display: grid;
-  gap: 4px;
+.ai-agent-proposal-diff-summary strong {
+  font-size: 11px;
 }
 
-.ai-agent-proposal-diff span {
+.ai-agent-proposal-diff-summary > span {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
   color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ai-agent-proposal-diff-scroll {
+  max-height: 300px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  outline: none;
+  scrollbar-gutter: stable;
+}
+
+.ai-agent-proposal-diff-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--brand-primary) 55%, transparent);
+}
+
+.ai-agent-proposal-diff-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.ai-agent-proposal-diff-pane {
+  min-width: 0;
+  background: var(--bg-editor, var(--bg-input));
+}
+
+.ai-agent-proposal-diff-pane.is-after {
+  border-top: 1px solid var(--border);
+}
+
+.ai-agent-proposal-diff-pane-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 29px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+}
+
+.ai-agent-proposal-diff-pane.is-before .ai-agent-proposal-diff-pane-header {
+  background: color-mix(in srgb, var(--bg-editor) 88%, var(--color-danger) 12%);
+  color: var(--text-primary);
+}
+
+.ai-agent-proposal-diff-pane.is-after .ai-agent-proposal-diff-pane-header {
+  background: color-mix(in srgb, var(--bg-editor) 88%, var(--color-success) 12%);
+  color: var(--text-primary);
+}
+
+.ai-agent-proposal-diff-pane.is-before .ai-agent-proposal-diff-pane-marker {
+  color: var(--color-danger);
+}
+
+.ai-agent-proposal-diff-pane.is-after .ai-agent-proposal-diff-pane-marker {
+  color: var(--color-success);
+}
+
+.ai-agent-proposal-diff-pane-title {
+  min-width: 0;
+  gap: 6px;
+}
+
+.ai-agent-proposal-diff-pane-title strong {
   font-size: 11px;
   font-weight: 600;
 }
 
-.ai-agent-proposal-diff pre {
-  max-height: 180px;
+.ai-agent-proposal-diff-pane-marker {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  line-height: 1;
+}
+
+.ai-agent-proposal-diff-line-scope {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.ai-agent-proposal-diff-lines {
   margin: 0;
-  padding: 8px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-editor, var(--bg-input));
+  padding: 0;
+  list-style: none;
+}
+
+.ai-agent-proposal-diff-line {
+  display: grid;
+  grid-template-columns: 32px 18px minmax(0, 1fr);
+  min-height: 25px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+}
+
+.ai-agent-proposal-diff-line.is-placeholder {
+  display: none;
+}
+
+.ai-agent-proposal-diff-line:last-child {
+  border-bottom: 0;
+}
+
+.ai-agent-proposal-diff-line.is-removed {
+  background: color-mix(in srgb, var(--bg-editor) 85%, var(--color-danger) 15%);
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.ai-agent-proposal-diff-line.is-added {
+  background: color-mix(in srgb, var(--bg-editor) 83%, var(--color-success) 17%);
+  box-shadow: inset 3px 0 0 var(--color-success);
+}
+
+.ai-agent-proposal-diff-line-number,
+.ai-agent-proposal-diff-line-marker {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding-top: 4px;
+  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  user-select: none;
+}
+
+.ai-agent-proposal-diff-line-number {
+  padding-right: 7px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  color: var(--text-muted);
+}
+
+.ai-agent-proposal-diff-line-marker {
+  justify-content: center;
+  padding-right: 0;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.ai-agent-proposal-diff-line.is-removed .ai-agent-proposal-diff-line-marker {
+  color: var(--color-danger);
+}
+
+.ai-agent-proposal-diff-line.is-added .ai-agent-proposal-diff-line-marker {
+  color: var(--color-success);
+}
+
+.ai-agent-proposal-diff-line.is-removed .ai-agent-proposal-diff-line-number {
+  background: color-mix(in srgb, var(--bg-editor) 78%, var(--color-danger) 22%);
+}
+
+.ai-agent-proposal-diff-line.is-added .ai-agent-proposal-diff-line-number {
+  background: color-mix(in srgb, var(--bg-editor) 76%, var(--color-success) 24%);
+}
+
+.ai-agent-proposal-diff-line code {
+  display: block;
+  min-width: 0;
+  padding: 4px 7px;
   color: var(--text-primary);
-  font: inherit;
-  line-height: 1.5;
+  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ai-agent-proposal-diff-line .is-word-change {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-weight: 600;
+}
+
+.ai-agent-proposal-diff-line.is-removed .is-word-change {
+  background: color-mix(in srgb, var(--bg-editor) 62%, var(--color-danger) 38%);
+}
+
+.ai-agent-proposal-diff-line.is-added .is-word-change {
+  background: color-mix(in srgb, var(--bg-editor) 60%, var(--color-success) 40%);
+}
+
+.ai-agent-proposal-diff-line .is-empty {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.ai-agent-proposal-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .ai-agent-proposal-actions {
@@ -252,9 +543,48 @@ const canDiscard = computed(() => (
   to { transform: rotate(360deg); }
 }
 
+@container (min-width: 520px) {
+  .ai-agent-proposal-diff-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-agent-proposal-diff-pane,
+  .ai-agent-proposal-diff-lines {
+    display: contents;
+  }
+
+  .ai-agent-proposal-diff-pane-header {
+    grid-row: 1;
+  }
+
+  .ai-agent-proposal-diff-pane.is-before .ai-agent-proposal-diff-pane-header,
+  .ai-agent-proposal-diff-pane.is-before .ai-agent-proposal-diff-line {
+    grid-column: 1;
+  }
+
+  .ai-agent-proposal-diff-pane.is-after .ai-agent-proposal-diff-pane-header,
+  .ai-agent-proposal-diff-pane.is-after .ai-agent-proposal-diff-line {
+    grid-column: 2;
+    border-left: 1px solid var(--border);
+  }
+
+  .ai-agent-proposal-diff-pane.is-after {
+    border-top: 0;
+  }
+
+  .ai-agent-proposal-diff-line.is-placeholder {
+    display: grid;
+    visibility: hidden;
+  }
+}
+
 @container (max-width: 420px) {
   .ai-agent-proposal {
     padding: 9px;
+  }
+
+  .ai-agent-proposal-diff-line {
+    grid-template-columns: 28px 16px minmax(0, 1fr);
   }
 }
 </style>

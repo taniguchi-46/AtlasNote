@@ -588,6 +588,7 @@ import {
   AI_WORKSPACE_BOTTOM_HEIGHT_MIN,
   AI_WORKSPACE_RIGHT_WIDTH_MAX,
   AI_WORKSPACE_RIGHT_WIDTH_MIN,
+  type AIAgentEditPermission,
   type AIWorkspacePlacement,
   useSettingsStore,
 } from '../stores/useSettingsStore'
@@ -615,7 +616,7 @@ type SummaryPanelHandle = { startSummary: () => Promise<boolean> }
 type LibrarianPanelHandle = { startOperation: (operation: LibrarianOperation) => Promise<boolean> }
 type AssistantPanelHandle = {
   openHistory: (id: string) => Promise<boolean>
-  submitPrompt: (prompt: string) => Promise<boolean>
+  submitPrompt: (prompt: string, agentEditPermission?: AIAgentEditPermission) => Promise<boolean>
 }
 type WritingPanelHandle = {
   openArtifact: (id: string) => Promise<boolean>
@@ -1121,18 +1122,60 @@ async function applyAgentProposal(entryID: string) {
     `次のAgent変更提案を本文へ適用します。\n\n対象: ${proposal.targetTitle || '無題のノート'}\nrevision: ${proposal.baseRevision}\n変更箇所: 本文\n\n通常のノート保存およびWebDAV同期の対象になります。適用後は元に戻す操作で取り消してください。`,
   )) return
 
+  await persistAgentProposal(entryID)
+}
+
+async function persistAgentProposal(entryID: string, automatic = false) {
+  const entry = chatStore.timeline.find((item) => item.id === entryID)
+  const proposal = entry?.proposal
+  if (
+    !proposal
+    || entry?.kind !== 'agent-proposal'
+    || (entry.proposalState !== 'awaiting-review' && entry.proposalState !== 'save-failure')
+  ) return
+
   chatStore.setAgentProposalState(entryID, 'applying')
   try {
     const outcome = await noteStore.applyAgentEditProposal(proposal)
     if (outcome === 'applied') {
-      chatStore.setAgentProposalState(entryID, 'applied', '変更提案を本文へ適用しました。')
+      chatStore.setAgentProposalState(
+        entryID,
+        'applied',
+        automatic
+          ? 'Agentが本文を更新しました。変更前後の差分を確認できます。'
+          : '変更提案を本文へ適用しました。',
+      )
+    } else if (outcome === 'applied-with-draft-conflict') {
+      chatStore.setAgentProposalState(
+        entryID,
+        'applied',
+        'Agentが本文を更新しましたが、適用中に入力されたローカル下書きを競合として保持しています。エディタで内容を確認してください。',
+      )
     } else if (outcome === 'conflict') {
-      chatStore.setAgentProposalState(entryID, 'conflict', '対象ノートまたは本文が更新されたため、変更提案を適用できませんでした。内容を確認して再生成してください。')
+      chatStore.setAgentProposalState(
+        entryID,
+        'conflict',
+        automatic
+          ? '対象ノートまたは本文が更新されたため、Agentは本文を更新しませんでした。差分を確認して再生成してください。'
+          : '対象ノートまたは本文が更新されたため、変更提案を適用できませんでした。内容を確認して再生成してください。',
+      )
     } else {
-      chatStore.setAgentProposalState(entryID, 'save-failure', '本文の保存に失敗しました。ノートを確認してから再試行してください。')
+      chatStore.setAgentProposalState(
+        entryID,
+        'save-failure',
+        automatic
+          ? 'Agentによる本文の更新に失敗しました。ノートを確認してから再試行してください。'
+          : '本文の保存に失敗しました。ノートを確認してから再試行してください。',
+      )
     }
   } catch {
-    chatStore.setAgentProposalState(entryID, 'save-failure', '本文の保存に失敗しました。ノートを確認してから再試行してください。')
+    chatStore.setAgentProposalState(
+      entryID,
+      'save-failure',
+      automatic
+        ? 'Agentによる本文の更新に失敗しました。ノートを確認してから再試行してください。'
+        : '本文の保存に失敗しました。ノートを確認してから再試行してください。',
+    )
   }
   await nextTick()
   scrollTimelineToEnd()
@@ -1269,6 +1312,7 @@ async function runComposerSubmission() {
   closeContextPicker()
   const draftSnapshot = chatStore.draft
   const tool = chatStore.selectedTool
+  const agentEditPermission = settingsStore.aiAgentEditPermission
   const prompt = tool && fixedScopeTools.has(tool) ? '' : draftSnapshot.trim()
   const toolLabel = selectedToolLabel.value
   const userEntryID = chatStore.appendUserMessage(userSubmissionLabel(prompt, tool))
@@ -1322,7 +1366,7 @@ async function runComposerSubmission() {
       activeLibrarianTraceID.value = null
     }
   } else {
-    submitted = Boolean(await assistantPanel.value?.submitPrompt(prompt))
+    submitted = Boolean(await assistantPanel.value?.submitPrompt(prompt, agentEditPermission))
     executionFailed = !submitted && Boolean(assistantStore.error)
     if (submitted) {
       const response = [...assistantStore.messages]
@@ -1334,6 +1378,9 @@ async function runComposerSubmission() {
           response?.content ?? '変更提案を生成できませんでした。',
           assistantStore.proposal,
         )
+        if (assistantStore.proposal && agentEditPermission === 'auto-update') {
+          await persistAgentProposal(agentProposalEntryID, true)
+        }
       } else if (response) {
         chatStore.appendAssistantMessage(response.content, assistantStore.citations)
       }

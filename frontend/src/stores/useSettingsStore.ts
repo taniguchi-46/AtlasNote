@@ -4,6 +4,7 @@ import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIco
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 export type AIWorkspacePlacement = 'right' | 'bottom'
+export type AIAgentEditPermission = 'review-required' | 'auto-update'
 export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai'
 
 export const SIDEBAR_WIDTH_MIN = 180
@@ -19,6 +20,7 @@ export const AI_WORKSPACE_BOTTOM_HEIGHT_MAX = 760
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26] as const
 const FIRST_LINE_STYLE_OPTIONS: EditorFirstLineStyle[] = ['heading1', 'heading2', 'heading3', 'paragraph']
 const AI_WORKSPACE_PLACEMENT_OPTIONS = ['right', 'bottom'] as const
+const AI_AGENT_EDIT_PERMISSION_OPTIONS = ['review-required', 'auto-update'] as const
 
 function readNumberOption<T extends readonly number[]>(key: string, fallback: T[number], options: T) {
   const value = Number(localStorage.getItem(key))
@@ -56,6 +58,13 @@ export const useSettingsStore = defineStore('settings', () => {
   )
   const aiWorkspacePlacement = ref<AIWorkspacePlacement>(
     readStringOption('atlas-ai-workspace-placement', 'right', AI_WORKSPACE_PLACEMENT_OPTIONS),
+  )
+  const aiAgentEditPermission = ref<AIAgentEditPermission>(
+    readStringOption(
+      'atlas-ai-agent-edit-permission',
+      'review-required',
+      AI_AGENT_EDIT_PERMISSION_OPTIONS,
+    ),
   )
   const aiWorkspaceRightWidth = ref(
     readClampedNumberInRange(
@@ -98,6 +107,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(aiWorkspacePlacement, (newPlacement) => {
     localStorage.setItem('atlas-ai-workspace-placement', newPlacement)
+  }, { immediate: true })
+
+  watch(aiAgentEditPermission, (newPermission) => {
+    localStorage.setItem('atlas-ai-agent-edit-permission', newPermission)
   }, { immediate: true })
 
   watch(aiWorkspaceRightWidth, (newWidth) => {
@@ -186,6 +199,7 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarWidth,
     noteListWidth,
     aiWorkspacePlacement,
+    aiAgentEditPermission,
     aiWorkspaceRightWidth,
     aiWorkspaceBottomHeight,
     fontFamily,

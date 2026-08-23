@@ -69,6 +69,16 @@
                 </select>
                 <p class="setting-help">位置を選択し、表示中の境界をドラッグして幅または高さを調整します。</p>
               </div>
+              <div class="setting-group">
+                <label for="ai-agent-edit-permission">Agentの本文編集権限</label>
+                <select id="ai-agent-edit-permission" v-model="settingsStore.aiAgentEditPermission">
+                  <option value="review-required">提案のみ（適用前に確認）</option>
+                  <option value="auto-update">更新可能（生成後に自動適用）</option>
+                </select>
+                <p class="setting-help">
+                  更新可能では、送信した通常のAgent依頼が返した本文1箇所の差分を自動保存します。変更前後はAIタイムラインで確認できます。
+                </p>
+              </div>
             </div>
             </section>
           </TabsContent>

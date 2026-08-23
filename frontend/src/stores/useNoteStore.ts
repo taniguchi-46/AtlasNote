@@ -38,7 +38,21 @@ export type NoteDraft = NoteSaveSnapshot & {
 }
 
 export type AIWritingApplyMode = 'append' | 'replace'
-export type AgentEditProposalApplyOutcome = 'applied' | 'conflict' | 'save-failure'
+export type AgentEditProposalApplyOutcome =
+  | 'applied'
+  | 'applied-with-draft-conflict'
+  | 'conflict'
+  | 'save-failure'
+
+export type AgentEditorHighlight = {
+  id: number
+  noteId: string
+  revision: number
+  start: number
+  end: number
+  beforeMarkdown: string
+  changeKind: 'replace' | 'delete'
+}
 
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   const markers: Record<EditorFirstLineStyle, string> = {
@@ -92,7 +106,9 @@ export const useNoteStore = defineStore('notes', () => {
   const drafts = ref<Record<string, NoteDraft>>({})
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
+  const agentEditorHighlight = ref<AgentEditorHighlight | null>(null)
   let nextDraftVersion = 0
+  let nextAgentEditorHighlightId = 0
   let currentListPage = 0
   let excludedNoteIds = new Set<string>()
   const noteSelectionRequests = createLatestRequestGuard()
@@ -239,6 +255,7 @@ export const useNoteStore = defineStore('notes', () => {
     // ノートを連続で高速に切り替えた際、過去のリクエストのレスポンスが遅延して到着し、
     // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
     // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
+    clearAgentEditorHighlight()
     const isLatestRequest = noteSelectionRequests.begin()
     await flushPendingDraft()
     if (!isLatestRequest()) return
@@ -267,6 +284,7 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
+    clearAgentEditorHighlight()
     await flushPendingDraft()
     const endSaving = savingRequests.begin()
     error.value = null
@@ -317,6 +335,11 @@ export const useNoteStore = defineStore('notes', () => {
     sortSummaries()
     currentListPage = 0
     hasMoreNotes.value = summaries.value.length > 0
+  }
+
+  function clearAgentEditorHighlight(noteId?: string) {
+    if (noteId && agentEditorHighlight.value?.noteId !== noteId) return
+    agentEditorHighlight.value = null
   }
 
   function getPersistedRevision(noteId: string) {
@@ -485,6 +508,7 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   function discardDraft(noteId: string) {
+    autoSave.cancel(noteId)
     replaceDraft(noteId, null)
   }
 
@@ -503,7 +527,7 @@ export const useNoteStore = defineStore('notes', () => {
       }
 
       applyPersistedNote(latestNote)
-      replaceDraft(noteId, null)
+      discardDraft(noteId)
       return latestNote
     } catch (e) {
       setErrorContext({
@@ -571,7 +595,7 @@ export const useNoteStore = defineStore('notes', () => {
 
       const current = getDraft(noteId)
       if (current?.status === 'conflicted' && current.draftVersion === capturedDraftVersion) {
-        replaceDraft(noteId, null)
+        discardDraft(noteId)
       }
       return created
     } catch (e) {
@@ -659,6 +683,7 @@ export const useNoteStore = defineStore('notes', () => {
     proposal: AgentEditProposal,
   ): Promise<AgentEditProposalApplyOutcome> {
     const noteId = proposal.targetNoteID.trim()
+    clearAgentEditorHighlight()
     const current = activeNote.value
     if (
       !noteId
@@ -692,8 +717,34 @@ export const useNoteStore = defineStore('notes', () => {
           content: patched.content,
           expectedRevision: proposal.baseRevision,
         })
+        const pendingDraft = getDraft(noteId)
+        if (pendingDraft) {
+          autoSave.cancel(noteId)
+          replaceDraft(noteId, {
+            ...pendingDraft,
+            status: 'conflicted',
+            error: 'Agentの更新中にローカル編集が行われたため、下書きを競合として保持しています',
+            conflict: {
+              code: 'NOTE_REVISION_CONFLICT',
+              noteId,
+              expectedRevision: proposal.baseRevision,
+              actualRevision: updated.revision,
+            },
+          })
+        }
         applyPersistedNote(updated)
-        return 'applied'
+        if (!pendingDraft) {
+          agentEditorHighlight.value = {
+            id: ++nextAgentEditorHighlightId,
+            noteId,
+            revision: updated.revision,
+            start: patched.range.start,
+            end: patched.range.end,
+            beforeMarkdown: latest.content,
+            changeKind: proposal.after === '' ? 'delete' : 'replace',
+          }
+        }
+        return pendingDraft ? 'applied-with-draft-conflict' : 'applied'
       } catch (e) {
         if (e instanceof NoteRevisionConflictError) return 'conflict'
         setErrorContext({ code: 'AI_AGENT_PROPOSAL_APPLY_FAILED' })
@@ -848,6 +899,7 @@ export const useNoteStore = defineStore('notes', () => {
     hasDirtyNotes,
     saveFeedbackVersion,
     lastSavedNoteId,
+    agentEditorHighlight,
     pinnedNotes,
     favoriteNotes,
     trashedNotes,
@@ -860,6 +912,7 @@ export const useNoteStore = defineStore('notes', () => {
     persistNote,
     applyAIWritingContent,
     applyAgentEditProposal,
+    clearAgentEditorHighlight,
     applyPersistedNote,
     getDraft,
     scheduleDraft,

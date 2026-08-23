@@ -37,7 +37,7 @@
       <span>現在のノートへのバックリンクも参照する</span>
     </label>
 
-    <form v-if="!props.externalComposer" class="ai-v3-form" @submit.prevent="confirmAndAsk">
+    <form v-if="!props.externalComposer" class="ai-v3-form" @submit.prevent="confirmAndAsk()">
       <label>
         <span>質問・相談</span>
         <textarea
@@ -46,8 +46,8 @@
           maxlength="8000"
           placeholder="現在のノートについて質問する"
           :disabled="assistantStore.isBusy"
-          @keydown.ctrl.enter.prevent="confirmAndAsk"
-          @keydown.meta.enter.prevent="confirmAndAsk"
+          @keydown.ctrl.enter.prevent="confirmAndAsk()"
+          @keydown.meta.enter.prevent="confirmAndAsk()"
         />
       </label>
       <div class="ai-v3-actions">
@@ -174,6 +174,7 @@ import type { AIChatMode, AIContextSource, AssistantKind } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
 import { useAIAssistantStore } from '../stores/useAIAssistantStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import type { AIAgentEditPermission } from '../stores/useSettingsStore'
 import AIMarkdownPreview from './AIMarkdownPreview.vue'
 
 const props = withDefaults(defineProps<{
@@ -270,7 +271,7 @@ async function ensureCurrentNotePersisted() {
   return true
 }
 
-async function confirmAndAsk() {
+async function confirmAndAsk(agentEditPermission: AIAgentEditPermission = 'review-required') {
   if (!canAsk.value || !noteStore.activeNote) return false
   if (!await preview()) return false
 
@@ -289,7 +290,9 @@ async function confirmAndAsk() {
     ? '\nWeb検索: 有効（OpenRouter Web Search / Exaを必須化します。各検索・合計とも最大3件で、実行回数が1回でない応答は表示しません。追加料金が発生します。質問・参照内容から生成された検索クエリはOpenRouterとExaへ外部送信されます。）'
     : '\nWeb検索: 無効'
   const agentProposalSummary = props.chatMode === 'agent' && !props.webSearch
-    ? '\nAgent変更提案: 開いているノート本文に対する差分を1件だけ生成します。保存・適用は行わず、回答後に内容を確認して明示的に適用します。'
+    ? agentEditPermission === 'auto-update'
+      ? '\nAgent本文更新: 開いているノート本文に対する差分を1件だけ生成し、検証後に自動適用します。競合または保存失敗時は本文を変更せず、差分を確認できます。更新した本文は通常のノート保存およびWebDAV同期の対象になります。'
+      : '\nAgent変更提案: 開いているノート本文に対する差分を1件だけ生成します。保存・適用は行わず、回答後に内容を確認して明示的に適用します。'
     : ''
   if (!window.confirm(
     `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}${agentProposalSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
@@ -310,9 +313,12 @@ async function confirmAndAsk() {
   return asked
 }
 
-async function submitPrompt(prompt: string) {
+async function submitPrompt(
+  prompt: string,
+  agentEditPermission: AIAgentEditPermission = 'review-required',
+) {
   question.value = prompt.trim()
-  return confirmAndAsk()
+  return confirmAndAsk(agentEditPermission)
 }
 
 async function saveHistory() {

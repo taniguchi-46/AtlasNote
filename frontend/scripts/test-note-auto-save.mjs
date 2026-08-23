@@ -29,6 +29,7 @@ try {
   await testFailedDraftSurvivesSwitchAndRetry()
   await testFlushWaitsForInFlightSave()
   await testCancelDropsPendingSave()
+  await testCancelSkipsQueuedSave()
   await testDifferentNotesSaveConcurrently()
   await testFlushTargetsOneNoteLane()
   await testFailedLaneWaitsForManualRetry()
@@ -143,6 +144,35 @@ async function testCancelDropsPendingSave() {
   timers.run()
   await Promise.resolve()
 
+  assert.deepEqual(saves, [])
+}
+
+async function testCancelSkipsQueuedSave() {
+  const saves = []
+  let runQueuedOperation = null
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: async (snapshot) => {
+      saves.push(snapshot)
+      return snapshot
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+    execute: (_noteId, operation) => new Promise((resolve) => {
+      runQueuedOperation = async () => resolve(await operation())
+    }),
+  })
+
+  autoSave.schedule({ noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 })
+  const flushPromise = autoSave.flush('note-a')
+  await Promise.resolve()
+  assert.equal(typeof runQueuedOperation, 'function')
+
+  autoSave.cancel('note-a')
+  await runQueuedOperation()
+
+  assert.equal(await flushPromise, true)
   assert.deepEqual(saves, [])
 }
 

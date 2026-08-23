@@ -254,8 +254,8 @@ type AgentEditTarget struct {
 }
 
 // AgentEditProposal is an exact one-hunk replacement for the target note
-// body. It is only a proposal; applying it remains an explicit UI action that
-// goes through the existing note revision/CAS save path.
+// body. The UI applies it only according to the user-selected Agent edit
+// policy, through the existing note revision/CAS save path.
 type AgentEditProposal struct {
 	TargetNoteID   string   `json:"targetNoteID"`
 	TargetTitle    string   `json:"targetTitle"`

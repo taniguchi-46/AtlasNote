@@ -192,7 +192,7 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 作業チェック v3: `docs/todo/todo-phese4-v3.md`
 
-現状: v1（AI設定・単発要約）のD-01〜D-07は承認・実装・受け入れ済み（2026-07-27）。Phase 4はv2・v3を順に完了し、v3完了をもって正式完了とする。単一チャット、Provider管理Web検索、共通下書きは実装済みで、制限付きAgentの変更提案・差分確認・明示適用は決定済み・未実装である。詳細な正本は上記のversion別scope／TODO、`ai-integration.md`、`ai-chat.md`とする。
+現状: v1（AI設定・単発要約）のD-01〜D-07は承認・実装・受け入れ済み（2026-07-27）。Phase 4はv2・v3を順に完了し、v3完了をもって正式完了とする。単一チャット、Provider管理Web検索、共通下書き、制限付きAgentの変更提案・差分確認・編集権限設定（既定は明示適用、更新可能は検証済み提案の自動適用）は実装済みである。詳細な正本は上記のversion別scope／TODO、`ai-integration.md`、`ai-chat.md`とする。
 
 ## AI設定
 

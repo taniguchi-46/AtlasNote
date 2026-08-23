@@ -108,9 +108,7 @@ try {
   assert.equal(store.timeline[1].status, 'success')
   assert.equal(store.timeline[2].citations?.[0]?.url, 'https://example.com/source')
 
-  const proposalID = store.appendAgentProposalPlaceholder()
-  assert.equal(store.timeline.at(-1)?.proposalState, 'generating')
-  store.resolveAgentProposal(proposalID, '本文の変更を提案します。', {
+  const proposal = {
     targetNoteID: 'active-note',
     targetTitle: '開いているノート',
     baseRevision: 1,
@@ -118,12 +116,24 @@ try {
     before: '変更前',
     after: '変更後',
     affectedFields: ['content'],
-  })
+  }
+  const proposalID = store.appendAgentProposalPlaceholder()
+  assert.equal(store.timeline.at(-1)?.proposalState, 'generating')
+  store.resolveAgentProposal(proposalID, '本文の変更を提案します。', proposal)
   assert.equal(store.timeline.at(-1)?.proposalState, 'awaiting-review')
   assert.equal(store.timeline.at(-1)?.proposal?.before, '変更前')
+  store.setAgentProposalState(proposalID, 'applied', 'Agentが本文を更新しました。')
+  assert.equal(store.timeline.at(-1)?.proposalState, 'applied')
+  assert.equal(store.timeline.at(-1)?.proposal?.before, '変更前', 'applied proposal must retain the before diff')
+  assert.equal(store.timeline.at(-1)?.proposal?.after, '変更後', 'applied proposal must retain the after diff')
+  store.markAgentProposalStale('active-note', 2)
+  assert.equal(store.timeline.at(-1)?.proposalState, 'applied', 'applied proposal must remain viewable after later revisions')
+
+  const staleProposalID = store.appendAgentProposalPlaceholder()
+  store.resolveAgentProposal(staleProposalID, '本文の変更を提案します。', proposal)
   store.markAgentProposalStale('active-note', 2)
   assert.equal(store.timeline.at(-1)?.proposalState, 'conflict')
-  store.discardAgentProposal(proposalID)
+  store.discardAgentProposal(staleProposalID)
   assert.equal(store.timeline.at(-1)?.proposalState, 'discarded')
   assert.equal(store.timeline.at(-1)?.proposal, undefined, 'discard must clear the in-memory proposal payload')
 

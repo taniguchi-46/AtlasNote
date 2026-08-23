@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-15
+最終更新: 2026-08-23
 
 ## 現在のフェーズ
 
@@ -72,7 +72,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
 - 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
 - Phase 4 v3のAIアシスタント／AIライティング基本経路、schema version 12のローカル履歴・成果物とversion 13の要約履歴、明示保存・個別／一括削除、stale／orphaned評価、WebDAV非同期境界テスト（手動受け入れ、Wails API通し検証、追加異常系は未完了）
-- Phase 4のAIワークスペースを単一チャットtimelineへ刷新。開いているノートの固定context chip、追加ノート／Notebook検索scope、要約・文章作成6種・タイトル・タグ・分類・関連・重複・Web検索の`＋`メニュー、Ask／Agent切替、入力欄右下の送信ボタン、候補の明示採用、構造化tool traceとtrace直後の候補カードを実装した。Web検索は実行ごとの明示確認を伴うOpenRouter Web Search／Exa固定のProvider管理ツールとする。Notebook scopeは直下ノートIDへ最大10件で解決し、本文・revisionは既存バックエンドでsnapshot化する。制限付きAgentは開いているノート本文の単一差分を構造化提案として表示し、revision/CAS・ノート単位保存queueを通る明示適用／破棄、競合・保存失敗状態を実装した。右側／下側配置・ドラッグ寸法、狭幅対応、履歴・成果物の既存保存境界を維持し、`test:agent-proposal`、`test:ai-chat`、`test:ai-v3`、`test:ai-workspace`を追加・更新した（手動受け入れは未完了）
+- Phase 4のAIワークスペースを単一チャットtimelineへ刷新。開いているノートの固定context chip、追加ノート／Notebook検索scope、要約・文章作成6種・タイトル・タグ・分類・関連・重複・Web検索の`＋`メニュー、Ask／Agent切替、入力欄右下の送信ボタン、候補の明示採用、構造化tool traceとtrace直後の候補カードを実装した。Web検索は実行ごとの明示確認を伴うOpenRouter Web Search／Exa固定のProvider管理ツールとする。Notebook scopeは直下ノートIDへ最大10件で解決し、本文・revisionは既存バックエンドでsnapshot化する。制限付きAgentは開いているノート本文の単一差分を構造化提案として表示し、端末ローカル設定の既定「提案のみ」では明示適用／破棄、「更新可能」では送信前確認後に検証済み提案だけをrevision/CAS・ノート単位保存queueで自動適用する。適用成功後は保存済み本文を開いているMarkdown／WYSIWYGエディタへ直ちに反映する。Agent保存中に作成されたdraftは未開始autosaveを取り消して競合として保持し、古い本文の後追い保存とエディタ上書きを防ぐ。自動適用後も変更前後の差分を現在のtimelineで確認でき、競合・保存失敗時は本文を変更しない。右側／下側配置・ドラッグ寸法、狭幅対応、履歴・成果物の既存保存境界を維持し、`test:auto-save`、`test:agent-proposal`、`test:ai-chat`、`test:ai-v3`、`test:ai-workspace`を追加・更新した（手動受け入れは未完了、エディタ即時反映と保存中draft保護の自動テストは2026-08-23に追加）
 - AIコンテキストへ全文文字数、送信済み本文バイト数、全文バイト数、切り詰め有無、作成日時、更新日時を追加し、OpenRouterの`stream`誤判定によるAgent拒否を修正した。Geminiを含むモデル能力一覧は不明値を実行時判定へ委譲し、SSEの機械可読エラーを安全なAIエラーへ分類する回帰テストを追加した（2026-08-15）。
 
 ## Phase 2の完了範囲
@@ -117,7 +117,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
 - Phase 4 v1はD-01〜D-07の設計承認、実装、保存/同期境界テスト、CI、ローカル受け入れを完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Phase 4全体の完了条件はv2のAI司書・実行体験とv3のAIアシスタント・ライティング・ローカル履歴まで含み、v3完了をもって完了とします。GitHub ActionsのD-07 CIは[run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)で成功しています。
 - Phase 4 v3の保存仕様（明示保存する会話・成果物、生成成功時に自動保存する要約履歴、SQLiteローカル管理データ、アプリケーション上の完全削除、参照元ノート削除後の保持、CI例外の扱い）は確定しています。schema version 12〜13の詳細は `docs/development/ai-integration.md` を正とします。
-- Phase 4 v3の実装進捗は `docs/todo/todo-phese4-v3.md` で【実装済み】【未検証】【決定済み・未実装】に分類しています。基本実装、制限付きAgentの本文差分提案・明示適用、自動テストは追加済みですが、手動受け入れ、Wails API通し検証、追加異常系が残っています。
+- Phase 4 v3の実装進捗は `docs/todo/todo-phese4-v3.md` で【実装済み】【未検証】【決定済み・未実装】に分類しています。基本実装、制限付きAgentの本文差分提案・編集権限設定（明示適用／検証済み自動適用）、適用成功後のエディタ即時反映、自動テストは追加済みですが、手動受け入れ、Wails API通し検証、追加異常系が残っています。
 - CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功しました（2026-07-30）。AI司書キャンセル時の生成ロックに関する既知CI例外は解消しましたが、Phase 4完了には残る手動受け入れと追加検証が必要です。
 - AI自由記述のMarkdown出力契約とAI専用DOMサニタイズ表示を実装し、通常ノートのraw HTML無効化・AI原文保存・危険なURL／外部リソース遮断を維持しました。`test:ai-markup-safety`、既存AIテスト、Go全体テスト、Frontend typecheck/buildはローカル成功済みです（2026-08-01）。Wails CLIのローカル未導入により統合ビルドは未確認で、CIでの再確認が必要です。
 

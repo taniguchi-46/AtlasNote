@@ -41,6 +41,10 @@ const workspaceTemplate = workspaceSource.slice(
 assert.match(settingsStoreSource, /export type AIWorkspacePlacement = 'right' \| 'bottom'/)
 assert.match(settingsStoreSource, /readStringOption\('atlas-ai-workspace-placement', 'right'/)
 assert.match(settingsStoreSource, /localStorage\.setItem\('atlas-ai-workspace-placement', newPlacement\)/)
+assert.match(settingsStoreSource, /export type AIAgentEditPermission = 'review-required' \| 'auto-update'/)
+assert.match(settingsStoreSource, /'atlas-ai-agent-edit-permission',\s*'review-required'/)
+assert.match(settingsStoreSource, /localStorage\.setItem\('atlas-ai-agent-edit-permission', newPermission\)/)
+assert.match(settingsStoreSource, /aiAgentEditPermission,/)
 assert.match(settingsStoreSource, /AI_WORKSPACE_RIGHT_WIDTH_MIN = 300/)
 assert.match(settingsStoreSource, /AI_WORKSPACE_RIGHT_WIDTH_MAX = 960/)
 assert.match(settingsStoreSource, /readClampedNumberInRange/)
@@ -57,6 +61,10 @@ assert.match(settingsModalSource, /v-model="settingsStore\.aiWorkspacePlacement"
 assert.match(settingsModalSource, /value="right">右側/)
 assert.match(settingsModalSource, /value="bottom">下側/)
 assert.match(settingsModalSource, /境界をドラッグして幅または高さを調整/)
+assert.match(settingsModalSource, /Agentの本文編集権限/)
+assert.match(settingsModalSource, /v-model="settingsStore\.aiAgentEditPermission"/)
+assert.match(settingsModalSource, /value="review-required">提案のみ/)
+assert.match(settingsModalSource, /value="auto-update">更新可能/)
 
 // Right/bottom placement and pointer/keyboard resizing remain available.
 assert.match(workspaceSource, /ResizeObserver/)
@@ -264,16 +272,36 @@ assert.match(assistantSource, /chatMode\?: AIChatMode/)
 assert.match(assistantSource, /mode: props\.chatMode/)
 assert.match(assistantSource, /agentTarget/)
 assert.match(assistantSource, /Agent変更提案/)
+assert.match(assistantSource, /agentEditPermission: AIAgentEditPermission = 'review-required'/)
+assert.match(assistantSource, /検証後に自動適用/)
 assert.match(workspaceSource, /appendAgentProposalPlaceholder/)
 assert.match(workspaceSource, /resolveAgentProposal/)
 assert.match(workspaceSource, /applyAgentEditProposal/)
+assert.match(workspaceSource, /async function persistAgentProposal\(entryID: string, automatic = false\)/)
+assert.match(workspaceSource, /const agentEditPermission = settingsStore\.aiAgentEditPermission/)
+assert.match(workspaceSource, /submitPrompt\(prompt, agentEditPermission\)/)
+assert.match(workspaceSource, /agentEditPermission === 'auto-update'/)
+assert.match(workspaceSource, /persistAgentProposal\(agentProposalEntryID, true\)/)
+assert.match(workspaceSource, /Agentが本文を更新しました。変更前後の差分を確認できます。/)
+assert.match(
+  workspaceSource,
+  /outcome === 'applied-with-draft-conflict'[\s\S]*?setAgentProposalState\(\s*entryID,\s*'applied',[\s\S]*?適用中に入力されたローカル下書きを競合として保持しています。/,
+)
 assert.match(workspaceSource, /markAgentProposalStale/)
 assert.match(workspaceSource, /window\.confirm\([\s\S]*?Agent変更提案/)
 assert.match(workspaceSource, /const hasPendingAgentProposal = computed/)
 assert.match(workspaceSource, /現在の変更提案を適用または破棄/)
 assert.doesNotMatch(agentProposalCardSource, /v-html/)
-assert.match(agentProposalCardSource, /<pre>\{\{ proposal\.before \}\}<\/pre>/)
-assert.match(agentProposalCardSource, /<pre>\{\{ proposal\.after \}\}<\/pre>/)
+assert.doesNotMatch(agentProposalCardSource, /<pre>/)
+assert.match(agentProposalCardSource, /createAgentEditVisualDiff/)
+assert.match(agentProposalCardSource, /本文の差分/)
+assert.match(agentProposalCardSource, /role="region"/)
+assert.match(agentProposalCardSource, /tabindex="0"/)
+assert.match(agentProposalCardSource, /visualDiff\.beforeLines/)
+assert.match(agentProposalCardSource, /visualDiff\.afterLines/)
+assert.match(agentProposalCardSource, /is-removed/)
+assert.match(agentProposalCardSource, /is-added/)
+assert.match(agentProposalCardSource, /@container \(min-width: 520px\)/)
 
 // The send button is the last control in the toolbar at the bottom-right inside the input shell.
 const inputShellStart = workspaceTemplate.indexOf('<div class="ai-chat-input-shell"')
@@ -371,7 +399,70 @@ assert.doesNotMatch(editorSource, /<AILibrarianPanel/)
 assert.doesNotMatch(editorSource, /<AIAssistantPanel/)
 assert.doesNotMatch(editorSource, /<AIWritingPanel/)
 
-// AI content and tool traces are in-memory only; localStorage remains layout-only.
+// A successful same-note content save must refresh both editor modes without
+// replacing an unresolved local draft or scheduling a duplicate save.
+const activeNoteWatchAnchor = editorSource.indexOf('() => noteStore.activeNote')
+const activeNoteWatchStart = editorSource.lastIndexOf('watch(', activeNoteWatchAnchor)
+const saveFeedbackWatchAnchor = editorSource.indexOf(
+  '() => noteStore.saveFeedbackVersion',
+  activeNoteWatchAnchor + 1,
+)
+const activeNoteWatchEnd = editorSource.lastIndexOf('watch(', saveFeedbackWatchAnchor)
+assert.ok(
+  activeNoteWatchStart >= 0 && activeNoteWatchEnd > activeNoteWatchStart,
+  'NoteEditor must watch the active note',
+)
+const activeNoteWatchSource = editorSource.slice(activeNoteWatchStart, activeNoteWatchEnd)
+assert.match(activeNoteWatchSource, /if \(draft \|\| localMarkdown\.value === note\.content\) return/)
+assert.match(activeNoteWatchSource, /localMarkdown\.value = note\.content/)
+assert.match(activeNoteWatchSource, /isRichDirty\.value = false/)
+assert.match(activeNoteWatchSource, /editMode\.value === 'wysiwyg'[\s\S]*?setEditorFromMarkdown\(note\.content\)/)
+assert.doesNotMatch(activeNoteWatchSource, /editMode\.value === 'markdown'[\s\S]*?return/)
+assert.doesNotMatch(activeNoteWatchSource, /scheduleAutoSave/)
+
+// Agent-applied content is highlighted in the central editor without adding
+// persistent markup to the Markdown source.
+assert.match(editorSource, /Agent更新箇所/)
+assert.match(editorSource, /aria-label="Agent更新箇所のハイライトを閉じる"/)
+assert.match(editorSource, /createAgentEditorTextHighlight/)
+assert.match(editorSource, /findChangedTopLevelBlockRange/)
+assert.match(editorSource, /new Plugin<DecorationSet>/)
+assert.match(editorSource, /Decoration\.node/)
+assert.match(editorSource, /setMeta\(agentEditorHighlightPluginKey/)
+assert.match(editorSource, /clearAgentEditorHighlight/)
+assert.match(editorSource, /markdownHighlightLayer/)
+assert.match(editorSource, /scrollTop = textarea\.scrollTop/)
+assert.match(editorSource, /scrollLeft = textarea\.scrollLeft/)
+assert.match(editorSource, /pointer-events: none/)
+assert.match(editorSource, /agent-editor-highlight-block/)
+assert.match(editorSource, /agent-editor-highlight-mark/)
+assert.match(
+  editorSource,
+  /background: color-mix\(in srgb, var\(--bg-editor\) 95%, var\(--color-success\) 5%\)/,
+)
+assert.match(
+  editorSource,
+  /background: color-mix\(in srgb, var\(--bg-editor\) 94%, var\(--color-success\) 6%\)/,
+)
+assert.match(
+  editorSource,
+  /\.prose-editor :deep\(\.agent-editor-highlight-block\)::before\s*\{[^}]*position: absolute;[^}]*left: -10px;[^}]*width: 2px;/s,
+)
+assert.match(
+  editorSource,
+  /\.agent-editor-highlight-mark:not\(\.is-deletion\)::before\s*\{[^}]*position: absolute;[^}]*left: -10px;[^}]*width: 2px;/s,
+)
+assert.match(
+  editorSource,
+  /\.agent-editor-highlight-mark\.is-deletion::before\s*\{[^}]*position: absolute;[^}]*left: -10px;[^}]*width: 2px;/s,
+)
+assert.match(
+  editorSource,
+  /function setEditMode[\s\S]*?localMarkdown\.value !== noteStore\.activeNote\?\.content[\s\S]*?scheduleAutoSave/,
+)
+assert.doesNotMatch(editorSource, /v-html/)
+
+// AI content and tool traces are in-memory only; only non-secret UI preferences persist locally.
 for (const [name, source] of [
   ['workspace', workspaceSource],
   ['chat store', chatStoreSource],

@@ -338,19 +338,50 @@
         @closed="focusAIWorkspaceToggle"
       >
         <div class="editor-body">
+          <div
+            v-if="activeAgentEditorHighlight"
+            class="agent-editor-highlight-status"
+            role="status"
+            aria-live="polite"
+          >
+            <SparklesIcon :size="14" aria-hidden="true" />
+            <span>Agent更新箇所</span>
+            <button
+              type="button"
+              title="ハイライトを閉じる"
+              aria-label="Agent更新箇所のハイライトを閉じる"
+              @click="dismissAgentEditorHighlight"
+            >
+              <XIcon :size="13" aria-hidden="true" />
+            </button>
+          </div>
           <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
-          <textarea
-            v-else
-            ref="markdownTextarea"
-            v-model="localMarkdown"
-            class="markdown-textarea"
-            placeholder="ここにMarkdownで内容を入力してください..."
-            title="Ctrl / Cmd + クリックでノートリンクを開く"
-            @input="handleMarkdownInput"
-            @click="handleMarkdownClick"
-            @keyup="updateMarkdownSelection"
-            @select="updateMarkdownSelection"
-          />
+          <div v-else class="markdown-editor-shell">
+            <div
+              v-if="markdownAgentHighlight"
+              ref="markdownHighlightLayer"
+              class="markdown-highlight-layer"
+              aria-hidden="true"
+            >
+              <span>{{ markdownAgentHighlight.prefix }}</span><mark
+                ref="markdownHighlightMark"
+                class="agent-editor-highlight-mark"
+                :class="{ 'is-deletion': markdownAgentHighlight.isDeletion }"
+              >{{ markdownAgentHighlight.highlighted }}</mark><span>{{ markdownAgentHighlight.suffix }}</span><span>&#8203;</span>
+            </div>
+            <textarea
+              ref="markdownTextarea"
+              v-model="localMarkdown"
+              class="markdown-textarea"
+              placeholder="ここにMarkdownで内容を入力してください..."
+              title="Ctrl / Cmd + クリックでノートリンクを開く"
+              @input="handleMarkdownInput"
+              @scroll="syncMarkdownHighlightLayer"
+              @click="handleMarkdownClick"
+              @keyup="updateMarkdownSelection"
+              @select="updateMarkdownSelection"
+            />
+          </div>
         </div>
       </AIWorkspace>
 
@@ -398,6 +429,7 @@ import {
   Rows3Icon,
   SquareMIcon,
   SquarePenIcon,
+  SparklesIcon,
   StarIcon,
   StrikethroughIcon,
   Table2Icon,
@@ -405,13 +437,16 @@ import {
   TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
+  XIcon,
 } from '@lucide/vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import {
   DOMParser as ProseMirrorDOMParser,
   DOMSerializer as ProseMirrorDOMSerializer,
+  type Node as ProseMirrorNode,
 } from '@tiptap/pm/model'
-import type { Selection } from '@tiptap/pm/state'
+import { Plugin, PluginKey, type Selection } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
 import { Placeholder } from '@tiptap/extension-placeholder'
@@ -442,6 +477,11 @@ import {
 } from '../utils/tableClipboard'
 import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
 import {
+  createAgentEditorTextHighlight,
+  findChangedTopLevelBlockRange,
+  type AgentEditorBlockRange,
+} from '../utils/agentEditorHighlight'
+import {
   createNoteLinkHref,
   createNoteLinkMarkdown,
   findNoteLinkTargetAt,
@@ -457,6 +497,13 @@ const CustomTableHeader = TableHeader.extend({
 })
 
 const lowlight = createLowlight(common)
+const agentEditorHighlightPluginKey = new PluginKey<DecorationSet>('agentEditorHighlight')
+
+type AgentEditorHighlightPluginMeta = {
+  range: AgentEditorBlockRange | null
+  isDeletion: boolean
+}
+
 const noteStore = useNoteStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
@@ -486,6 +533,8 @@ const aiWorkspaceToggleIcon = computed(() => {
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
+const markdownHighlightLayer = ref<HTMLElement | null>(null)
+const markdownHighlightMark = ref<HTMLElement | null>(null)
 const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
@@ -494,6 +543,45 @@ let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
 let savedRichSelection: { from: number; to: number } | null = null
+let markdownHighlightResizeObserver: ResizeObserver | null = null
+let lastScrolledAgentHighlightKey = ''
+
+const activeAgentEditorHighlight = computed(() => {
+  const highlight = noteStore.agentEditorHighlight
+  const note = noteStore.activeNote
+  if (!highlight || !note) return null
+  if (noteStore.activeDraft) return null
+  if (highlight.noteId !== note.id || highlight.revision !== note.revision) return null
+  if (localMarkdown.value !== note.content) return null
+  return highlight
+})
+
+const markdownAgentHighlight = computed(() => {
+  const highlight = activeAgentEditorHighlight.value
+  if (!highlight) return null
+  return createAgentEditorTextHighlight(localMarkdown.value, highlight)
+})
+
+const agentEditorHighlightPlugin = new Plugin<DecorationSet>({
+  key: agentEditorHighlightPluginKey,
+  state: {
+    init: () => DecorationSet.empty,
+    apply(transaction, decorations) {
+      const meta = transaction.getMeta(agentEditorHighlightPluginKey) as
+        | AgentEditorHighlightPluginMeta
+        | undefined
+      if (meta) {
+        return createRichAgentDecorationSet(transaction.doc, meta.range, meta.isDeletion)
+      }
+      return decorations.map(transaction.mapping, transaction.doc)
+    },
+  },
+  props: {
+    decorations(state) {
+      return agentEditorHighlightPluginKey.getState(state) ?? null
+    },
+  },
+})
 
 const editor = new Editor({
   extensions: [
@@ -559,6 +647,7 @@ const editor = new Editor({
     if (editMode.value !== 'wysiwyg') return
     if (isApplyingContent.value) return
 
+    dismissAgentEditorHighlight()
     const markdown = serializeTiptapJsonToMarkdown(editor.getJSON())
     isRichDirty.value = true
 
@@ -570,16 +659,27 @@ const editor = new Editor({
   },
 })
 
+editor.registerPlugin(agentEditorHighlightPlugin)
+
 watch(
   () => noteStore.activeNote,
   (note) => {
     if (!note) {
+      noteStore.clearAgentEditorHighlight()
       activeNoteId = null
       savedRichSelection = null
       return
     }
 
     const noteChanged = activeNoteId !== note.id
+    if (noteChanged) {
+      noteStore.clearAgentEditorHighlight()
+    } else if (
+      noteStore.agentEditorHighlight?.noteId === note.id
+      && noteStore.agentEditorHighlight.revision !== note.revision
+    ) {
+      noteStore.clearAgentEditorHighlight(note.id)
+    }
     activeNoteId = note.id
     const draft = noteStore.getDraft(note.id)
     const editableContent = draft?.content ?? note.content
@@ -601,18 +701,44 @@ watch(
       return
     }
 
-    if (editMode.value === 'markdown') {
-      return
-    }
+    if (draft || localMarkdown.value === note.content) return
 
-    if (!isRichDirty.value && localMarkdown.value !== note.content) {
-      localMarkdown.value = note.content
-      if (!setEditorFromMarkdown(note.content)) {
-        editMode.value = 'markdown'
-      }
+    savedRichSelection = null
+    localMarkdown.value = note.content
+    isRichDirty.value = false
+    if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(note.content)) {
+      editMode.value = 'markdown'
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => activeAgentEditorHighlight.value?.id ?? null,
+  () => {
+    void nextTick(() => renderAgentEditorHighlight())
+  },
+  { flush: 'post' },
+)
+
+watch(editMode, () => {
+  void nextTick(() => renderAgentEditorHighlight())
+})
+
+watch(
+  markdownTextarea,
+  (textarea) => {
+    markdownHighlightResizeObserver?.disconnect()
+    markdownHighlightResizeObserver = null
+    if (!textarea) return
+
+    if (typeof ResizeObserver !== 'undefined') {
+      markdownHighlightResizeObserver = new ResizeObserver(syncMarkdownHighlightLayer)
+      markdownHighlightResizeObserver.observe(textarea)
+    }
+    void nextTick(syncMarkdownHighlightLayer)
+  },
+  { flush: 'post' },
 )
 
 watch(
@@ -625,7 +751,9 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  noteStore.clearAgentEditorHighlight(activeNoteId ?? undefined)
   void noteStore.flushPendingDraft()
+  markdownHighlightResizeObserver?.disconnect()
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
   }
@@ -745,7 +873,12 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
     return
   }
 
-  scheduleAutoSave(localMarkdown.value)
+  if (
+    localMarkdown.value !== noteStore.activeNote?.content
+    || getSavableTitle() !== noteStore.activeNote?.title
+  ) {
+    scheduleAutoSave(localMarkdown.value)
+  }
   if (setEditorFromMarkdown(localMarkdown.value)) {
     editMode.value = mode
   }
@@ -771,6 +904,134 @@ function setEditorFromMarkdown(markdown: string): boolean {
   } finally {
     isApplyingContent.value = false
   }
+}
+
+function createRichAgentDecorationSet(
+  document: ProseMirrorNode,
+  range: AgentEditorBlockRange | null,
+  isDeletion: boolean,
+): DecorationSet {
+  if (!range) return DecorationSet.empty
+
+  const decorations: Decoration[] = []
+  document.forEach((node, offset, index) => {
+    if (index < range.startIndex || index >= range.endIndex) return
+    const usesDeletionStyle = isDeletion || range.usesDeletionAnchor
+    decorations.push(Decoration.node(
+      offset,
+      offset + node.nodeSize,
+      {
+        class: usesDeletionStyle
+          ? 'agent-editor-highlight-block is-deletion'
+          : 'agent-editor-highlight-block',
+      },
+    ))
+  })
+  return DecorationSet.create(document, decorations)
+}
+
+function setRichAgentEditorHighlight(
+  range: AgentEditorBlockRange | null,
+  isDeletion = false,
+) {
+  if (editor.isDestroyed) return
+  editor.view.dispatch(editor.state.tr.setMeta(agentEditorHighlightPluginKey, {
+    range,
+    isDeletion,
+  } satisfies AgentEditorHighlightPluginMeta))
+}
+
+function renderAgentEditorHighlight() {
+  const highlight = activeAgentEditorHighlight.value
+  if (!highlight) {
+    setRichAgentEditorHighlight(null)
+    return
+  }
+
+  if (editMode.value === 'markdown') {
+    setRichAgentEditorHighlight(null)
+    syncMarkdownHighlightLayer()
+    scrollToAgentEditorHighlight()
+    return
+  }
+
+  try {
+    const beforeDocument = parseRichHtmlToJson(parseMarkdownToRichHtml(highlight.beforeMarkdown))
+    const afterDocument = editor.getJSON()
+    const blockRange = findChangedTopLevelBlockRange(beforeDocument, afterDocument)
+      ?? createFallbackRichAgentBlockRange(afterDocument, localMarkdown.value, highlight.start)
+    setRichAgentEditorHighlight(blockRange, highlight.changeKind === 'delete')
+    void nextTick(scrollToAgentEditorHighlight)
+  } catch {
+    setRichAgentEditorHighlight(null)
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.agent-highlight',
+      errorCategory: 'parse-failed',
+    })
+  }
+}
+
+function createFallbackRichAgentBlockRange(
+  document: JSONContent,
+  markdown: string,
+  markdownOffset: number,
+): AgentEditorBlockRange | null {
+  const blockCount = document.content?.length ?? 0
+  if (blockCount === 0) return null
+
+  const normalizedOffset = Math.min(Math.max(markdownOffset, 0), markdown.length)
+  const linesBefore = markdown.slice(0, normalizedOffset).split(/\r\n|\n|\r/).length - 1
+  const totalLines = Math.max(markdown.split(/\r\n|\n|\r/).length, 1)
+  const index = Math.min(Math.floor((linesBefore / totalLines) * blockCount), blockCount - 1)
+  return {
+    startIndex: index,
+    endIndex: index + 1,
+    usesDeletionAnchor: false,
+  }
+}
+
+function dismissAgentEditorHighlight() {
+  noteStore.clearAgentEditorHighlight(noteStore.activeNote?.id)
+  setRichAgentEditorHighlight(null)
+}
+
+function syncMarkdownHighlightLayer() {
+  const textarea = markdownTextarea.value
+  const layer = markdownHighlightLayer.value
+  if (!textarea || !layer) return
+
+  layer.style.width = `${textarea.clientWidth}px`
+  layer.style.height = `${textarea.clientHeight}px`
+  layer.scrollTop = textarea.scrollTop
+  layer.scrollLeft = textarea.scrollLeft
+}
+
+function scrollToAgentEditorHighlight() {
+  const highlight = activeAgentEditorHighlight.value
+  if (!highlight) return
+
+  const scrollKey = `${highlight.id}:${editMode.value}`
+  if (lastScrolledAgentHighlightKey === scrollKey) return
+
+  if (editMode.value === 'markdown') {
+    const textarea = markdownTextarea.value
+    const mark = markdownHighlightMark.value
+    if (!textarea || !mark) return
+
+    textarea.scrollTop = Math.max(0, mark.offsetTop - textarea.clientHeight * 0.35)
+    syncMarkdownHighlightLayer()
+  } else {
+    const target = editor.view.dom.querySelector<HTMLElement>('.agent-editor-highlight-block')
+    const scrollContainer = editor.view.dom.parentElement
+    if (!target || !scrollContainer) return
+
+    const targetRect = target.getBoundingClientRect()
+    const containerRect = scrollContainer.getBoundingClientRect()
+    scrollContainer.scrollTop += targetRect.top - containerRect.top - scrollContainer.clientHeight * 0.35
+  }
+
+  lastScrolledAgentHighlightKey = scrollKey
 }
 
 function applyRichEditorToMarkdown() {
@@ -1117,6 +1378,7 @@ function getClipboardErrorCategory(error: unknown) {
 }
 
 function handleMarkdownInput() {
+  dismissAgentEditorHighlight()
   updateMarkdownSelection()
   updateAutoTitleFromMarkdown(localMarkdown.value)
   scheduleAutoSave(localMarkdown.value)
@@ -1348,6 +1610,7 @@ function replaceMarkdownRange(
   selectionStart = start + text.length,
   selectionEnd = selectionStart,
 ) {
+  dismissAgentEditorHighlight()
   localMarkdown.value = `${localMarkdown.value.slice(0, start)}${text}${localMarkdown.value.slice(end)}`
   scheduleAutoSave(localMarkdown.value)
   markdownSelectionVersion.value += 1
@@ -1577,6 +1840,47 @@ function formatDate(iso: string): string {
   color: var(--brand-primary);
 }
 
+.editor-body {
+  position: relative;
+}
+
+.agent-editor-highlight-status {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 6px 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-editor) 88%, var(--color-success) 12%);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  color: color-mix(in srgb, var(--color-success) 70%, var(--text-primary) 30%);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.agent-editor-highlight-status button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: currentColor;
+}
+
+.agent-editor-highlight-status button:hover {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+
+.agent-editor-highlight-status button:focus-visible {
+  outline: 2px solid var(--color-success);
+  outline-offset: 1px;
+}
+
 .prose-editor :deep(.ProseMirror) {
   box-sizing: border-box;
   width: 100%;
@@ -1601,20 +1905,108 @@ function formatDate(iso: string): string {
   line-height: var(--editor-line-height);
 }
 
-.markdown-textarea {
+.prose-editor :deep(.agent-editor-highlight-block) {
+  position: relative;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg-editor) 95%, var(--color-success) 5%);
+}
+
+.prose-editor :deep(.agent-editor-highlight-block)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-success) 78%, transparent);
+}
+
+.prose-editor :deep(.agent-editor-highlight-block.is-deletion) {
+  background: color-mix(in srgb, var(--bg-editor) 97%, var(--color-success) 3%);
+  outline: 1px dashed color-mix(in srgb, var(--color-success) 30%, transparent);
+  outline-offset: -1px;
+}
+
+.markdown-editor-shell {
+  position: relative;
+  flex: 1;
   width: 100%;
   max-width: var(--editor-line-max-width);
-  height: 100%;
   min-height: 400px;
   margin: 0 auto;
+  overflow: hidden;
+}
+
+.markdown-highlight-layer,
+.markdown-textarea {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 400px;
+  margin: 0;
   border: none;
-  resize: none;
-  background-color: transparent;
-  color: var(--text-primary);
   font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   line-height: calc(var(--editor-line-height) * 1em + var(--editor-paragraph-spacing) * 0.25);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  tab-size: 4;
   padding: 24px;
+}
+
+.markdown-highlight-layer {
+  z-index: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+}
+
+.agent-editor-highlight-mark {
+  position: relative;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--bg-editor) 94%, var(--color-success) 6%);
+  color: transparent;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.agent-editor-highlight-mark:not(.is-deletion)::before {
+  content: '';
+  position: absolute;
+  top: -0.1em;
+  bottom: -0.1em;
+  left: -10px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-success) 78%, transparent);
+}
+
+.agent-editor-highlight-mark.is-deletion {
+  background: transparent;
+}
+
+.agent-editor-highlight-mark.is-deletion::before {
+  content: '';
+  position: absolute;
+  top: -0.1em;
+  left: -10px;
+  width: 2px;
+  height: 1.2em;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-success) 78%, transparent);
+}
+
+.markdown-textarea {
+  z-index: 1;
+  resize: none;
+  background-color: transparent;
+  color: var(--text-primary);
+  caret-color: var(--text-primary);
   outline: none;
 }
 </style>

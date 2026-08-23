@@ -47,7 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案し、明示適用時だけ既存のrevision/CAS・保存laneを通す。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
 ## データ / 状態管理
 
@@ -56,7 +56,7 @@ Go Backend
 - ノート本文のファイル名は安定 ID を使った `note-id.md` とし、ユーザー入力をファイルパスへ直接使用しない。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- AIワークスペースの右側／下側配置と右側幅／下側高さだけは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
+- AIワークスペースの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
 
