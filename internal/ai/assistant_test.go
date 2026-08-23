@@ -13,6 +13,7 @@ type testV3TextAdapter struct {
 	*testProviderAdapter
 	text                string
 	structured          string
+	structuredErr       error
 	citations           []WebCitation
 	webSearches         int
 	lastInput           TextGenerationInput
@@ -48,10 +49,23 @@ func (a *testV3TextAdapter) GenerateText(ctx context.Context, providerID Provide
 	}, nil
 }
 
-func (a *testV3TextAdapter) GenerateStructured(_ context.Context, providerID ProviderID, _ string, input StructuredGenerationInput, _ func(string) error) (string, error) {
+func (a *testV3TextAdapter) GenerateStructured(ctx context.Context, providerID ProviderID, _ string, input StructuredGenerationInput, _ func(string) error) (string, error) {
 	a.lastProvider = providerID
 	a.lastStructuredInput = input
 	a.structuredCalls++
+	if a.started != nil {
+		a.started <- struct{}{}
+	}
+	if a.release != nil {
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	if a.structuredErr != nil {
+		return "", a.structuredErr
+	}
 	if a.structured == "" {
 		return "", ErrInvalidResponse
 	}

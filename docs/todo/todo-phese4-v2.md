@@ -55,7 +55,8 @@ v2は主要なAI司書機能、単一チャットtimelineへの統合、ロー�
 - [ ] 【未検証】キーボードでキャンセル、採用、破棄、retryを操作できることを確認する。標準buttonによる操作はあるが、専用の手動記録・テストがない。
 - [x] 【実装済み】`test:ai-librarian`相当の既存Node script方式テストを維持・拡張し、単一チャットのcontext、tool trace、送信lock、未採用結果の置換防止を`test:ai-chat`／`test:ai-workspace`へ追加した。2026-08-01にローカルのFrontend・Go回帰テストとWails clean buildで成功を確認した。
 - [x] 【実装済み】Go test doubleでstream、cancel、partial、structured output、safe error、非保存境界を検証する。CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) で生成lockを含むGo testが成功した。
-- [ ] 【未検証】AI失敗後もローカル保存、編集、検索、既存同期が継続することを受け入れる。
+- [x] 【自動検証済み】AI失敗後もローカル保存、編集、検索、既存同期outbox更新が継続することをApp統合テストで確認した（2026-08-23）。
+- [ ] 【未検証】AI失敗後のローカル保存、編集、検索、既存同期の継続を実画面で手動受け入れする。
 
 ## v2完了条件
 

@@ -26,7 +26,7 @@
       </button>
     </div>
 
-    <p v-if="librarianStore.state === 'error' && librarianStore.error" class="ai-librarian-error" role="alert">
+    <p v-if="librarianStore.error && (librarianStore.state === 'error' || librarianStore.isGenerating)" class="ai-librarian-error" role="alert">
       {{ librarianStore.error.message }}
     </p>
     <p v-else-if="librarianStore.state === 'empty'" class="ai-librarian-status">

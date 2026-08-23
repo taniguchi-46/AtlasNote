@@ -7,11 +7,16 @@ import { createPinia, setActivePinia } from 'pinia'
 
 const rootDir = process.cwd()
 const storePath = path.join(rootDir, 'src', 'stores', 'useAIChatStore.ts')
+const timelineUtilityPath = path.join(rootDir, 'src', 'utils', 'aiWorkspaceTimeline.ts')
 const outDir = path.join(rootDir, '.tmp', 'ai-chat-test')
 const outFile = path.join(outDir, 'useAIChatStore.mjs')
+const timelineUtilityOutFile = path.join(outDir, 'aiWorkspaceTimeline.mjs')
 const mockNotesFile = path.join(outDir, 'mock-notes.mjs')
 
-const storeSource = await readFile(storePath, 'utf8')
+const [storeSource, timelineUtilitySource] = await Promise.all([
+  readFile(storePath, 'utf8'),
+  readFile(timelineUtilityPath, 'utf8'),
+])
 assert.doesNotMatch(storeSource, /localStorage/, 'AI chat content and tool traces must remain memory-only')
 assert.match(storeSource, /ref<AIChatMode>\('ask'\)/, 'the chat store must use the Ask/Agent mode contract')
 assert.match(storeSource, /kind:\s*'active-note'/, 'the active note must have a distinct fixed-context kind')
@@ -35,12 +40,21 @@ const compiled = ts.transpileModule(
   },
 )
 await writeFile(outFile, compiled.outputText, 'utf8')
+const compiledTimelineUtility = ts.transpileModule(timelineUtilitySource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+  },
+  fileName: timelineUtilityPath,
+})
+await writeFile(timelineUtilityOutFile, compiledTimelineUtility.outputText, 'utf8')
 await writeFile(mockNotesFile, createMockNotesModule(), 'utf8')
 
 try {
   setActivePinia(createPinia())
   const mockNotes = await import(pathToFileURL(mockNotesFile).href)
   const { useAIChatStore } = await import(pathToFileURL(outFile).href)
+  const { recordAssistantTimelineFailure } = await import(pathToFileURL(timelineUtilityOutFile).href)
   const store = useAIChatStore()
 
   store.setActiveNoteContext({ id: 'active-note', title: '開いているノート' })
@@ -129,6 +143,17 @@ try {
   store.markAgentProposalStale('active-note', 2)
   assert.equal(store.timeline.at(-1)?.proposalState, 'applied', 'applied proposal must remain viewable after later revisions')
 
+  const failedProposalID = store.appendAgentProposalPlaceholder()
+  store.resolveAgentProposal(failedProposalID, '本文の変更を提案します。', proposal)
+  store.setAgentProposalState(failedProposalID, 'save-failure', '本文の保存に失敗しました。')
+  const failedProposal = store.timeline.find((entry) => entry.id === failedProposalID)
+  assert.equal(failedProposal?.proposalState, 'save-failure')
+  assert.deepEqual(
+    failedProposal?.proposal,
+    proposal,
+    'a save failure must retain the proposal payload for review and retry',
+  )
+
   const staleProposalID = store.appendAgentProposalPlaceholder()
   store.resolveAgentProposal(staleProposalID, '本文の変更を提案します。', proposal)
   store.markAgentProposalStale('active-note', 2)
@@ -196,6 +221,42 @@ try {
   assert.equal(limitStore.contextError, null, 'removing a context must clear the actionable limit error')
   assert.equal(limitStore.addNoteContext('limit-overflow', '上限内'), true)
   assert.equal(limitStore.contextError, null, 'a successful context addition must clear the prior error')
+
+  for (const failure of [
+    { code: 'AI_TIMEOUT', message: 'AI プロバイダーが時間内に応答しませんでした。' },
+    { code: 'AI_CANCELLED', message: 'AI処理をキャンセルしました。' },
+  ]) {
+    setActivePinia(createPinia())
+    const failureStore = useAIChatStore()
+    failureStore.setMode('agent')
+    failureStore.setDraft(`${failure.code}でも保持する下書き`)
+    const userEntryID = failureStore.appendUserMessage(`${failure.code}になるAgent要求`)
+    const proposalEntryID = failureStore.appendAgentProposalPlaceholder()
+    recordAssistantTimelineFailure({
+      errorMessage: failure.message,
+      tool: null,
+      agentProposalEntryID: proposalEntryID,
+      traceID: null,
+      removeTimelineEntry: (entryID) => failureStore.removeTimelineEntry(entryID),
+      appendError: (content, tool) => failureStore.appendError(content, tool),
+      updateTimelineEntry: (entryID, update) => failureStore.updateTimelineEntry(entryID, update),
+    })
+    assert.equal(failureStore.timeline.some((entry) => entry.id === proposalEntryID), false)
+    assert.deepEqual(
+      failureStore.timeline.map((entry) => [entry.id, entry.kind, entry.content]),
+      [
+        [userEntryID, 'message', `${failure.code}になるAgent要求`],
+        [failureStore.timeline[1].id, 'error', failure.message],
+      ],
+      `${failure.code} must retain the user entry and append one safe error`,
+    )
+    assert.equal(failureStore.draft, `${failure.code}でも保持する下書き`)
+    assert.equal(
+      failureStore.timeline.filter((entry) => entry.kind === 'error').length,
+      1,
+      `${failure.code} must append exactly one timeline error`,
+    )
+  }
 
   console.log('AI chat tests passed')
 } finally {

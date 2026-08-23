@@ -1,9 +1,11 @@
 package ai
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceReturnsValidatedAgentEditProposalWithoutPersistence(t *testing.T) {
@@ -118,6 +120,77 @@ func TestServiceRejectsExplicitlyUnsupportedAgentModel(t *testing.T) {
 	}
 	if adapter.structuredCalls != 0 {
 		t.Fatalf("unsupported agent made %d structured calls", adapter.structuredCalls)
+	}
+}
+
+func TestServiceStopsAgentOnContextCancellationAndClassifiesTimeout(t *testing.T) {
+	t.Run("context cancellation", func(t *testing.T) {
+		started := make(chan struct{}, 1)
+		adapter := &testV3TextAdapter{
+			testProviderAdapter: &testProviderAdapter{},
+			structured:          `{"message":"must not complete","hasProposal":false,"reason":"","before":"","after":""}`,
+			started:             started,
+			release:             make(chan struct{}),
+		}
+		service, db := newV3Service(t, adapter)
+		ctx, cancel := context.WithCancel(t.Context())
+		result := make(chan error, 1)
+		go func() {
+			_, err := service.RunAssistant(ctx, validAgentAssistantInput())
+			result <- err
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("Agent request did not reach the provider adapter")
+		}
+		cancel()
+		select {
+		case err := <-result:
+			if !errors.Is(err, ErrProviderUnavailable) {
+				t.Fatalf("canceled Agent error = %v, want safe provider error", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("canceled Agent request did not finish")
+		}
+		if !service.tryStartGeneration() {
+			t.Fatal("canceled Agent kept the app-wide generation lock")
+		}
+		service.finishGeneration()
+		assertAIExecutionHasNoPersistentSideEffects(t, db)
+	})
+
+	t.Run("provider deadline", func(t *testing.T) {
+		adapter := &testV3TextAdapter{
+			testProviderAdapter: &testProviderAdapter{},
+			structuredErr:       context.DeadlineExceeded,
+		}
+		service, db := newV3Service(t, adapter)
+
+		_, err := service.RunAssistant(t.Context(), validAgentAssistantInput())
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("timed out Agent error = %v, want ErrTimeout", err)
+		}
+		if adapter.structuredCalls != 1 {
+			t.Fatalf("timed out Agent structured calls = %d, want 1", adapter.structuredCalls)
+		}
+		assertAIExecutionHasNoPersistentSideEffects(t, db)
+	})
+}
+
+func validAgentAssistantInput() AssistantInput {
+	return AssistantInput{
+		ProviderID: ProviderOpenRouter,
+		ModelID:    "openai/test",
+		Kind:       AssistantKindQA,
+		Mode:       ChatModeAgent,
+		Question:   "Change it",
+		NoteIDs:    []string{"note-1"},
+		ExpectedSources: []AIHistorySource{
+			{NoteID: "note-1", InputRevision: 4},
+		},
+		AgentTarget: &AgentEditTarget{NoteID: "note-1", BaseRevision: 4},
 	}
 }
 

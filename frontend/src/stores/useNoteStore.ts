@@ -733,7 +733,9 @@ export const useNoteStore = defineStore('notes', () => {
           })
         }
         applyPersistedNote(updated)
-        if (!pendingDraft) {
+        const isTargetStillActive = activeNote.value?.id === noteId
+          && activeNote.value.revision === updated.revision
+        if (!pendingDraft && isTargetStillActive) {
           agentEditorHighlight.value = {
             id: ++nextAgentEditorHighlightId,
             noteId,

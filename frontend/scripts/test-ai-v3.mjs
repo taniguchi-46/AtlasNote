@@ -70,6 +70,8 @@ let source = {
 }
 let pendingAssistant
 let assistantProposal
+const assistantErrors = []
+const writingErrors = []
 
 export function setSource(nextSource) {
   source = clone(nextSource)
@@ -86,6 +88,14 @@ export function setAssistantProposal(nextProposal) {
   assistantProposal = nextProposal ? clone(nextProposal) : undefined
 }
 
+export function queueAssistantError(error) {
+  assistantErrors.push(clone(error))
+}
+
+export function queueWritingError(error) {
+  writingErrors.push(clone(error))
+}
+
 export async function prepareAIContext(input) {
   calls.context.push(clone(input))
   return { sources: [clone(source)] }
@@ -98,6 +108,8 @@ export async function runAIAssistant(input) {
     pendingAssistant = undefined
     await deferred.promise
   }
+  const error = assistantErrors.shift()
+  if (error) return { error }
   return {
     result: {
       providerID: input.providerID,
@@ -153,6 +165,8 @@ export async function deleteAllAIHistories() {
 
 export async function runAIWriting(input) {
   calls.writing.push(clone(input))
+  const error = writingErrors.shift()
+  if (error) return { error }
   return {
     result: {
       providerID: input.providerID,
@@ -278,6 +292,41 @@ try {
   assert.equal(assistant.state, 'idle')
   assert.deepEqual(assistant.messages, [])
 
+  for (const failure of [
+    {
+      code: 'AI_TIMEOUT',
+      message: 'AI プロバイダーが時間内に応答しませんでした。',
+      question: 'タイムアウトするAgent要求',
+    },
+    {
+      code: 'AI_CANCELLED',
+      message: 'AI処理をキャンセルしました。',
+      question: 'キャンセル済みのAgent要求',
+    },
+  ]) {
+    const callsBeforeFailure = mock.calls.assistant.length
+    const savesBeforeFailure = mock.calls.saveHistory.length
+    mock.queueAssistantError({ code: failure.code, raw: `raw-${failure.code}` })
+    assert.equal(await assistant.ask({
+      kind: 'qa',
+      mode: 'agent',
+      question: failure.question,
+      noteIDs: ['note-1'],
+      searchQuery: '',
+      includeBacklinks: false,
+      agentTarget: { noteID: 'note-1', baseRevision: 1 },
+    }), false)
+    assert.equal(mock.calls.assistant.length, callsBeforeFailure + 1, `${failure.code} must not retry automatically`)
+    assert.equal(mock.calls.saveHistory.length, savesBeforeFailure, `${failure.code} must not save history`)
+    assert.equal(assistant.state, 'error')
+    assert.equal(assistant.error?.code, failure.code)
+    assert.equal(assistant.error?.message, failure.message)
+    assert.doesNotMatch(assistant.error?.message ?? '', new RegExp(`raw-${failure.code}`))
+    assert.deepEqual(assistant.messages, [{ role: 'user', content: failure.question }])
+    assert.equal(assistant.proposal, null, `${failure.code} must not retain an Agent proposal`)
+    assistant.clearConversation()
+  }
+
   assert.equal(await assistant.previewContext({
     kind: 'qa',
     question: '確認したいこと',
@@ -378,6 +427,29 @@ try {
     includeBacklinks: false,
   }), true)
   assert.equal(mock.calls.writing.length, 0, 'writing context preview must not call the provider')
+  const artifactSavesBeforeTimeout = mock.calls.saveArtifact.length
+  mock.queueWritingError({ code: 'AI_TIMEOUT', raw: 'raw-writing-timeout' })
+  assert.equal(await writing.generate({
+    providerID: 'openrouter',
+    modelID: 'openai/gpt-test',
+    kind: 'document',
+    instruction: 'タイムアウトする文章作成',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), false)
+  assert.equal(writing.state, 'error')
+  assert.equal(writing.error?.code, 'AI_TIMEOUT')
+  assert.equal(writing.error?.message, 'AI プロバイダーが時間内に応答しませんでした。')
+  assert.doesNotMatch(writing.error?.message ?? '', /raw-writing-timeout/)
+  assert.equal(writing.content, '')
+  assert.equal(mock.calls.saveArtifact.length, artifactSavesBeforeTimeout)
+  writing.clear()
+  assert.equal(await writing.previewContext({
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
   assert.equal(await writing.generate({
     providerID: 'openrouter',
     modelID: 'openai/gpt-test',

@@ -34,6 +34,10 @@ type appTestAIProviderAdapter struct {
 	listErr          error
 	summaryResult    aiservice.SummaryResult
 	summaryErr       error
+	textResult       aiservice.TextGenerationResult
+	textErr          error
+	textInput        aiservice.TextGenerationInput
+	textCalls        int
 	structuredResult string
 	structuredErr    error
 	structuredInput  aiservice.StructuredGenerationInput
@@ -56,6 +60,15 @@ func (a *appTestAIProviderAdapter) GenerateSummary(context.Context, aiservice.Pr
 		return aiservice.SummaryResult{}, a.summaryErr
 	}
 	return a.summaryResult, nil
+}
+
+func (a *appTestAIProviderAdapter) GenerateText(_ context.Context, _ aiservice.ProviderID, _ string, input aiservice.TextGenerationInput) (aiservice.TextGenerationResult, error) {
+	a.textCalls++
+	a.textInput = input
+	if a.textErr != nil {
+		return aiservice.TextGenerationResult{}, a.textErr
+	}
+	return a.textResult, nil
 }
 
 func (a *appTestAIProviderAdapter) GenerateStructured(_ context.Context, _ aiservice.ProviderID, _ string, input aiservice.StructuredGenerationInput, _ func(string) error) (string, error) {
@@ -590,6 +603,165 @@ func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
 	}
 }
 
+func TestAppAIRecordLifecycleUsesLocalDatabaseWithoutChangingSyncState(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	if status := app.GetStartupStatus(); !status.Ready {
+		t.Fatal("test app is not ready")
+	}
+
+	created, err := app.CreateNote(note.CreateInput{
+		Title:   "AI record source",
+		Content: "local source content",
+	})
+	if err != nil {
+		t.Fatalf("create AI record source note: %v", err)
+	}
+
+	captureSyncState := func() []string {
+		return []string{
+			appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_connections ORDER BY id"),
+			appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_outbox ORDER BY sequence"),
+			appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_item_states ORDER BY entity_key"),
+			appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_snapshots ORDER BY snapshot_id"),
+			appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_conflicts ORDER BY conflict_id"),
+		}
+	}
+
+	syncBeforeSave := captureSyncState()
+	historyResponse := app.SaveAIHistory(aiservice.SaveAIHistoryInput{
+		Kind:       aiservice.AssistantKindQA,
+		Title:      "Saved local Q&A",
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/local-test",
+		Messages: []aiservice.AIConversationMessage{
+			{Role: "user", Content: "Local question"},
+			{Role: "assistant", Content: "Local answer"},
+		},
+		Sources: []aiservice.AIHistorySource{{NoteID: created.ID, InputRevision: created.Revision}},
+	})
+	if historyResponse.Error != nil || historyResponse.History == nil || historyResponse.History.ID == "" {
+		t.Fatalf("save AI history through App API = %#v", historyResponse)
+	}
+	historyID := historyResponse.History.ID
+
+	artifactResponse := app.SaveAIArtifact(aiservice.SaveAIArtifactInput{
+		Kind:       aiservice.ArtifactKindDocument,
+		Title:      "Saved local document",
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/local-test",
+		Content:    "Local generated document",
+		Sources:    []aiservice.AIHistorySource{{NoteID: created.ID, InputRevision: created.Revision}},
+	})
+	if artifactResponse.Error != nil || artifactResponse.Artifact == nil || artifactResponse.Artifact.ID == "" {
+		t.Fatalf("save AI artifact through App API = %#v", artifactResponse)
+	}
+	artifactID := artifactResponse.Artifact.ID
+
+	histories := app.ListAIHistories()
+	if histories.Error != nil || len(histories.Items) != 1 || histories.Items[0].ID != historyID {
+		t.Fatalf("list AI histories through App API = %#v", histories)
+	}
+	artifacts := app.ListAIArtifacts()
+	if artifacts.Error != nil || len(artifacts.Items) != 1 || artifacts.Items[0].ID != artifactID {
+		t.Fatalf("list AI artifacts through App API = %#v", artifacts)
+	}
+	if fetched := app.GetAIHistory(historyID); fetched.Error != nil || fetched.History == nil || fetched.History.Status != aiservice.AIRecordStatusSaved {
+		t.Fatalf("get saved AI history through App API = %#v", fetched)
+	}
+	if fetched := app.GetAIArtifact(artifactID); fetched.Error != nil || fetched.Artifact == nil || fetched.Artifact.Status != aiservice.AIRecordStatusSaved {
+		t.Fatalf("get saved AI artifact through App API = %#v", fetched)
+	}
+	if syncAfterSave := captureSyncState(); !reflect.DeepEqual(syncAfterSave, syncBeforeSave) {
+		t.Fatal("saving or reading local AI records changed WebDAV sync state")
+	}
+
+	nextContent := "local source content after AI save"
+	expectedRevision := created.Revision
+	updatedResult, err := app.UpdateNote(created.ID, note.UpdateInput{
+		Content:          &nextContent,
+		ExpectedRevision: &expectedRevision,
+	})
+	if err != nil || updatedResult.Note == nil || updatedResult.Conflict != nil {
+		t.Fatalf("update source note after AI save = %#v, %v", updatedResult, err)
+	}
+	updated := updatedResult.Note
+	if fetched := app.GetAIHistory(historyID); fetched.Error != nil || fetched.History == nil || fetched.History.Status != aiservice.AIRecordStatusStale {
+		t.Fatalf("get stale AI history through App API = %#v", fetched)
+	}
+	if fetched := app.GetAIArtifact(artifactID); fetched.Error != nil || fetched.Artifact == nil || fetched.Artifact.Status != aiservice.AIRecordStatusStale {
+		t.Fatalf("get stale AI artifact through App API = %#v", fetched)
+	}
+
+	deletedNote, err := app.DeleteNote(created.ID, note.DeleteInput{ExpectedRevision: updated.Revision})
+	if err != nil || !deletedNote.Deleted || deletedNote.Conflict != nil {
+		t.Fatalf("delete source note for orphaned AI records = %#v, %v", deletedNote, err)
+	}
+	if fetched := app.GetAIHistory(historyID); fetched.Error != nil || fetched.History == nil || fetched.History.Status != aiservice.AIRecordStatusOrphaned {
+		t.Fatalf("get orphaned AI history through App API = %#v", fetched)
+	}
+	if fetched := app.GetAIArtifact(artifactID); fetched.Error != nil || fetched.Artifact == nil || fetched.Artifact.Status != aiservice.AIRecordStatusOrphaned {
+		t.Fatalf("get orphaned AI artifact through App API = %#v", fetched)
+	}
+
+	syncBeforeDelete := captureSyncState()
+	if deleted := app.DeleteAIHistory(historyID); deleted.Error != nil || !deleted.Deleted {
+		t.Fatalf("delete AI history through App API = %#v", deleted)
+	}
+	if deleted := app.DeleteAIArtifact(artifactID); deleted.Error != nil || !deleted.Deleted {
+		t.Fatalf("delete AI artifact through App API = %#v", deleted)
+	}
+	if missing := app.GetAIHistory(historyID); missing.Error == nil || missing.Error.Code != aiservice.ErrorCodeHistoryNotFound || missing.History != nil {
+		t.Fatalf("get deleted AI history through App API = %#v", missing)
+	}
+	if missing := app.GetAIArtifact(artifactID); missing.Error == nil || missing.Error.Code != aiservice.ErrorCodeArtifactNotFound || missing.Artifact != nil {
+		t.Fatalf("get deleted AI artifact through App API = %#v", missing)
+	}
+
+	secondHistory := app.SaveAIHistory(aiservice.SaveAIHistoryInput{
+		Kind:       aiservice.AssistantKindBrainstorm,
+		Title:      "Second local history",
+		ProviderID: aiservice.ProviderGemini,
+		ModelID:    "gemini-local-test",
+		Messages: []aiservice.AIConversationMessage{
+			{Role: "user", Content: "Second question"},
+			{Role: "assistant", Content: "Second answer"},
+		},
+	})
+	if secondHistory.Error != nil || secondHistory.History == nil {
+		t.Fatalf("save source-free AI history through App API = %#v", secondHistory)
+	}
+	secondArtifact := app.SaveAIArtifact(aiservice.SaveAIArtifactInput{
+		Kind:       aiservice.ArtifactKindREADME,
+		Title:      "Second local artifact",
+		ProviderID: aiservice.ProviderGemini,
+		ModelID:    "gemini-local-test",
+		Content:    "Second local content",
+	})
+	if secondArtifact.Error != nil || secondArtifact.Artifact == nil {
+		t.Fatalf("save source-free AI artifact through App API = %#v", secondArtifact)
+	}
+	if deleted := app.DeleteAllAIHistories(); deleted.Error != nil || !deleted.Deleted {
+		t.Fatalf("delete all AI histories through App API = %#v", deleted)
+	}
+	if deleted := app.DeleteAllAIArtifacts(); deleted.Error != nil || !deleted.Deleted {
+		t.Fatalf("delete all AI artifacts through App API = %#v", deleted)
+	}
+	if listed := app.ListAIHistories(); listed.Error != nil || len(listed.Items) != 0 {
+		t.Fatalf("AI histories after delete all = %#v", listed)
+	}
+	if listed := app.ListAIArtifacts(); listed.Error != nil || len(listed.Items) != 0 {
+		t.Fatalf("AI artifacts after delete all = %#v", listed)
+	}
+	if syncAfterDelete := captureSyncState(); !reflect.DeepEqual(syncAfterDelete, syncBeforeDelete) {
+		t.Fatal("deleting local AI records changed WebDAV sync state")
+	}
+}
+
 func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
@@ -613,6 +785,7 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 		credential.NewManager(credential.NewSessionStore()),
 		adapter,
 	)
+	app.aiService.SetNoteContextProvider(aiservice.NewNoteContextProvider(app.notes))
 
 	syncRepository := syncservice.NewRepository(app.db)
 	if err := syncRepository.SaveConnection(t.Context(), syncservice.Connection{
@@ -706,6 +879,59 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 		t.Fatal("failed AI summary exposed a synthetic marker")
 	}
 
+	adapter.textErr = errors.New("assistant and writing provider failure " + providerErrorMarker)
+	assistantFailure := app.RunAIAssistant(aiservice.AssistantInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/d07-summary-model",
+		Kind:       aiservice.AssistantKindQA,
+		Mode:       aiservice.ChatModeAsk,
+		Question:   "Can local features continue?",
+		NoteIDs:    []string{created.ID},
+	})
+	if assistantFailure.Error == nil || assistantFailure.Error.Code != aiservice.ErrorCodeProviderUnavailable || assistantFailure.Result != nil {
+		t.Fatalf("failed AI assistant response = %#v", assistantFailure)
+	}
+	writingFailure := app.RunAIWriting(aiservice.WritingInput{
+		ProviderID:  aiservice.ProviderOpenRouter,
+		ModelID:     "openai/d07-summary-model",
+		Kind:        aiservice.WritingKindDocument,
+		Instruction: "Create a local-only failure fixture",
+		NoteIDs:     []string{created.ID},
+	})
+	if writingFailure.Error == nil || writingFailure.Error.Code != aiservice.ErrorCodeProviderUnavailable || writingFailure.Result != nil {
+		t.Fatalf("failed AI writing response = %#v", writingFailure)
+	}
+
+	adapter.structuredErr = errors.New("agent provider failure " + providerErrorMarker)
+	agentFailure := app.RunAIAssistant(aiservice.AssistantInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/d07-summary-model",
+		Kind:       aiservice.AssistantKindQA,
+		Mode:       aiservice.ChatModeAgent,
+		Question:   "Change the note",
+		NoteIDs:    []string{created.ID},
+		ExpectedSources: []aiservice.AIHistorySource{
+			{NoteID: created.ID, InputRevision: before.Note.Revision},
+		},
+		AgentTarget: &aiservice.AgentEditTarget{NoteID: created.ID, BaseRevision: before.Note.Revision},
+	})
+	if agentFailure.Error == nil || agentFailure.Error.Code != aiservice.ErrorCodeProviderUnavailable || agentFailure.Result != nil {
+		t.Fatalf("failed AI Agent response = %#v", agentFailure)
+	}
+	for name, response := range map[string]any{
+		"assistant": assistantFailure,
+		"writing":   writingFailure,
+		"agent":     agentFailure,
+	} {
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("serialize failed AI %s response: %v", name, err)
+		}
+		if strings.Contains(string(encoded), credentialMarker) || strings.Contains(string(encoded), providerErrorMarker) {
+			t.Fatalf("failed AI %s response exposed a synthetic marker", name)
+		}
+	}
+
 	after := captureAppTestAIInvariantSnapshot(t, app, created.ID, markdownPath)
 	if after.Note.Content != before.Note.Content || after.Note.Revision != before.Note.Revision || !bytes.Equal(after.Markdown, before.Markdown) {
 		t.Fatal("AI operations changed the local note or Markdown")
@@ -735,6 +961,38 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 	}
 	if strings.Contains(string(currentSettingsJSON), credentialMarker) || strings.Contains(string(currentSettingsJSON), summaryMarker) || strings.Contains(string(currentSettingsJSON), providerErrorMarker) {
 		t.Fatal("persisted AI settings exposed a synthetic marker")
+	}
+
+	continuedContent := "d07 local continuation after provider failure"
+	expectedRevision := after.Note.Revision
+	continuedResult, err := app.UpdateNote(created.ID, note.UpdateInput{
+		Content:          &continuedContent,
+		ExpectedRevision: &expectedRevision,
+	})
+	if err != nil || continuedResult.Note == nil || continuedResult.Conflict != nil {
+		t.Fatalf("update local note after AI failure = %#v, %v", continuedResult, err)
+	}
+	if continuedResult.Note.Content != continuedContent || continuedResult.Note.Revision != expectedRevision+1 {
+		t.Fatalf("local note after AI failure = %#v", continuedResult.Note)
+	}
+	continuedMarkdown, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatalf("read Markdown after AI failure: %v", err)
+	}
+	if !bytes.Equal(continuedMarkdown, []byte(continuedContent)) {
+		t.Fatalf("Markdown after AI failure = %q, want %q", continuedMarkdown, continuedContent)
+	}
+	continuedSearch, err := app.SearchNotes(note.SearchInput{Query: "continuation"})
+	if err != nil || continuedSearch.Error != nil || len(continuedSearch.Items) != 1 || continuedSearch.Items[0].Note.ID != created.ID {
+		t.Fatalf("search after AI failure = %#v, %v", continuedSearch, err)
+	}
+	continuedSyncStatus, err := app.GetSyncStatus()
+	if err != nil || continuedSyncStatus.OutboxCount == 0 {
+		t.Fatalf("sync status after AI failure = %#v, %v", continuedSyncStatus, err)
+	}
+	continuedSyncOutbox := appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_outbox ORDER BY sequence")
+	if continuedSyncOutbox == after.SyncOutbox {
+		t.Fatal("local update after AI failure did not advance the normal sync outbox")
 	}
 }
 

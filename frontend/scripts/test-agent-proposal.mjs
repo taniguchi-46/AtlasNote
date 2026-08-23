@@ -34,7 +34,9 @@ assert.match(noteStoreSource, /return 'save-failure'/)
 assert.match(noteStoreSource, /agentEditorHighlight/)
 assert.match(noteStoreSource, /start: patched\.range\.start/)
 assert.match(noteStoreSource, /end: patched\.range\.end/)
-assert.match(noteStoreSource, /if \(!pendingDraft\) \{[\s\S]*?agentEditorHighlight\.value =/)
+assert.match(noteStoreSource, /const isTargetStillActive = activeNote\.value\?\.id === noteId/)
+assert.match(noteStoreSource, /activeNote\.value\.revision === updated\.revision/)
+assert.match(noteStoreSource, /if \(!pendingDraft && isTargetStillActive\) \{[\s\S]*?agentEditorHighlight\.value =/)
 assert.match(noteStoreSource, /async function selectNote[\s\S]*?clearAgentEditorHighlight\(\)/)
 assert.match(noteStoreSource, /async function newNote[\s\S]*?clearAgentEditorHighlight\(\)/)
 const agentApplyStart = noteStoreSource.indexOf('async function applyAgentEditProposal')
@@ -274,7 +276,10 @@ try {
   testEditorHighlightUtilities(createAgentEditorTextHighlight, findChangedTopLevelBlockRange)
 
   await testAgentSavePublishesHighlight()
+  await testAgentInvalidStateDoesNotStartSave()
+  await testAgentRevisionConflictDoesNotPublishHighlight()
   await testAgentSaveRetainsConcurrentDraft()
+  await testAgentSaveAfterNoteSwitchDoesNotPublishHighlight()
   await testAgentSaveFailureDoesNotPublishHighlight()
 
   console.log('Agent proposal tests passed')
@@ -505,6 +510,101 @@ async function testAgentSavePublishesHighlight() {
   assert.equal(mockNotes.calls.updateNote.length, 1)
 }
 
+async function testAgentInvalidStateDoesNotStartSave() {
+  const targetNote = {
+    id: 'note-preflight',
+    notebookId: null,
+    title: '事前検証対象',
+    content: '変更前',
+    isFavorite: false,
+    isPinned: false,
+    isTrashed: false,
+    revision: 2,
+    createdAt: '2026-08-23T00:00:00Z',
+    updatedAt: '2026-08-23T00:00:00Z',
+  }
+  const proposal = {
+    targetNoteID: targetNote.id,
+    targetTitle: targetNote.title,
+    baseRevision: targetNote.revision,
+    reason: '事前検証',
+    before: '変更前',
+    after: '変更後',
+    changedFields: ['content'],
+  }
+  const cases = [
+    {
+      name: 'active note switched before apply',
+      activeNote: { ...targetNote, id: 'different-note' },
+      proposal,
+    },
+    {
+      name: 'persisted revision changed before apply',
+      activeNote: { ...targetNote, revision: 3 },
+      proposal,
+    },
+    {
+      name: 'proposal hunk is not in the current body',
+      activeNote: targetNote,
+      proposal: { ...proposal, before: '存在しない変更前' },
+    },
+  ]
+
+  for (const testCase of cases) {
+    setActivePinia(createPinia())
+    const mockNotes = await import(pathToFileURL(mockNotesFile).href)
+    const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
+    mockNotes.calls.updateNote.length = 0
+    const noteStore = useNoteStore()
+    noteStore.activeNote = testCase.activeNote
+    noteStore.summaries = [testCase.activeNote]
+
+    assert.equal(await noteStore.applyAgentEditProposal(testCase.proposal), 'conflict', testCase.name)
+    assert.equal(mockNotes.calls.updateNote.length, 0, testCase.name)
+    assert.equal(noteStore.agentEditorHighlight, null, testCase.name)
+  }
+}
+
+async function testAgentRevisionConflictDoesNotPublishHighlight() {
+  setActivePinia(createPinia())
+  const mockNotes = await import(pathToFileURL(mockNotesFile).href)
+  const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
+  mockNotes.calls.updateNote.length = 0
+  const noteStore = useNoteStore()
+  const originalNote = {
+    id: 'note-cas-conflict',
+    notebookId: null,
+    title: 'CAS競合対象',
+    content: '変更前',
+    isFavorite: false,
+    isPinned: false,
+    isTrashed: false,
+    revision: 7,
+    createdAt: '2026-08-23T00:00:00Z',
+    updatedAt: '2026-08-23T00:00:00Z',
+  }
+  noteStore.activeNote = originalNote
+  noteStore.summaries = [originalNote]
+
+  const deferredUpdate = mockNotes.deferUpdate()
+  const applyPromise = noteStore.applyAgentEditProposal({
+    targetNoteID: originalNote.id,
+    targetTitle: originalNote.title,
+    baseRevision: originalNote.revision,
+    reason: 'CAS競合確認',
+    before: '変更前',
+    after: '変更後',
+    changedFields: ['content'],
+  })
+  await waitFor(() => mockNotes.calls.updateNote.length === 1)
+  deferredUpdate.reject(new mockNotes.NoteRevisionConflictError('revision conflict'))
+
+  assert.equal(await applyPromise, 'conflict')
+  assert.equal(noteStore.activeNote.content, originalNote.content)
+  assert.equal(noteStore.activeNote.revision, originalNote.revision)
+  assert.equal(noteStore.agentEditorHighlight, null)
+}
+
 async function testAgentSaveRetainsConcurrentDraft() {
   setActivePinia(createPinia())
   const mockNotes = await import(pathToFileURL(mockNotesFile).href)
@@ -605,6 +705,60 @@ async function testAgentSaveFailureDoesNotPublishHighlight() {
   assert.equal(await applyPromise, 'save-failure')
   assert.equal(noteStore.agentEditorHighlight, null)
   assert.equal(noteStore.activeNote.content, originalNote.content)
+}
+
+async function testAgentSaveAfterNoteSwitchDoesNotPublishHighlight() {
+  setActivePinia(createPinia())
+  const mockNotes = await import(pathToFileURL(mockNotesFile).href)
+  const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
+  mockNotes.calls.updateNote.length = 0
+  const noteStore = useNoteStore()
+  const targetNote = {
+    id: 'note-target',
+    notebookId: null,
+    title: '更新対象',
+    content: '変更前',
+    isFavorite: false,
+    isPinned: false,
+    isTrashed: false,
+    revision: 2,
+    createdAt: '2026-08-23T00:00:00Z',
+    updatedAt: '2026-08-23T00:00:00Z',
+  }
+  const switchedNote = {
+    ...targetNote,
+    id: 'note-switched',
+    title: '切替先',
+    content: '切替先の本文',
+    revision: 5,
+  }
+  noteStore.activeNote = targetNote
+  noteStore.summaries = [targetNote, switchedNote]
+
+  const deferredUpdate = mockNotes.deferUpdate()
+  const applyPromise = noteStore.applyAgentEditProposal({
+    targetNoteID: targetNote.id,
+    targetTitle: targetNote.title,
+    baseRevision: targetNote.revision,
+    reason: '切替境界の確認',
+    before: '変更前',
+    after: 'Agent変更後',
+    changedFields: ['content'],
+  })
+  await waitFor(() => mockNotes.calls.updateNote.length === 1)
+  noteStore.activeNote = switchedNote
+  deferredUpdate.resolve({
+    ...targetNote,
+    content: 'Agent変更後',
+    revision: 3,
+    updatedAt: '2026-08-23T00:01:00Z',
+  })
+
+  assert.equal(await applyPromise, 'applied')
+  assert.equal(noteStore.activeNote.id, switchedNote.id)
+  assert.equal(noteStore.activeNote.content, switchedNote.content)
+  assert.equal(noteStore.agentEditorHighlight, null)
+  assert.equal(noteStore.summaries.find((note) => note.id === targetNote.id)?.revision, 3)
 }
 
 async function waitFor(predicate) {

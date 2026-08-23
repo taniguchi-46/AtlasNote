@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import ts from 'typescript'
 
 const rootDir = process.cwd()
 const componentPath = (...parts) => path.join(rootDir, 'src', 'components', ...parts)
+const agentProposalPermissionPath = path.join(rootDir, 'src', 'utils', 'agentProposalPermission.ts')
+const workspaceTimelinePath = path.join(rootDir, 'src', 'utils', 'aiWorkspaceTimeline.ts')
 
 const [
   workspaceSource,
@@ -18,6 +21,8 @@ const [
   recordsSource,
   markdownPreviewSource,
   agentProposalCardSource,
+  agentProposalPermissionSource,
+  workspaceTimelineSource,
 ] = await Promise.all([
   readFile(componentPath('AIWorkspace.vue'), 'utf8'),
   readFile(componentPath('NoteEditor.vue'), 'utf8'),
@@ -31,6 +36,8 @@ const [
   readFile(componentPath('AIRecordsPanel.vue'), 'utf8'),
   readFile(componentPath('AIMarkdownPreview.vue'), 'utf8'),
   readFile(componentPath('AIAgentProposalCard.vue'), 'utf8'),
+  readFile(agentProposalPermissionPath, 'utf8'),
+  readFile(workspaceTimelinePath, 'utf8'),
 ])
 
 const workspaceTemplate = workspaceSource.slice(
@@ -278,11 +285,45 @@ assert.match(workspaceSource, /appendAgentProposalPlaceholder/)
 assert.match(workspaceSource, /resolveAgentProposal/)
 assert.match(workspaceSource, /applyAgentEditProposal/)
 assert.match(workspaceSource, /async function persistAgentProposal\(entryID: string, automatic = false\)/)
-assert.match(workspaceSource, /const agentEditPermission = settingsStore\.aiAgentEditPermission/)
 assert.match(workspaceSource, /submitPrompt\(prompt, agentEditPermission\)/)
-assert.match(workspaceSource, /agentEditPermission === 'auto-update'/)
-assert.match(workspaceSource, /persistAgentProposal\(agentProposalEntryID, true\)/)
+assert.match(
+  workspaceSource,
+  /const agentEditPermission = settingsStore\.aiAgentEditPermission[\s\S]*?runAgentProposalPermissionFlow\(\{[\s\S]*?permission: agentEditPermission,[\s\S]*?resolveProposal: \(entryID, content, proposal\) => \{\s*chatStore\.resolveAgentProposal\(entryID, content, proposal\)\s*\},/,
+)
+assert.match(workspaceSource, /autoApply: async \(entryID\) => persistAgentProposal\(entryID, true\)/)
+assert.match(agentProposalPermissionSource, /permission === 'auto-update'/)
+await testAgentProposalPermissionFlow(agentProposalPermissionSource)
 assert.match(workspaceSource, /Agentが本文を更新しました。変更前後の差分を確認できます。/)
+assert.match(
+  workspaceSource,
+  /recordAssistantTimelineFailure\(\{[\s\S]*?errorMessage: assistantStore\.error\.message,[\s\S]*?agentProposalEntryID,[\s\S]*?removeTimelineEntry:/,
+)
+assert.match(
+  workspaceSource,
+  /completeLibrarianTimelineTrace\(\{[\s\S]*?state,[\s\S]*?errorMessage: librarianStore\.error\?\.message,[\s\S]*?updateTimelineEntry:/,
+)
+assert.match(workspaceTimelineSource, /state === 'generating' \|\| state === 'partial' \|\| state === 'canceling'/)
+assert.match(workspaceTimelineSource, /agentProposalEntryID\) removeTimelineEntry\(agentProposalEntryID\)/)
+const persistAgentProposalStart = workspaceSource.indexOf('async function persistAgentProposal')
+const persistAgentProposalEnd = workspaceSource.indexOf('\nfunction discardAgentProposal', persistAgentProposalStart)
+assert.ok(
+  persistAgentProposalStart >= 0 && persistAgentProposalEnd > persistAgentProposalStart,
+  'the Agent proposal persistence boundary must remain inspectable',
+)
+const persistAgentProposalSource = workspaceSource.slice(
+  persistAgentProposalStart,
+  persistAgentProposalEnd,
+)
+assert.match(
+  persistAgentProposalSource,
+  /else \{[\s\S]*?setAgentProposalState\(\s*entryID,\s*'save-failure'/,
+  'a failed save outcome must move the proposal card to save-failure',
+)
+assert.match(
+  persistAgentProposalSource,
+  /catch \{[\s\S]*?setAgentProposalState\(\s*entryID,\s*'save-failure'/,
+  'a thrown save must move the proposal card to save-failure',
+)
 assert.match(
   workspaceSource,
   /outcome === 'applied-with-draft-conflict'[\s\S]*?setAgentProposalState\(\s*entryID,\s*'applied',[\s\S]*?適用中に入力されたローカル下書きを競合として保持しています。/,
@@ -536,3 +577,135 @@ assert.match(recordsSource, /removeAllHistories/)
 assert.match(recordsSource, /removeAllArtifacts/)
 
 console.log('AI workspace tests passed')
+
+async function testAgentProposalPermissionFlow(source) {
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: agentProposalPermissionPath,
+  })
+  const moduleURL = `data:text/javascript;base64,${Buffer.from(compiled.outputText, 'utf8').toString('base64')}`
+  const { runAgentProposalPermissionFlow } = await import(moduleURL)
+  const proposal = Object.freeze({
+    targetNoteID: 'note-1',
+    targetTitle: '対象ノート',
+    baseRevision: 4,
+    reason: '重複を減らすため',
+    before: '変更前',
+    after: '変更後',
+    affectedFields: ['content'],
+  })
+
+  function createHarness({
+    resultProposal = proposal,
+    submitted = true,
+    submitGate = null,
+    autoApplyState = 'applied',
+  } = {}) {
+    const calls = { submit: [], resolve: [], autoApply: [] }
+    const events = []
+    const entry = {
+      id: 'proposal-1',
+      kind: 'agent-proposal',
+      content: '生成中',
+      proposal: null,
+      proposalState: 'generating',
+    }
+
+    return {
+      calls,
+      events,
+      entry,
+      input(permission) {
+        return {
+          prompt: '本文を整理して',
+          permission,
+          entryID: entry.id,
+          async submitPrompt(prompt, submittedPermission) {
+            calls.submit.push({ prompt, permission: submittedPermission })
+            if (submitGate) await submitGate
+            return submitted
+          },
+          readResult: () => ({
+            content: resultProposal ? '変更提案を生成しました。' : '変更提案を生成できませんでした。',
+            proposal: resultProposal,
+          }),
+          resolveProposal(entryID, content, resolvedProposal) {
+            calls.resolve.push(entryID)
+            events.push('resolve')
+            entry.content = content
+            entry.proposal = resolvedProposal
+            entry.kind = resolvedProposal ? 'agent-proposal' : 'message'
+            entry.proposalState = resolvedProposal ? 'awaiting-review' : undefined
+          },
+          async autoApply(entryID) {
+            calls.autoApply.push(entryID)
+            events.push('auto-apply')
+            entry.proposalState = autoApplyState
+            entry.content = autoApplyState === 'save-failure'
+              ? 'Agentによる本文の更新に失敗しました。'
+              : 'Agentが本文を更新しました。'
+          },
+        }
+      },
+    }
+  }
+
+  const reviewRequired = createHarness()
+  assert.equal(
+    await runAgentProposalPermissionFlow(reviewRequired.input('review-required')),
+    true,
+  )
+  assert.deepEqual(reviewRequired.calls.submit, [{
+    prompt: '本文を整理して',
+    permission: 'review-required',
+  }])
+  assert.equal(reviewRequired.calls.resolve.length, 1)
+  assert.equal(reviewRequired.calls.autoApply.length, 0, 'review-required must not save automatically')
+  assert.equal(reviewRequired.entry.proposalState, 'awaiting-review')
+
+  const autoUpdate = createHarness()
+  assert.equal(await runAgentProposalPermissionFlow(autoUpdate.input('auto-update')), true)
+  assert.deepEqual(autoUpdate.events, ['resolve', 'auto-apply'])
+  assert.equal(autoUpdate.calls.autoApply.length, 1, 'auto-update must save exactly once')
+  assert.equal(autoUpdate.entry.proposalState, 'applied')
+  assert.equal(autoUpdate.entry.proposal, proposal, 'the applied card must retain its proposal diff')
+
+  let releaseSubmission
+  const submissionGate = new Promise((resolve) => { releaseSubmission = resolve })
+  let selectedPermission = 'review-required'
+  const fixedPermission = createHarness({ submitGate: submissionGate })
+  const pendingSubmission = runAgentProposalPermissionFlow(fixedPermission.input(selectedPermission))
+  assert.equal(fixedPermission.calls.submit.length, 1, 'the deferred Agent request must have started')
+  selectedPermission = 'auto-update'
+  releaseSubmission()
+  assert.equal(await pendingSubmission, true)
+  assert.equal(selectedPermission, 'auto-update')
+  assert.equal(
+    fixedPermission.calls.autoApply.length,
+    0,
+    'a setting change while waiting must not replace the request-start permission',
+  )
+
+  const noProposal = createHarness({ resultProposal: null })
+  assert.equal(await runAgentProposalPermissionFlow(noProposal.input('auto-update')), true)
+  assert.equal(noProposal.calls.autoApply.length, 0, 'an empty Agent proposal must never save')
+  assert.equal(noProposal.entry.kind, 'message')
+
+  const rejectedSubmission = createHarness({ submitted: false })
+  assert.equal(await runAgentProposalPermissionFlow(rejectedSubmission.input('auto-update')), false)
+  assert.equal(rejectedSubmission.calls.resolve.length, 0)
+  assert.equal(rejectedSubmission.calls.autoApply.length, 0, 'a rejected or failed submission must never save')
+
+  const failedAutoUpdate = createHarness({ autoApplyState: 'save-failure' })
+  assert.equal(await runAgentProposalPermissionFlow(failedAutoUpdate.input('auto-update')), true)
+  assert.equal(failedAutoUpdate.calls.autoApply.length, 1)
+  assert.equal(failedAutoUpdate.entry.proposalState, 'save-failure')
+  assert.equal(
+    failedAutoUpdate.entry.proposal,
+    proposal,
+    'an auto-update failure must retain the proposal card for review',
+  )
+}

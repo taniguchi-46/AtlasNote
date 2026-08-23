@@ -116,6 +116,8 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
   let activeRequestID: string | null = null
   let unsubscribe: (() => void) | null = null
   let pendingEvents: LibrarianEvent[] = []
+  let cancelRequested = false
+  let startAttempt = 0
 
   function stopListening() {
     unsubscribe?.()
@@ -123,9 +125,11 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
   }
 
   function clear() {
+    startAttempt += 1
     stopListening()
     activeRequestID = null
     pendingEvents = []
+    cancelRequested = false
     stale.value = false
     targetNoteID.value = null
     baseRevision.value = null
@@ -147,13 +151,16 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
     if (event.requestID !== activeRequestID) return
 
     if (event.phase === 'partial') {
+      if (state.value === 'canceling') return
       partialText.value += event.partialText ?? ''
       state.value = 'partial'
       return
     }
     if (event.phase === 'completed') {
       result.value = event.result ?? { operation: event.operation, quality: 'empty', candidates: [] }
+      error.value = null
       state.value = result.value.quality === 'empty' ? 'empty' : 'success'
+      cancelRequested = false
       stopListening()
       activeRequestID = null
       return
@@ -161,6 +168,7 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
     if (event.phase === 'canceled') {
       error.value = createError('AI_CANCELLED')
       state.value = 'canceled'
+      cancelRequested = false
       stopListening()
       activeRequestID = null
       return
@@ -168,6 +176,7 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
 
     error.value = createError(event.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', event.error?.retryAfterSeconds)
     state.value = 'error'
+    cancelRequested = false
     stopListening()
     activeRequestID = null
   }
@@ -190,6 +199,7 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
       return false
     }
     clear()
+    const attempt = startAttempt
     targetNoteID.value = source.noteID
     baseRevision.value = source.baseRevision
     operation.value = source.operation
@@ -212,7 +222,12 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
 
     try {
       const response = await startAILibrarian(input)
+      if (attempt !== startAttempt) {
+        if (response.requestID) void cancelAILibrarian(response.requestID).catch(() => {})
+        return false
+      }
       if (response.error) {
+        cancelRequested = false
         error.value = createError(response.error.code, response.error.retryAfterSeconds)
         state.value = 'error'
         pendingEvents = []
@@ -220,6 +235,7 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
         return false
       }
       if (!response.requestID) {
+        cancelRequested = false
         error.value = createError('AI_PROVIDER_UNAVAILABLE')
         state.value = 'error'
         pendingEvents = []
@@ -227,11 +243,19 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
         return false
       }
       activeRequestID = response.requestID
+      const shouldCancel = cancelRequested
+      cancelRequested = false
       const queuedEvents = pendingEvents
       pendingEvents = []
       queuedEvents.forEach(handleEvent)
+      if (shouldCancel && activeRequestID) {
+        await cancel()
+        if (attempt !== startAttempt) return false
+      }
       return true
     } catch (cause) {
+      if (attempt !== startAttempt) return false
+      cancelRequested = false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
       pendingEvents = []
@@ -241,16 +265,33 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
   }
 
   async function cancel() {
-    if (!activeRequestID) return false
+    if (!activeRequestID) {
+      if (state.value === 'generating' || state.value === 'partial') {
+        cancelRequested = true
+        error.value = null
+        state.value = 'canceling'
+        return true
+      }
+      return state.value === 'canceling' && cancelRequested
+    }
+    const requestID = activeRequestID
+    error.value = null
     state.value = 'canceling'
     try {
-      await cancelAILibrarian(activeRequestID)
+      const response = await cancelAILibrarian(requestID)
+      if (activeRequestID !== requestID) {
+        return response.canceled
+      }
+      if (response.error || !response.canceled) {
+        error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
+        state.value = partialText.value ? 'partial' : 'generating'
+        return false
+      }
       return true
     } catch (cause) {
+      if (activeRequestID !== requestID) return false
       error.value = errorFromUnknown(cause)
-      state.value = 'error'
-      stopListening()
-      activeRequestID = null
+      state.value = partialText.value ? 'partial' : 'generating'
       return false
     }
   }
@@ -272,9 +313,12 @@ export const useAILibrarianStore = defineStore('ai-librarian', () => {
     if (targetNoteID.value !== noteID || baseRevision.value === null || baseRevision.value === revision) return
     if (!result.value && !isGenerating.value) return
     const requestID = activeRequestID
+    startAttempt += 1
+    cancelRequested = false
     activeRequestID = null
     pendingEvents = []
     stopListening()
+    error.value = null
     stale.value = true
     state.value = 'stale'
     if (requestID) void cancelAILibrarian(requestID).catch(() => {})

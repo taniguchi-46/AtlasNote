@@ -544,7 +544,7 @@ VALUES (1, 'https://dav.example.test', '/', 'alice', 'vault', 0, 'ref', 'now', '
 	}
 }
 
-func TestOpenMigratesVersionTenDatabaseWithAIProviderSettingsSchema(t *testing.T) {
+func TestOpenMigratesVersionTenDatabaseWithExistingDataAndAISchema(t *testing.T) {
 	t.Parallel()
 
 	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
@@ -557,6 +557,39 @@ func TestOpenMigratesVersionTenDatabaseWithAIProviderSettingsSchema(t *testing.T
 			_ = legacyDB.Close()
 			t.Fatalf("apply version ten migration %d: %v", index+1, err)
 		}
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO notebooks(id, parent_id, name, icon, created_at, updated_at)
+VALUES ('legacy-book', NULL, 'Legacy notebook', 'default:note', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z');
+INSERT INTO notes(
+	id, notebook_id, title, content_path, is_favorite, is_pinned, is_trashed, revision, created_at, updated_at
+)
+VALUES (
+	'legacy-note', 'legacy-book', 'Legacy note', 'legacy-note.md', 1, 0, 0, 4,
+	'2026-07-27T00:00:00Z', '2026-07-27T00:01:00Z'
+);
+INSERT INTO tags(id, name, normalized_name, created_at, updated_at)
+VALUES ('legacy-tag', 'Legacy tag', 'legacy tag', '2026-07-27T00:00:00Z', '2026-07-27T00:00:00Z');
+INSERT INTO note_tags(note_id, tag_id) VALUES ('legacy-note', 'legacy-tag');
+INSERT INTO sync_item_states(
+	entity_key, entity_type, local_object_hash, base_object_hash, remote_object_hash,
+	body_hash, metadata_hash, resolution_state, snapshot_json, updated_at
+)
+VALUES (
+	'note:legacy-note', 'note', 'local-hash', 'base-hash', 'remote-hash',
+	'body-hash', 'metadata-hash', 'synced', '{"legacy":true}', '2026-07-27T00:02:00Z'
+);
+INSERT INTO sync_outbox(
+	change_set_id, entity_key, entity_type, object_hash, base_manifest_hash, base_head_etag,
+	object_json, deleted, attempt_count, next_retry_at, failed_class, created_at
+)
+VALUES (
+	'legacy-change', 'note:legacy-note', 'note', 'object-hash', 'manifest-hash', 'head-etag',
+	'{"legacy":"outbox"}', 0, 2, '2026-07-27T00:03:00Z', 'network', '2026-07-27T00:02:00Z'
+);
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert version ten data: %v", err)
 	}
 	if _, err := legacyDB.Exec("PRAGMA user_version = 10"); err != nil {
 		_ = legacyDB.Close()
@@ -579,14 +612,63 @@ func TestOpenMigratesVersionTenDatabaseWithAIProviderSettingsSchema(t *testing.T
 	if userVersion != len(migrations) {
 		t.Fatalf("migrated user version = %d, want %d", userVersion, len(migrations))
 	}
-	var tableName string
-	if err := db.QueryRowContext(t.Context(), `
-SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ai_provider_settings'
-`).Scan(&tableName); err != nil {
-		t.Fatalf("read AI provider settings table: %v", err)
+	for _, table := range []string{
+		"ai_provider_settings",
+		"ai_histories",
+		"ai_history_messages",
+		"ai_history_sources",
+		"ai_artifacts",
+		"ai_artifact_sources",
+	} {
+		var tableName string
+		if err := db.QueryRowContext(t.Context(), `
+SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?
+`, table).Scan(&tableName); err != nil {
+			t.Fatalf("read %s table: %v", table, err)
+		}
+		if tableName != table {
+			t.Fatalf("AI table = %q, want %q", tableName, table)
+		}
 	}
-	if tableName != "ai_provider_settings" {
-		t.Fatalf("AI provider settings table = %q", tableName)
+
+	var title string
+	var notebookID string
+	var revision int
+	if err := db.QueryRowContext(t.Context(), `
+SELECT title, notebook_id, revision FROM notes WHERE id = 'legacy-note'
+`).Scan(&title, &notebookID, &revision); err != nil {
+		t.Fatalf("read migrated legacy note: %v", err)
+	}
+	if title != "Legacy note" || notebookID != "legacy-book" || revision != 4 {
+		t.Fatalf("migrated legacy note = title:%q notebook:%q revision:%d", title, notebookID, revision)
+	}
+	var relationCount int
+	if err := db.QueryRowContext(t.Context(), `
+SELECT COUNT(*) FROM note_tags WHERE note_id = 'legacy-note' AND tag_id = 'legacy-tag'
+`).Scan(&relationCount); err != nil {
+		t.Fatalf("read migrated legacy note tag: %v", err)
+	}
+	if relationCount != 1 {
+		t.Fatalf("migrated legacy note tag count = %d, want 1", relationCount)
+	}
+	var snapshotJSON string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT snapshot_json FROM sync_item_states WHERE entity_key = 'note:legacy-note'
+`).Scan(&snapshotJSON); err != nil {
+		t.Fatalf("read migrated legacy sync item: %v", err)
+	}
+	if snapshotJSON != `{"legacy":true}` {
+		t.Fatalf("migrated legacy sync snapshot = %q", snapshotJSON)
+	}
+	var objectJSON string
+	var attemptCount int
+	if err := db.QueryRowContext(t.Context(), `
+SELECT object_json, attempt_count FROM sync_outbox WHERE change_set_id = 'legacy-change'
+`).Scan(&objectJSON, &attemptCount); err != nil {
+		t.Fatalf("read migrated legacy outbox: %v", err)
+	}
+	if objectJSON != `{"legacy":"outbox"}` || attemptCount != 2 {
+		t.Fatalf("migrated legacy outbox = object:%q attempts:%d", objectJSON, attemptCount)
 	}
 }
 
@@ -717,6 +799,87 @@ INSERT INTO ai_artifacts(id, kind, title, provider_id, model_id, content, status
 VALUES ('summary-v13', 'summary', 'Summary', 'openrouter', 'test-model', '## 概要', 'saved', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z')
 `); err != nil {
 		t.Fatalf("insert summary artifact after migration: %v", err)
+	}
+}
+
+func TestMigrateVersionTwelveArtifactsRollsBackFailedV13Rebuild(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open fixture database: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	for index, migration := range migrations[:12] {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("apply version twelve migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := db.Exec(`
+INSERT INTO ai_artifacts(id, kind, title, provider_id, model_id, content, status, created_at, updated_at)
+VALUES ('rollback-artifact', 'document', 'Rollback artifact', 'openrouter', 'test-model', 'preserve rollback data', 'saved', '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z');
+INSERT INTO ai_artifact_sources(artifact_id, note_id, input_revision)
+VALUES ('rollback-artifact', 'deleted-source-note', 9);
+PRAGMA user_version = 12;
+`); err != nil {
+		t.Fatalf("insert version twelve rollback fixture: %v", err)
+	}
+
+	failingMigrations := append([]string(nil), migrations...)
+	failingMigrations[12] += `
+INSERT INTO table_that_does_not_exist(id) VALUES ('force-v13-rollback');
+`
+	if err := migrate(t.Context(), db, failingMigrations); err == nil {
+		t.Fatal("v13 artifact rebuild succeeded, want forced migration error")
+	}
+
+	var userVersion int
+	if err := db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&userVersion); err != nil {
+		t.Fatalf("read rolled back user version: %v", err)
+	}
+	if userVersion != 12 {
+		t.Fatalf("rolled back user version = %d, want 12", userVersion)
+	}
+	var kind string
+	var content string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT kind, content FROM ai_artifacts WHERE id = 'rollback-artifact'
+`).Scan(&kind, &content); err != nil {
+		t.Fatalf("read artifact after v13 rollback: %v", err)
+	}
+	if kind != "document" || content != "preserve rollback data" {
+		t.Fatalf("artifact after v13 rollback = kind:%q content:%q", kind, content)
+	}
+	var sourceRevision int
+	if err := db.QueryRowContext(t.Context(), `
+SELECT input_revision FROM ai_artifact_sources WHERE artifact_id = 'rollback-artifact'
+`).Scan(&sourceRevision); err != nil {
+		t.Fatalf("read artifact source after v13 rollback: %v", err)
+	}
+	if sourceRevision != 9 {
+		t.Fatalf("artifact source after v13 rollback = %d, want 9", sourceRevision)
+	}
+	var temporaryTableCount int
+	if err := db.QueryRowContext(t.Context(), `
+SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ai_artifacts_v13'
+`).Scan(&temporaryTableCount); err != nil {
+		t.Fatalf("check v13 temporary table after rollback: %v", err)
+	}
+	if temporaryTableCount != 0 {
+		t.Fatalf("v13 temporary table count after rollback = %d, want 0", temporaryTableCount)
+	}
+	var indexName string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_ai_artifacts_status_updated_at'
+`).Scan(&indexName); err != nil {
+		t.Fatalf("read restored artifact index after rollback: %v", err)
+	}
+	if indexName != "idx_ai_artifacts_status_updated_at" {
+		t.Fatalf("restored artifact index = %q", indexName)
 	}
 }
 

@@ -603,6 +603,11 @@ import { useAILibrarianStore } from '../stores/useAILibrarianStore'
 import { useAIWritingStore } from '../stores/useAIWritingStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import { runAgentProposalPermissionFlow } from '../utils/agentProposalPermission'
+import {
+  completeLibrarianTimelineTrace,
+  recordAssistantTimelineFailure,
+} from '../utils/aiWorkspaceTimeline'
 import AIMarkdownPreview from './AIMarkdownPreview.vue'
 import AISummaryPanel from './AISummaryPanel.vue'
 import AILibrarianPanel from './AILibrarianPanel.vue'
@@ -1366,22 +1371,39 @@ async function runComposerSubmission() {
       activeLibrarianTraceID.value = null
     }
   } else {
-    submitted = Boolean(await assistantPanel.value?.submitPrompt(prompt, agentEditPermission))
+    if (agentProposalEntryID) {
+      submitted = await runAgentProposalPermissionFlow({
+        prompt,
+        permission: agentEditPermission,
+        entryID: agentProposalEntryID,
+        submitPrompt: async (nextPrompt, permission) => Boolean(
+          await assistantPanel.value?.submitPrompt(nextPrompt, permission),
+        ),
+        readResult: () => {
+          const response = [...assistantStore.messages]
+            .reverse()
+            .find((message) => message.role === 'assistant')
+          return {
+            content: response?.content ?? '変更提案を生成できませんでした。',
+            proposal: assistantStore.proposal,
+          }
+        },
+        resolveProposal: (entryID, content, proposal) => {
+          chatStore.resolveAgentProposal(entryID, content, proposal)
+        },
+        autoApply: async (entryID) => persistAgentProposal(entryID, true),
+      })
+    } else {
+      submitted = Boolean(await assistantPanel.value?.submitPrompt(prompt, agentEditPermission))
+    }
     executionFailed = !submitted && Boolean(assistantStore.error)
     if (submitted) {
-      const response = [...assistantStore.messages]
-        .reverse()
-        .find((message) => message.role === 'assistant')
-      if (agentProposalEntryID) {
-        chatStore.resolveAgentProposal(
-          agentProposalEntryID,
-          response?.content ?? '変更提案を生成できませんでした。',
-          assistantStore.proposal,
-        )
-        if (assistantStore.proposal && agentEditPermission === 'auto-update') {
-          await persistAgentProposal(agentProposalEntryID, true)
-        }
-      } else if (response) {
+      const response = agentProposalEntryID
+        ? null
+        : [...assistantStore.messages]
+            .reverse()
+            .find((message) => message.role === 'assistant')
+      if (response) {
         chatStore.appendAssistantMessage(response.content, assistantStore.citations)
       }
       if (traceID) {
@@ -1391,14 +1413,15 @@ async function runComposerSubmission() {
         })
       }
     } else if (assistantStore.error) {
-      if (agentProposalEntryID) chatStore.removeTimelineEntry(agentProposalEntryID)
-      chatStore.appendError(assistantStore.error.message, tool ?? undefined)
-      if (traceID) {
-        chatStore.updateTimelineEntry(traceID, {
-          content: assistantStore.error.message,
-          status: 'error',
-        })
-      }
+      recordAssistantTimelineFailure({
+        errorMessage: assistantStore.error.message,
+        tool,
+        agentProposalEntryID,
+        traceID,
+        removeTimelineEntry: (entryID) => chatStore.removeTimelineEntry(entryID),
+        appendError: (content, errorTool) => chatStore.appendError(content, errorTool),
+        updateTimelineEntry: (entryID, update) => chatStore.updateTimelineEntry(entryID, update),
+      })
     }
   }
 
@@ -1584,14 +1607,13 @@ watch(
   () => librarianStore.state,
   (state) => {
     const traceID = activeLibrarianTraceID.value
-    if (!traceID || state === 'generating' || state === 'partial' || state === 'canceling') return
-    const successful = state === 'success' || state === 'empty'
-    chatStore.updateTimelineEntry(traceID, {
-      content: successful
-        ? state === 'empty' ? '候補は見つかりませんでした。' : '候補を生成しました。内容を確認してください。'
-        : librarianStore.error?.message ?? '候補生成を完了できませんでした。',
-      status: successful ? 'success' : 'error',
+    const completed = completeLibrarianTimelineTrace({
+      traceID,
+      state,
+      errorMessage: librarianStore.error?.message,
+      updateTimelineEntry: (entryID, update) => chatStore.updateTimelineEntry(entryID, update),
     })
+    if (!completed) return
     activeLibrarianTraceID.value = null
     void nextTick(scrollTimelineToEnd)
   },
