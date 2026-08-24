@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -304,6 +305,72 @@ func TestNormalizeLibrarianResultRejectsUnsafeOrOutOfPoolOutput(t *testing.T) {
 	low, err := normalizeLibrarianResult(input, `{"candidates":[{"noteId":"candidate-1","score":0.59}]}`)
 	if err != nil || low.Quality != librarianQualityLow {
 		t.Fatalf("low quality result = %#v, %v", low, err)
+	}
+}
+
+func TestLibrarianLargeCandidatePoolIsBoundedDeduplicatedAndSafelyNarrowed(t *testing.T) {
+	input := testLibrarianInput(LibrarianOperationRelated)
+	input.CandidateCount = LibrarianMaxCandidateCount
+	input.Candidates = make([]LibrarianCandidateContext, 0, LibrarianMaxCandidatePool)
+	for index := range LibrarianMaxCandidatePool {
+		input.Candidates = append(input.Candidates, LibrarianCandidateContext{
+			NoteID:  fmt.Sprintf("candidate-%02d", index),
+			Title:   fmt.Sprintf("Candidate %02d", index),
+			Snippet: strings.Repeat("候補", LibrarianSnippetLimitRunes),
+		})
+	}
+
+	normalized, err := normalizeLibrarianInput(input)
+	if err != nil {
+		t.Fatalf("normalize maximum candidate pool: %v", err)
+	}
+	if len(normalized.Candidates) != LibrarianMaxCandidatePool {
+		t.Fatalf("normalized candidate pool size = %d, want %d", len(normalized.Candidates), LibrarianMaxCandidatePool)
+	}
+	for _, candidate := range normalized.Candidates {
+		if len([]rune(candidate.Snippet)) != LibrarianSnippetLimitRunes {
+			t.Fatalf("candidate %q snippet runes = %d, want %d", candidate.NoteID, len([]rune(candidate.Snippet)), LibrarianSnippetLimitRunes)
+		}
+	}
+
+	overLimit := input
+	overLimit.Candidates = append(append([]LibrarianCandidateContext{}, input.Candidates...), LibrarianCandidateContext{NoteID: "candidate-over-limit"})
+	if _, err := normalizeLibrarianInput(overLimit); !errors.Is(err, ErrInputInvalid) {
+		t.Fatalf("over-limit candidate pool error = %v", err)
+	}
+
+	filtered := normalizeCandidateContexts(input.NoteID, []LibrarianCandidateContext{
+		{NoteID: " candidate-safe ", Title: " First candidate ", Snippet: " first snippet "},
+		{NoteID: "candidate-safe", Title: "duplicate must be removed"},
+		{NoteID: input.NoteID, Title: "current note must be removed"},
+		{NoteID: "", Title: "empty ID must be removed"},
+		{NoteID: "unsafe\nID", Title: "control character must be removed"},
+		{NoteID: "candidate-second", Title: " Second candidate ", Snippet: strings.Repeat("長", LibrarianSnippetLimitRunes+1)},
+	})
+	if len(filtered) != 2 || filtered[0].NoteID != "candidate-safe" || filtered[1].NoteID != "candidate-second" {
+		t.Fatalf("filtered candidate pool = %#v", filtered)
+	}
+	if filtered[0].Title != "First candidate" || filtered[0].Snippet != "first snippet" {
+		t.Fatalf("trimmed candidate = %#v", filtered[0])
+	}
+	if len([]rune(filtered[1].Snippet)) != LibrarianSnippetLimitRunes {
+		t.Fatalf("filtered snippet runes = %d, want %d", len([]rune(filtered[1].Snippet)), LibrarianSnippetLimitRunes)
+	}
+
+	unsafePool := input
+	unsafePool.Candidates = []LibrarianCandidateContext{
+		{NoteID: "candidate-safe"},
+		{NoteID: "candidate-safe"},
+		{NoteID: input.NoteID},
+	}
+	if _, err := normalizeLibrarianInput(unsafePool); !errors.Is(err, ErrInputInvalid) {
+		t.Fatalf("duplicate/current-note candidate pool error = %v", err)
+	}
+
+	narrowed := normalized
+	narrowed.CandidateCount = 2
+	if _, err := normalizeLibrarianResult(narrowed, `{"candidates":[{"noteId":"candidate-00","score":0.9},{"noteId":"candidate-01","score":0.8},{"noteId":"candidate-02","score":0.7}]}`); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatalf("result exceeding requested candidate count error = %v", err)
 	}
 }
 

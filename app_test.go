@@ -41,6 +41,7 @@ type appTestAIProviderAdapter struct {
 	textCalls        int
 	structuredResult string
 	structuredErr    error
+	structuredChunks []string
 	structuredInput  aiservice.StructuredGenerationInput
 	structuredCalls  int
 	started          chan<- struct{}
@@ -84,9 +85,19 @@ func (a *appTestAIProviderAdapter) GenerateText(ctx context.Context, _ aiservice
 	return a.textResult, nil
 }
 
-func (a *appTestAIProviderAdapter) GenerateStructured(_ context.Context, _ aiservice.ProviderID, _ string, input aiservice.StructuredGenerationInput, _ func(string) error) (string, error) {
+func (a *appTestAIProviderAdapter) GenerateStructured(ctx context.Context, _ aiservice.ProviderID, _ string, input aiservice.StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	a.structuredCalls++
 	a.structuredInput = input
+	for _, chunk := range a.structuredChunks {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if onChunk != nil {
+			if err := onChunk(chunk); err != nil {
+				return "", err
+			}
+		}
+	}
 	if a.structuredErr != nil {
 		return "", a.structuredErr
 	}
@@ -125,6 +136,13 @@ type appTestAIInvariantSnapshot struct {
 	SyncItemStates    string
 	SyncSnapshots     string
 	SyncConflicts     string
+	SearchIndex       string
+	SearchState       string
+	AIHistories       string
+	AIHistoryMessages string
+	AIHistorySources  string
+	AIArtifacts       string
+	AIArtifactSources string
 }
 
 func captureAppTestAIInvariantSnapshot(t *testing.T, app *App, noteID string, markdownPath string) appTestAIInvariantSnapshot {
@@ -166,6 +184,13 @@ func captureAppTestAIInvariantSnapshot(t *testing.T, app *App, noteID string, ma
 		SyncItemStates:    appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_item_states ORDER BY entity_key"),
 		SyncSnapshots:     appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_snapshots ORDER BY snapshot_id"),
 		SyncConflicts:     appTestRowsSnapshot(t, app.db, "SELECT * FROM sync_conflicts ORDER BY conflict_id"),
+		SearchIndex:       appTestRowsSnapshot(t, app.db, "SELECT rowid, note_id, title, body FROM note_search ORDER BY rowid"),
+		SearchState:       appTestRowsSnapshot(t, app.db, "SELECT * FROM note_search_state ORDER BY note_id"),
+		AIHistories:       appTestRowsSnapshot(t, app.db, "SELECT * FROM ai_histories ORDER BY id"),
+		AIHistoryMessages: appTestRowsSnapshot(t, app.db, "SELECT * FROM ai_history_messages ORDER BY history_id, sequence"),
+		AIHistorySources:  appTestRowsSnapshot(t, app.db, "SELECT * FROM ai_history_sources ORDER BY history_id, note_id"),
+		AIArtifacts:       appTestRowsSnapshot(t, app.db, "SELECT * FROM ai_artifacts ORDER BY id"),
+		AIArtifactSources: appTestRowsSnapshot(t, app.db, "SELECT * FROM ai_artifact_sources ORDER BY artifact_id, note_id"),
 	}
 }
 
@@ -864,6 +889,112 @@ func TestAppAIRecordLifecycleUsesLocalDatabaseWithoutChangingSyncState(t *testin
 	}
 	if syncAfterDelete := captureSyncState(); !reflect.DeepEqual(syncAfterDelete, syncBeforeDelete) {
 		t.Fatal("deleting local AI records changed WebDAV sync state")
+	}
+}
+
+func TestAppLibrarianExecutionKeepsV2OutputTransient(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	if status := app.GetStartupStatus(); !status.Ready {
+		t.Fatal("test app is not ready")
+	}
+
+	const candidateMarker = "v2-librarian-candidate-marker"
+	const chunkMarker = "v2-librarian-partial-marker"
+	const promptMarker = "v2-librarian-prompt-marker"
+	const resultMarker = "v2-librarian-result-marker"
+	adapter := &appTestAIProviderAdapter{
+		structuredResult: `{"candidates":[{"noteId":"` + candidateMarker + `","score":0.91,"reason":"` + resultMarker + `"}]}`,
+		structuredChunks: []string{chunkMarker},
+	}
+	app.aiService.Shutdown()
+	app.aiService = aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(app.db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+	app.aiService.SetNoteContextProvider(aiservice.NewNoteContextProvider(app.notes))
+
+	created, err := app.CreateNote(note.CreateInput{
+		Title:   "D-07 librarian invariant",
+		Content: "d07 stable librarian baseline",
+	})
+	if err != nil {
+		t.Fatalf("create librarian invariant note: %v", err)
+	}
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     "v2-librarian-session-only-key",
+		ModelID:    "openai/v2-librarian-test",
+	}); err != nil {
+		t.Fatalf("configure librarian invariant provider: %v", err)
+	}
+
+	markdownPath := filepath.Join(dataDir, "notes", created.ID+".md")
+	before := captureAppTestAIInvariantSnapshot(t, app, created.ID, markdownPath)
+	events := make(chan aiservice.LibrarianEvent, 4)
+	started, err := app.aiService.StartLibrarian(t.Context(), aiservice.LibrarianInput{
+		ProviderID:     aiservice.ProviderOpenRouter,
+		ModelID:        "openai/v2-librarian-test",
+		Operation:      aiservice.LibrarianOperationRelated,
+		NoteID:         created.ID,
+		BaseRevision:   created.Revision,
+		Title:          created.Title,
+		Content:        created.Content,
+		CandidateCount: 1,
+		Candidates: []aiservice.LibrarianCandidateContext{{
+			NoteID:  candidateMarker,
+			Title:   "Transient candidate",
+			Snippet: promptMarker,
+		}},
+	}, func(event aiservice.LibrarianEvent) {
+		events <- event
+	})
+	if err != nil || started.RequestID == "" {
+		t.Fatalf("start librarian invariant execution = %#v, %v", started, err)
+	}
+
+	partial := appTestReceiveLibrarianEvent(t, events)
+	if partial.RequestID != started.RequestID || partial.Phase != "partial" || partial.PartialText != chunkMarker {
+		t.Fatalf("librarian partial event = %#v", partial)
+	}
+	completed := appTestReceiveLibrarianEvent(t, events)
+	if completed.RequestID != started.RequestID || completed.Phase != "completed" || completed.Result == nil || len(completed.Result.Candidates) != 1 {
+		t.Fatalf("librarian completed event = %#v", completed)
+	}
+	if completed.Result.Candidates[0].NoteID != candidateMarker || completed.Result.Candidates[0].Reason != resultMarker {
+		t.Fatalf("librarian transient result = %#v", completed.Result)
+	}
+	if adapter.structuredCalls != 1 || !strings.Contains(adapter.structuredInput.Prompt, promptMarker) || !strings.Contains(adapter.structuredInput.Prompt, candidateMarker) {
+		t.Fatalf("librarian structured input = calls:%d input:%#v", adapter.structuredCalls, adapter.structuredInput)
+	}
+
+	after := captureAppTestAIInvariantSnapshot(t, app, created.ID, markdownPath)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("librarian execution changed a v2 persistence boundary\nbefore: %#v\nafter:  %#v", before, after)
+	}
+	for _, marker := range []string{candidateMarker, chunkMarker, promptMarker, resultMarker} {
+		if appTestDatabaseContainsMarker(t, app.db, marker) {
+			t.Fatalf("librarian marker %q was persisted in SQLite", marker)
+		}
+		if path := appTestFindMarkerInDataFiles(t, dataDir, marker); path != "" {
+			t.Fatalf("librarian marker %q was persisted in application data: %s", marker, path)
+		}
+	}
+}
+
+func appTestReceiveLibrarianEvent(t *testing.T, events <-chan aiservice.LibrarianEvent) aiservice.LibrarianEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for librarian event")
+		return aiservice.LibrarianEvent{}
 	}
 }
 

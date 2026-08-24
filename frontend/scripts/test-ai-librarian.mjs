@@ -8,19 +8,22 @@ import { createPinia, setActivePinia } from 'pinia'
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'stores', 'useAILibrarianStore.ts')
 const chatStorePath = path.join(rootDir, 'src', 'stores', 'useAIChatStore.ts')
+const noteStorePath = path.join(rootDir, 'src', 'stores', 'useNoteStore.ts')
 const timelineUtilityPath = path.join(rootDir, 'src', 'utils', 'aiWorkspaceTimeline.ts')
 const panelPath = path.join(rootDir, 'src', 'components', 'AILibrarianPanel.vue')
 const workspacePath = path.join(rootDir, 'src', 'components', 'AIWorkspace.vue')
 const outDir = path.join(rootDir, '.tmp', 'ai-librarian-test')
 const outFile = path.join(outDir, 'useAILibrarianStore.mjs')
 const chatStoreOutFile = path.join(outDir, 'useAIChatStore.mjs')
+const noteStoreOutFile = path.join(outDir, 'useNoteStore.mjs')
 const timelineUtilityOutFile = path.join(outDir, 'aiWorkspaceTimeline.mjs')
 
 await mkdir(outDir, { recursive: true })
 
-const [storeSource, chatStoreSource, timelineUtilitySource, panelSource, workspaceSource] = await Promise.all([
+const [storeSource, chatStoreSource, noteStoreSource, timelineUtilitySource, panelSource, workspaceSource] = await Promise.all([
   readFile(sourcePath, 'utf8'),
   readFile(chatStorePath, 'utf8'),
+  readFile(noteStorePath, 'utf8'),
   readFile(timelineUtilityPath, 'utf8'),
   readFile(panelPath, 'utf8'),
   readFile(workspacePath, 'utf8'),
@@ -47,6 +50,38 @@ const compiledChatStore = ts.transpileModule(
   },
 )
 await writeFile(chatStoreOutFile, compiledChatStore.outputText, 'utf8')
+for (const utilityName of ['agentEditProposal', 'noteAutoSave', 'noteOperationQueue']) {
+  const utilitySource = await readFile(path.join(rootDir, 'src', 'utils', `${utilityName}.ts`), 'utf8')
+  const compiledUtility = ts.transpileModule(utilitySource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  })
+  await writeFile(path.join(outDir, `${utilityName}.mjs`), compiledUtility.outputText, 'utf8')
+}
+const compiledNoteStore = ts.transpileModule(
+  noteStoreSource
+    .replace("from '../api/notes'", "from './mock-notes.mjs'")
+    .replace("from '../utils/latestRequestGuard'", "from './mock-note-utilities.mjs'")
+    .replace("from '../utils/noteAutoSave'", "from './noteAutoSave.mjs'")
+    .replace("from '../utils/noteOperationQueue'", "from './noteOperationQueue.mjs'")
+    .replace("from '../utils/requestCounter'", "from './mock-note-utilities.mjs'")
+    .replace("from '../utils/deleteNotesSequentially'", "from './mock-note-utilities.mjs'")
+    .replace("from '../utils/updateNotesSequentially'", "from './mock-note-utilities.mjs'")
+    .replace("from '../utils/agentEditProposal'", "from './agentEditProposal.mjs'")
+    .replace("from './useSettingsStore'", "from './mock-note-stores.mjs'")
+    .replace("from './useNotificationStore'", "from './mock-note-stores.mjs'")
+    .replace("from './useAppStore'", "from './mock-note-stores.mjs'"),
+  {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: noteStorePath,
+  },
+)
+await writeFile(noteStoreOutFile, compiledNoteStore.outputText, 'utf8')
 const compiledTimelineUtility = ts.transpileModule(timelineUtilitySource, {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
@@ -64,7 +99,91 @@ export function useAIStore() {
 }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-notes.mjs'), `
+export const calls = { updateNote: [] }
+let nextUpdate = null
+
+export class NoteRevisionConflictError extends Error {}
+
+export function resetNoteMock() {
+  calls.updateNote.length = 0
+  nextUpdate = null
+}
+
+export function queueUpdateResult(result) {
+  nextUpdate = { result }
+}
+
+export function queueUpdateError(error) {
+  nextUpdate = { error }
+}
+
+export async function updateNote(id, input) {
+  calls.updateNote.push({ id, input })
+  if (!nextUpdate) throw new Error('unexpected note update')
+  const update = nextUpdate
+  nextUpdate = null
+  if (update.error) throw update.error
+  return update.result
+}
+
 export async function listNotes() { return [] }
+export async function listNotesPage() {
+  return { items: [], page: 1, pageSize: 100, total: 0, hasNext: false }
+}
+export async function getNote() { throw new Error('unexpected note read') }
+export async function createNote() { throw new Error('unexpected note create') }
+export async function deleteNote() { throw new Error('unexpected note delete') }
+`, 'utf8')
+await writeFile(path.join(outDir, 'mock-note-utilities.mjs'), `
+export class NoteDeleteError extends Error {}
+
+export function createLatestRequestGuard() {
+  let version = 0
+  return {
+    begin() {
+      const requestVersion = ++version
+      return () => requestVersion === version
+    },
+  }
+}
+
+export function createRequestCounter(onChange) {
+  let count = 0
+  return {
+    begin() {
+      count += 1
+      onChange(count)
+      let ended = false
+      return () => {
+        if (ended) return
+        ended = true
+        count -= 1
+        onChange(count)
+      }
+    },
+    getCount: () => count,
+  }
+}
+
+export async function deleteNotesSequentially(ids, operation) {
+  for (const id of ids) await operation(id)
+  return ids
+}
+
+export async function updateNotesSequentially(ids, operation) {
+  for (const id of ids) await operation(id)
+  return ids
+}
+`, 'utf8')
+await writeFile(path.join(outDir, 'mock-note-stores.mjs'), `
+const notifications = { dismissBySource() {}, notify() {} }
+const settings = { editorFirstLineStyle: 'paragraph' }
+const app = { sortOption: '', sidebarSection: 'all' }
+
+export function useNotificationStore() { return notifications }
+export function useSettingsStore() { return settings }
+export function useAppStore() { return app }
+export function parseNoteSortOption() { return null }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai-librarian.mjs'), `
 export const calls = { start: [], cancel: [] }
@@ -151,6 +270,40 @@ const input = {
   candidates: [{ noteID: 'note-2', title: 'Candidate note' }],
 }
 
+const adoptSourceStart = panelSource.indexOf('async function adopt(candidate: LibrarianCandidate)')
+const adoptSourceEnd = panelSource.indexOf('\nfunction normalizeTagName', adoptSourceStart)
+assert.ok(
+  adoptSourceStart >= 0 && adoptSourceEnd > adoptSourceStart,
+  'the librarian candidate adoption boundary must remain inspectable',
+)
+const executableAdoptSource = panelSource
+  .slice(adoptSourceStart, adoptSourceEnd)
+  .replace('async function adopt(candidate: LibrarianCandidate)', 'async function adopt(candidate)')
+
+function createAdoptCandidate(noteStore, librarianStore) {
+  const createAdopt = new Function(
+    'noteStore',
+    'librarianStore',
+    'tagStore',
+    'notebookStore',
+    'candidateLabel',
+    'normalizeTagName',
+    'createNoteLinkHref',
+    'createNoteLinkMarkdown',
+    `"use strict"; return (${executableAdoptSource});`,
+  )
+  return createAdopt(
+    noteStore,
+    librarianStore,
+    { activeNoteTags: [], tags: [] },
+    { notebooks: [] },
+    (candidate) => candidate.value ?? candidate.name ?? candidate.noteID ?? '',
+    (value) => value.normalize('NFC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase(),
+    (noteID) => `atlasnote://note/${noteID}`,
+    (title, noteID) => `[${title}](atlasnote://note/${noteID})`,
+  )
+}
+
 try {
   assert.match(source, /onAILibrarianUpdate/, 'the store must subscribe to Wails librarian events')
   assert.doesNotMatch(source, /localStorage/, 'librarian state must remain in memory')
@@ -174,7 +327,9 @@ try {
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-ai-librarian.mjs')).href)
   const { useAILibrarianStore } = await import(pathToFileURL(outFile).href)
   const { useAIChatStore } = await import(pathToFileURL(chatStoreOutFile).href)
+  const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
   const { completeLibrarianTimelineTrace } = await import(pathToFileURL(timelineUtilityOutFile).href)
+  const noteMock = await import(pathToFileURL(path.join(outDir, 'mock-notes.mjs')).href)
   const store = useAILibrarianStore()
   const chatStore = useAIChatStore()
 
@@ -515,7 +670,162 @@ try {
   mock.emit(event({ phase: 'partial', sequence: 2, partialText: 'late' }))
   assert.equal(store.partialText, '', 'stale requests must ignore late events')
 
+  await testCandidateAdoptionBoundaries({ mock, noteMock, useAILibrarianStore, useNoteStore })
+
   console.log('AI librarian tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
+}
+
+async function testCandidateAdoptionBoundaries({ mock, noteMock, useAILibrarianStore, useNoteStore }) {
+  const originalNote = {
+    id: 'note-adoption',
+    notebookId: null,
+    title: '採用対象',
+    content: '保存前の本文',
+    isFavorite: false,
+    isPinned: false,
+    isTrashed: false,
+    revision: 4,
+    createdAt: '2026-08-24T00:00:00Z',
+    updatedAt: '2026-08-24T00:00:00Z',
+  }
+
+  async function createScenario(suffix) {
+    setActivePinia(createPinia())
+    noteMock.resetNoteMock()
+    const noteStore = useNoteStore()
+    const librarianStore = useAILibrarianStore()
+    const note = { ...originalNote, id: `${originalNote.id}-${suffix}` }
+    noteStore.activeNote = note
+    noteStore.summaries = [note]
+    assert.equal(await librarianStore.start({
+      ...input,
+      operation: 'title',
+      noteID: note.id,
+      baseRevision: note.revision,
+      title: note.title,
+      content: note.content,
+      candidates: [],
+    }), true)
+    mock.emit(event({
+      noteID: note.id,
+      baseRevision: note.revision,
+      operation: 'title',
+      phase: 'completed',
+      sequence: 1,
+      result: {
+        operation: 'title',
+        quality: 'normal',
+        candidates: [{ value: 'AIが提案したタイトル', score: 0.9, reason: '簡潔化' }],
+      },
+    }))
+    assert.equal(librarianStore.state, 'success')
+    const candidate = librarianStore.result?.candidates[0]
+    assert.ok(candidate)
+    return {
+      note,
+      noteStore,
+      librarianStore,
+      candidate,
+      adopt: createAdoptCandidate(noteStore, librarianStore),
+    }
+  }
+
+  const successful = await createScenario('success')
+  noteMock.queueUpdateResult({
+    ...successful.note,
+    title: successful.candidate.value,
+    revision: successful.note.revision + 1,
+  })
+  await successful.adopt(successful.candidate)
+  assert.deepEqual(noteMock.calls.updateNote, [{
+    id: successful.note.id,
+    input: {
+      title: successful.candidate.value,
+      expectedRevision: successful.note.revision,
+    },
+  }])
+  assert.equal(successful.noteStore.activeNote.title, successful.candidate.value)
+  assert.equal(successful.librarianStore.state, 'empty')
+  assert.deepEqual(successful.librarianStore.result?.candidates, [])
+
+  const saveFailure = await createScenario('save-failure')
+  noteMock.queueUpdateError(new Error('raw save failure'))
+  await saveFailure.adopt(saveFailure.candidate)
+  assert.equal(noteMock.calls.updateNote.length, 1)
+  assert.equal(saveFailure.noteStore.activeNote.title, saveFailure.note.title)
+  assert.equal(saveFailure.noteStore.activeNote.revision, saveFailure.note.revision)
+  assert.equal(saveFailure.librarianStore.state, 'error')
+  assert.equal(saveFailure.librarianStore.error?.code, 'AI_REVISION_CONFLICT')
+  assert.equal(saveFailure.librarianStore.result?.candidates.length, 1)
+
+  const revisionConflict = await createScenario('revision-conflict')
+  revisionConflict.noteStore.activeNote = { ...revisionConflict.note, revision: revisionConflict.note.revision + 1 }
+  await revisionConflict.adopt(revisionConflict.candidate)
+  assert.equal(noteMock.calls.updateNote.length, 0, 'a changed revision must not reach the note API')
+  assert.equal(revisionConflict.noteStore.activeNote.title, revisionConflict.note.title)
+  assert.equal(revisionConflict.librarianStore.state, 'error')
+  assert.equal(revisionConflict.librarianStore.result?.candidates.length, 1)
+
+  const noteSwitch = await createScenario('note-switch')
+  noteSwitch.noteStore.activeNote = {
+    ...noteSwitch.note,
+    id: 'different-active-note',
+    title: '切替先',
+    content: '切替先の本文',
+  }
+  await noteSwitch.adopt(noteSwitch.candidate)
+  assert.equal(noteMock.calls.updateNote.length, 0, 'a switched note must not reach the note API')
+  assert.equal(noteSwitch.noteStore.activeNote.title, '切替先')
+  assert.equal(noteSwitch.librarianStore.state, 'error')
+  assert.equal(noteSwitch.librarianStore.result?.candidates.length, 1)
+
+  setActivePinia(createPinia())
+  noteMock.resetNoteMock()
+  const canceledNoteStore = useNoteStore()
+  const canceledStore = useAILibrarianStore()
+  const canceledNote = { ...originalNote, id: 'note-user-cancel' }
+  canceledNoteStore.activeNote = canceledNote
+  canceledNoteStore.summaries = [canceledNote]
+  assert.equal(await canceledStore.start({
+    ...input,
+    operation: 'title',
+    noteID: canceledNote.id,
+    baseRevision: canceledNote.revision,
+    title: canceledNote.title,
+    content: canceledNote.content,
+    candidates: [],
+  }), true)
+  mock.emit(event({
+    noteID: canceledNote.id,
+    baseRevision: canceledNote.revision,
+    operation: 'title',
+    partialText: '生成途中の候補',
+  }))
+  assert.equal(await canceledStore.cancel(), true)
+  mock.emit(event({
+    noteID: canceledNote.id,
+    baseRevision: canceledNote.revision,
+    operation: 'title',
+    phase: 'canceled',
+    sequence: 2,
+  }))
+  mock.emit(event({
+    noteID: canceledNote.id,
+    baseRevision: canceledNote.revision,
+    operation: 'title',
+    phase: 'completed',
+    sequence: 3,
+    result: {
+      operation: 'title',
+      quality: 'normal',
+      candidates: [{ value: '遅延候補', score: 1 }],
+    },
+  }))
+  assert.equal(canceledStore.state, 'canceled')
+  assert.equal(canceledStore.result, null)
+  assert.equal(noteMock.calls.updateNote.length, 0, 'user cancellation must not reach the note API')
+  assert.equal(canceledNoteStore.activeNote.title, canceledNote.title)
+  assert.equal(canceledNoteStore.activeNote.revision, canceledNote.revision)
 }

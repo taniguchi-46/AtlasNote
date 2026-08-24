@@ -587,7 +587,99 @@ assert.match(recordsSource, /refreshArtifacts/)
 assert.match(recordsSource, /removeAllHistories/)
 assert.match(recordsSource, /removeAllArtifacts/)
 
+testNativeKeyboardActionContracts()
+
 console.log('AI workspace tests passed')
+
+function testNativeKeyboardActionContracts() {
+  // Enter/Space activation and focusability come from the native button element.
+  // Keep each action on a button with an accessible name, a click handler, and
+  // the relevant busy-state guard instead of introducing custom key handlers.
+  assertNativeActionButton({
+    source: workspaceSource,
+    marker: 'title="AI処理を停止"',
+    name: 'Assistant cancel',
+    accessibleName: /aria-label="AI処理を停止"/,
+    handler: /@click="stopAssistant"/,
+    disabled: /:disabled="assistantStore\.state === 'canceling'"/,
+  })
+  assertNativeActionButton({
+    source: librarianSource,
+    marker: 'title="生成をキャンセル"',
+    name: 'librarian cancel',
+    accessibleName: /aria-label="生成をキャンセル"/,
+    handler: /@click="librarianStore\.cancel\(\)"/,
+  })
+  assert.match(
+    librarianSource,
+    /v-if="librarianStore\.state !== 'canceling'"[\s\S]*?title="生成をキャンセル"/,
+    'librarian cancel must not remain actionable while cancellation is pending',
+  )
+
+  assertNativeActionButton({
+    source: librarianSource,
+    marker: 'title="候補を採用"',
+    name: 'librarian adoption',
+    accessibleName: /aria-label="候補を採用"/,
+    handler: /@click="adopt\(candidate\)"/,
+    disabled: /:disabled="noteStore\.isSaving"/,
+  })
+  assertNativeActionButton({
+    source: agentProposalCardSource,
+    marker: "state === 'save-failure' ? '保存を再試行' : '本文へ適用'",
+    name: 'Agent proposal adoption and retry',
+    accessibleName: /保存を再試行'[\s\S]*?'本文へ適用/,
+    handler: /@click="emit\('apply'\)"/,
+    disabled: /:disabled="busy"/,
+  })
+
+  assertNativeActionButton({
+    source: librarianSource,
+    marker: 'title="候補を破棄"',
+    name: 'librarian candidate discard',
+    accessibleName: /aria-label="候補を破棄"/,
+    handler: /@click="librarianStore\.removeCandidate\(candidate\)"/,
+  })
+  assertNativeActionButton({
+    source: agentProposalCardSource,
+    marker: '提案を破棄',
+    name: 'Agent proposal discard',
+    accessibleName: /提案を破棄/,
+    handler: /@click="emit\('discard'\)"/,
+    disabled: /:disabled="busy"/,
+  })
+
+  assertNativeActionButton({
+    source: librarianSource,
+    marker: 'title="現在の操作を再試行"',
+    name: 'librarian retry',
+    accessibleName: /aria-label="現在の操作を再試行"/,
+    handler: /@click="retryCurrentOperation"/,
+  })
+}
+
+function assertNativeActionButton({
+  source,
+  marker,
+  name,
+  accessibleName,
+  handler,
+  disabled = null,
+}) {
+  const markerIndex = source.indexOf(marker)
+  assert.ok(markerIndex >= 0, `${name} marker must exist`)
+  const buttonStart = source.lastIndexOf('<button', markerIndex)
+  const buttonEnd = source.indexOf('</button>', markerIndex)
+  assert.ok(buttonStart >= 0 && buttonEnd > markerIndex, `${name} must be rendered by a native button`)
+  const buttonSource = source.slice(buttonStart, buttonEnd + '</button>'.length)
+  assert.match(buttonSource, /<button\b/)
+  assert.match(buttonSource, /type="button"/, `${name} must not submit an enclosing form`)
+  assert.match(buttonSource, accessibleName, `${name} must have an accessible name`)
+  assert.match(buttonSource, handler, `${name} must delegate native activation to its handler`)
+  if (disabled) assert.match(buttonSource, disabled, `${name} must expose its busy-state guard`)
+  assert.doesNotMatch(buttonSource, /tabindex="-1"/, `${name} must remain keyboard-focusable`)
+  assert.doesNotMatch(buttonSource, /@key(?:down|up)/, `${name} must retain native Enter/Space semantics`)
+}
 
 async function testAgentProposalPermissionFlow(source) {
   const compiled = ts.transpileModule(source, {

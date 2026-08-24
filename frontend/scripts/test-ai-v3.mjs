@@ -71,6 +71,7 @@ let source = {
 }
 let pendingContext
 let pendingAssistant
+let pendingAssistantCancel
 let activeAssistant
 let assistantProposal
 const contextErrors = []
@@ -87,6 +88,13 @@ export function deferAssistant() {
   const promise = new Promise((done) => { resolve = done })
   pendingAssistant = { promise, resolve }
   return pendingAssistant
+}
+
+export function deferAssistantCancel() {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  pendingAssistantCancel = { promise, resolve }
+  return pendingAssistantCancel
 }
 
 export function deferContext() {
@@ -158,6 +166,11 @@ export async function runAIAssistant(input) {
 export async function cancelAIAssistant(requestID) {
   calls.cancelAssistant.push(requestID)
   const queued = assistantCancelResponses.shift()
+  if (pendingAssistantCancel) {
+    const deferred = pendingAssistantCancel
+    pendingAssistantCancel = undefined
+    await deferred.promise
+  }
   if (queued) return queued
   return { canceled: activeAssistant?.requestID === requestID }
 }
@@ -341,10 +354,125 @@ try {
     clearedRequestID,
     'clearing an active conversation must request best-effort backend cancellation',
   )
+  assert.equal(assistant.state, 'canceling', 'a cleared backend run must remain tracked until it terminates')
   deferredAssistant.resolve()
   assert.equal(await lateAssistant, false, 'a response that arrives after clear must be discarded')
   assert.equal(assistant.state, 'idle')
   assert.deepEqual(assistant.messages, [])
+
+  const clearDuringCancelRequest = {
+    kind: 'qa',
+    question: '停止応答待ちで会話をクリアする',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }
+  assert.equal(await assistant.previewContext(clearDuringCancelRequest), true)
+  const deferredClearRun = mock.deferAssistant()
+  const clearDuringCancelCalls = mock.calls.assistant.length
+  const clearDuringCancelRun = assistant.ask(clearDuringCancelRequest)
+  for (let index = 0; index < 5 && mock.calls.assistant.length === clearDuringCancelCalls; index += 1) {
+    await Promise.resolve()
+  }
+  const clearDuringCancelID = mock.calls.assistant.at(-1).requestID
+  const cancelCallsBeforeClearRace = mock.calls.cancelAssistant.length
+  mock.queueAssistantCancelResponse({
+    canceled: false,
+    error: { code: 'AI_NETWORK_UNAVAILABLE', raw: 'raw-clear-cancel-failure' },
+  })
+  const deferredClearCancel = mock.deferAssistantCancel()
+  const firstClearCancel = assistant.cancel()
+  for (let index = 0; index < 5 && mock.calls.cancelAssistant.length === cancelCallsBeforeClearRace; index += 1) {
+    await Promise.resolve()
+  }
+  assert.equal(assistant.state, 'canceling')
+  assistant.clearConversation()
+  assert.deepEqual(
+    mock.calls.cancelAssistant.slice(-2),
+    [clearDuringCancelID, clearDuringCancelID],
+    'clear must repeat best-effort cancellation instead of losing an in-flight request ID',
+  )
+  assert.equal(assistant.state, 'canceling')
+  assert.equal(assistant.isBusy, true, 'the cleared backend run must keep the generation lane visibly locked')
+  assert.deepEqual(assistant.messages, [])
+  deferredClearCancel.resolve()
+  assert.equal(await firstClearCancel, false)
+  assert.equal(assistant.state, 'canceling', 'a stale cancel failure must not reopen a cleared conversation')
+  mock.queueAssistantError({ code: 'AI_CANCELLED', raw: 'raw-cleared-run' })
+  deferredClearRun.resolve()
+  assert.equal(await clearDuringCancelRun, false)
+  assert.equal(assistant.state, 'idle')
+  assert.equal(assistant.isBusy, false)
+  assert.deepEqual(assistant.messages, [])
+
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 5,
+    contentByte: 120,
+  })
+  const staleDuringRunRequest = {
+    kind: 'qa',
+    mode: 'agent',
+    question: '生成中のrevision変更を検出する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+    agentTarget: { noteID: 'note-1', baseRevision: 5 },
+  }
+  assert.equal(await assistant.previewContext(staleDuringRunRequest), true)
+  mock.setAssistantProposal({
+    targetNoteID: 'note-1',
+    targetTitle: '対象ノート',
+    baseRevision: 5,
+    reason: 'stale結果は採用しない',
+    before: '変更前',
+    after: '変更後',
+    affectedFields: ['content'],
+  })
+  const savesBeforeStaleRun = mock.calls.saveHistory.length
+  const deferredStaleRun = mock.deferAssistant()
+  const staleRunCallsBeforeWait = mock.calls.assistant.length
+  const staleDuringRun = assistant.ask(staleDuringRunRequest)
+  for (let index = 0; index < 5 && mock.calls.assistant.length === staleRunCallsBeforeWait; index += 1) {
+    await Promise.resolve()
+  }
+  assistant.markStaleForRevision('note-1', 6)
+  assert.equal(assistant.state, 'generating', 'revision changes must not hide the stop action for an active run')
+  assert.equal(assistant.isBusy, true)
+  deferredStaleRun.resolve()
+  assert.equal(await staleDuringRun, false, 'a successful response for a stale snapshot must be discarded')
+  assert.equal(assistant.state, 'stale')
+  assert.equal(assistant.proposal, null, 'a stale Agent response must not expose an applicable proposal')
+  assert.deepEqual(assistant.messages, [{ role: 'user', content: staleDuringRunRequest.question }])
+  assert.equal(mock.calls.saveHistory.length, savesBeforeStaleRun)
+  assert.equal(await assistant.save('stale結果'), false)
+  assert.equal(mock.calls.saveHistory.length, savesBeforeStaleRun)
+  assistant.clearConversation()
+
+  assert.equal(await assistant.previewContext(staleDuringRunRequest), true)
+  const deferredStaleCancelRun = mock.deferAssistant()
+  const staleCancelCallsBeforeWait = mock.calls.assistant.length
+  const staleCancelRun = assistant.ask(staleDuringRunRequest)
+  for (let index = 0; index < 5 && mock.calls.assistant.length === staleCancelCallsBeforeWait; index += 1) {
+    await Promise.resolve()
+  }
+  assistant.markStaleForRevision('note-1', 6)
+  mock.queueAssistantError({ code: 'AI_CANCELLED', raw: 'raw-stale-cancel' })
+  assert.equal(await assistant.cancel(), true, 'a run must remain cancelable after its source revision changes')
+  deferredStaleCancelRun.resolve()
+  assert.equal(await staleCancelRun, false)
+  assert.equal(assistant.error?.code, 'AI_CANCELLED')
+  assert.equal(assistant.proposal, null)
+  assert.equal(mock.calls.saveHistory.length, savesBeforeStaleRun)
+  assistant.clearConversation()
+  mock.setAssistantProposal(null)
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 1,
+    contentByte: 120,
+  })
 
   const contextCallsBeforeCancel = mock.calls.context.length
   const assistantCallsBeforeContextCancel = mock.calls.assistant.length

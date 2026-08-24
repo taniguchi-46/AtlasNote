@@ -156,6 +156,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   let latestGenerationRequest = 0
   let activeBackendRequestID: string | null = null
   let cancelRequestedRequestID: string | null = null
+  let clearedBackendRequestID: string | null = null
+  let staleBackendRequestID: string | null = null
   let completedMessages: AIConversationMessage[] = []
 
   function clearError() {
@@ -237,6 +239,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     const backendRequestID = createAssistantRequestID()
     activeBackendRequestID = backendRequestID
     cancelRequestedRequestID = null
+    clearedBackendRequestID = null
+    staleBackendRequestID = null
     messages.value = [
       ...request.messages,
       { role: 'user', content: request.question },
@@ -263,6 +267,12 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         state.value = 'error'
         return false
       }
+      if (staleBackendRequestID === backendRequestID) {
+        clearError()
+        proposal.value = null
+        state.value = 'stale'
+        return false
+      }
       clearError()
       messages.value = response.result.messages
       citations.value = response.result.citations ?? []
@@ -282,8 +292,12 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       return false
     } finally {
       if (activeBackendRequestID === backendRequestID) {
+        const wasCleared = clearedBackendRequestID === backendRequestID
         activeBackendRequestID = null
         cancelRequestedRequestID = null
+        clearedBackendRequestID = null
+        staleBackendRequestID = null
+        if (wasCleared) state.value = 'idle'
       }
     }
   }
@@ -306,6 +320,9 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     state.value = 'canceling'
     try {
       const response = await cancelAIAssistant(requestID)
+      if (clearedBackendRequestID === requestID) {
+        return response.canceled && !response.error
+      }
       if (activeBackendRequestID !== requestID || state.value !== 'canceling') {
         return response.canceled && !response.error
       }
@@ -317,6 +334,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }
       return true
     } catch (cause) {
+      if (clearedBackendRequestID === requestID) return false
       if (activeBackendRequestID !== requestID || state.value !== 'canceling') return false
       cancelRequestedRequestID = null
       error.value = errorFromUnknown(cause)
@@ -447,15 +465,14 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
 
   function clearConversation() {
     const requestID = activeBackendRequestID
-    const shouldCancelBackend = Boolean(requestID && cancelRequestedRequestID !== requestID)
-    activeBackendRequestID = null
-    cancelRequestedRequestID = null
-    if (requestID && shouldCancelBackend) {
+    if (requestID) {
+      clearedBackendRequestID = requestID
+      cancelRequestedRequestID = requestID
       void cancelAIAssistant(requestID).catch(() => undefined)
     }
     latestContextRequest += 1
     latestGenerationRequest += 1
-    state.value = 'idle'
+    state.value = requestID ? 'canceling' : 'idle'
     error.value = null
     messages.value = []
     citations.value = []
@@ -471,7 +488,13 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
 
   function markStaleForRevision(noteID: string, revision: number) {
     const source = sources.value.find((item) => item.noteID === noteID)
+      ?? contextSources.value.find((item) => item.noteID === noteID)
     if (!source || source.revision === revision || messages.value.length === 0) return
+    preparedContextKey = ''
+    if (activeBackendRequestID) {
+      staleBackendRequestID = activeBackendRequestID
+      return
+    }
     state.value = 'stale'
   }
 

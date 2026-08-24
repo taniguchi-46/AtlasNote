@@ -160,16 +160,16 @@ Askは読み取り専用であり続ける。Agentの書き込みは上記の変
 
 - context準備、Provider実行、tool実行は既存の各AI Storeと候補カードで`idle / loading-context / generating / canceling / success / error / stale`を判別できるようにし、構造化tool traceは`pending / success / error`を表示する。
 - 同時生成の既存単一実行制御を維持し、実行中のmode、context、モデル切替を無効化する。
-- 外部送信確認のキャンセルでは暫定entryを削除する。AI司書の実行キャンセル、各AI Storeのnote切替、clear後の遅延応答は既存のrequest ID／run token／source評価に従って破棄する。Assistant／AgentはFrontendで生成したrequest IDをWails API、Service、Provider contextまで相関させ、参照context準備中はProvider呼び出し前に停止し、生成中は一致するrequest IDだけを停止する。停止受付後は元の実行が終端するまで`canceling`として送信lockを維持し、古い／異なるrequest ID、終了済みrequest、停止API失敗、note切替／clear後の遅延応答が新しい実行やtimelineを上書きしない。利用者cancelでは`AI_CANCELLED`だけを安全に表示し、Agent提案、履歴保存、自動適用、自動retryを行わない。
-- source revision変更時はstaleとして扱い、再準備なしで保存・採用しない。
+- 外部送信確認のキャンセルでは暫定entryを削除する。AI司書の実行キャンセル、各AI Storeのnote切替、clear後の遅延応答は既存のrequest ID／run token／source評価に従って破棄する。Assistant／AgentはFrontendで生成したrequest IDをWails API、Service、Provider contextまで相関させ、参照context準備中はProvider呼び出し前に停止し、生成中は一致するrequest IDだけを停止する。停止受付後は元の実行が終端するまで`canceling`として送信lockを維持する。cancel API応答待ち中にnote切替／clearされた場合もrequest IDを終端まで保持して停止を再要求し、古い／異なるrequest ID、終了済みrequest、停止API失敗、遅延応答が新しい実行やtimelineを上書きしない。利用者cancelでは`AI_CANCELLED`だけを安全に表示し、Agent提案、履歴保存、自動適用、自動retryを行わない。
+- source revision変更時はstaleとして扱い、再準備なしで保存・採用しない。生成中にrevisionが変わった場合は停止可能状態を維持し、成功応答が遅れてもstale結果、Agent提案、履歴を採用しない。
 - Assistantのstale／orphaned状態は、非表示の実行bridgeだけでなく共通timeline上にも警告する。
 - AI失敗はノート編集、自動保存、検索、同期を停止させない。
 
 ## 9. テスト契約
 
-- `test:ai-workspace`: 単一timelineとtool trace直後の候補カードanchor、Agent編集権限設定、`review-required`の自動保存0回、`auto-update`の保存1回、応答待ち中の設定変更に対する送信開始時権限の固定、提案なし・送信失敗時の非保存、自動適用失敗時の提案保持、適用成功後の同一ノートMarkdown／WYSIWYG即時反映・中央エディタ更新箇所ハイライト、保存中に作成されたdraftの競合保持、結果上書き防止、固定active-note context chip、`＋`メニュー全項目、文章作成6種と12,000文字上限、固定scopeツール、送信lockと下書き保持、mode別許可ツール、Ask／Agent、入力欄内右下送信、右側／下側resize、狭幅、Web検索の能力・明示確認境界、AI内容の`localStorage`非保存を確認する。
+- `test:ai-workspace`: 単一timelineとtool trace直後の候補カードanchor、Agent編集権限設定、`review-required`の自動保存0回、`auto-update`の保存1回、応答待ち中の設定変更に対する送信開始時権限の固定、提案なし・送信失敗時の非保存、自動適用失敗時の提案保持、適用成功後の同一ノートMarkdown／WYSIWYG即時反映・中央エディタ更新箇所ハイライト、保存中に作成されたdraftの競合保持、結果上書き防止、固定active-note context chip、`＋`メニュー全項目、文章作成6種と12,000文字上限、固定scopeツール、送信lockと下書き保持、mode別許可ツール、Ask／Agent、入力欄内右下送信、右側／下側resize、狭幅、Web検索の能力・明示確認境界、cancel・採用・破棄・retryのnative button／accessible name／busy guard／Enter・Space契約、AI内容の`localStorage`非保存を確認する。
 - `test:ai-chat`: mode状態、固定context、重複排除、明示ノート上限拒否とエラー解除、catalog未準備時のNotebook拒否、Notebook scopeの最大10件解決と省略件数、文章作成を含む許可ツールの単一timeline上のtool trace、Agent提案の適用後差分保持・競合・破棄、active note切替時のノート依存状態破棄、`localStorage`非保存を確認する。
-- `test:agent-proposal`、`test:auto-save`、`test:ai-store`、`test:ai-librarian`、`test:ai-v3`、Go Agentテスト: 本文差分の一意適用、UTF-16基準の更新範囲、Agent保存成功時だけ発行する一時ハイライト、Agent保存待ち中のdraft競合化と未開始autosaveの取消、保存中の対象ノート切替時に旧ノート用ハイライトを残さない境界、事前revision差異・差分不一致・保存時CAS競合、AI司書cancel／timeoutのWails mockからtimelineまでの終端処理、Assistant／Agent利用者cancelのrequest ID相関・Provider停止・生成lock解放・Agent非保存・停止API失敗後の終端監視、AI司書の正常な候補0件、要約・Assistant・Writingの空／無効応答、長文contextの切り詰めmetadataと`AI_INPUT_TOO_LARGE`時の安全な非保存、Assistant／Agentの`AI_TIMEOUT`／`AI_CANCELLED`応答とWriting timeout、Goのtimeout分類・外部context cancel時の既存エラー契約、ノート保存queue、資格情報、保存前flush、候補採用、明示保存、source snapshot累積、busy中の履歴切替拒否、staleの既存保証を維持する。
+- `test:agent-proposal`、`test:auto-save`、`test:ai-store`、`test:ai-librarian`、`test:ai-v3`、Go AIテスト: 本文差分の一意適用、UTF-16基準の更新範囲、Agent保存成功時だけ発行する一時ハイライト、Agent保存待ち中のdraft競合化と未開始autosaveの取消、保存中の対象ノート切替時に旧ノート用ハイライトを残さない境界、事前revision差異・差分不一致・保存時CAS競合、AI司書cancel／timeoutのWails mockからtimelineまでの終端処理、候補採用の保存失敗・revision競合・note切替・cancel非適用、大量候補poolの上限・重複排除、AI司書のMarkdown／SQLite／journal／検索索引／WebDAV outbox非保存、Assistant／Agent利用者cancelのrequest ID相関・Provider停止・生成lock解放・Agent非保存・停止API失敗後の終端監視、生成中revision変更とcancel中clearの競合、AI司書の正常な候補0件、要約・Assistant・Writingの空／無効応答、長文contextの切り詰めmetadataと`AI_INPUT_TOO_LARGE`時の安全な非保存、Assistant／Agentの`AI_TIMEOUT`／`AI_CANCELLED`応答とWriting timeout、Goのtimeout分類・外部context cancel時の既存エラー契約、ノート保存queue、資格情報、保存前flush、候補採用、明示保存、source snapshot累積、busy中の履歴切替拒否、staleの既存保証を維持する。
 - 手動確認では右側／下側、狭幅、キーボード操作、確認ダイアログ、送信中・失敗・空結果を確認する。
 
 ## 10. 対象外
