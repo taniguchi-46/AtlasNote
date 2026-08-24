@@ -1,6 +1,6 @@
 # Phase 4 TODO：v3
 
-決定状態: 正式決定（2026-07-27）／v3保存仕様確定（2026-07-28）／進捗分類更新・Agent本文編集権限実装（2026-08-18）／エディタ即時反映・自動受け入れ拡張（2026-08-23）
+決定状態: 正式決定（2026-07-27）／v3保存仕様確定（2026-07-28）／進捗分類更新・Agent本文編集権限実装（2026-08-18）／エディタ即時反映・自動受け入れ拡張（2026-08-23）／Phase 4受け入れ完了（2026-08-24）
 
 ## TODOの目的
 
@@ -16,7 +16,7 @@ v2のAI司書を基盤に、AIアシスタント、AIライティング、利用
 - `【未検証】`: 実装はあるが、異常系の追加テスト、手動受け入れ、または最新差分のCI確認が残る項目。
 - `【決定済み・未実装】`: 仕様は合意済みだが、コード、テスト、受け入れが未完了の項目。
 
-v3の保存基盤、AIアシスタント／ライティングの基本経路、明示保存・削除・stale／orphaned境界、単一チャットtimeline、Provider管理Web検索、共通下書き、制限付きAgentの本文差分提案・編集権限設定（既定の明示適用と検証済み自動適用）、保存成功後のエディタ即時反映、v3相当のFrontend／Goテストは確認済みである。Wails公開APIからService、Repository、一時SQLiteまでの履歴・成果物ライフサイクル、version 10既存データ保持、version 12→13再構築失敗時のrollback、Provider失敗後のローカル機能継続も2026-08-23に自動検証した。2026-08-24に空結果・候補なし・長文、Assistant／Agent利用者停止、v2の大量候補pool・候補採用・全保存境界を追加検証し、Assistantの生成中revision変更とcancel応答待ち中clearの競合を修正した。commit `d56e6c0b640be86b1da25ecb0d6412dfad725b88`までの差分はCI run [#32700754252](https://github.com/taniguchi-46/AtlasNote/actions/runs/32700754252) で成功している。実画面の手動受け入れと後続ローカル差分のCI反映は未完了として残す。
+v3の保存基盤、AIアシスタント／ライティングの基本経路、明示保存・削除・stale／orphaned境界、単一チャットtimeline、Provider管理Web検索、共通下書き、制限付きAgentの本文差分提案・編集権限設定（既定の明示適用と検証済み自動適用）、保存成功後のエディタ即時反映、v3相当のFrontend／Goテストは確認済みである。Wails公開APIからService、Repository、一時SQLiteまでの履歴・成果物ライフサイクル、version 10既存データ保持、version 12→13再構築失敗時のrollback、Provider失敗後のローカル機能継続も2026-08-23に自動検証した。2026-08-24に空結果・候補なし・長文、Assistant／Agent利用者停止、v2の大量候補pool・候補採用・全保存境界を追加検証し、Assistantの生成中revision変更とcancel応答待ち中clearの競合を修正した。最終実装差分を含むcommit `e8f6816f60e61c4de149aaa45f778812c0ad86a8`はCI run [#32722645563](https://github.com/taniguchi-46/AtlasNote/actions/runs/32722645563) で全工程成功し、実画面の手動UI受け入れも利用者が「現状OK」と確認したため、2026-08-24付でv3およびPhase 4完了と判定する。
 
 ## v3保存仕様の確定（2026-07-28）
 
@@ -26,14 +26,14 @@ v3の保存基盤、AIアシスタント／ライティングの基本経路、�
 2. 明示保存したuser／assistantメッセージと最終編集済み成果物だけを保存し、system prompt、内部指示、raw context、request body、API Key、Authorization、raw provider error、生成中chunkは保存しない。
 3. 自動保持期限は設けない。個別・一括削除は本体とmessages／sourcesを含むアプリケーション上の完全削除とし、soft-delete・tombstone・AI一時ファイルは作らない。物理媒体の消去は保証しない。
 4. 参照元ノート削除後も保存済みデータを残す。`note_id`／`input_revision` を保持し、参照不能は `orphaned`、revision不一致は `stale` とする。自動rebase・自動再生成はせず、再生成は明示操作に限定する。
-5. CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功した。AI司書キャンセル時の生成ロックに関する既知CI例外は解消したが、手動受け入れと追加検証は残る。
+5. CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功した。AI司書キャンセル時の生成ロックに関する既知CI例外は解消した。当時残っていた手動受け入れと追加検証は、2026-08-24に完了した。
 
-この確定はv3の保存設計を承認するものであり、未完了のv1／v2完了条件や、CI成功の完了条件を満たしたことを意味しない。
+この確定はv3の保存設計だけを承認した時点の記録であり、当時未完了だったv1／v2やCIの完了判定とは分離する。これらの後続条件は2026-08-24に完了した。
 
 ## v3開始条件
 
 - [x] 【実装済み】v1の完了条件を満たす。D-01〜D-07の設計承認、実装、保存／同期境界テスト、CI、ローカル受け入れは2026-07-27に完了している。
-- [ ] v2の完了条件を満たす。
+- [x] 【受入済み】v2の完了条件を満たす（2026-08-24）。
 - [x] AI履歴・生成成果物を保存する対象、正本、削除、再生成、保持期間をレビュー承認する（2026-07-28確定）。
 - [x] v3でもAI設定、資格情報、AI履歴、生成成果物をWebDAV同期しないことを承認する（2026-07-28確定）。
 - [x] 【実装済み】DB schema、migration、rollback、既存データへの影響を確定・実装する。
@@ -84,19 +84,19 @@ v3の保存基盤、AIアシスタント／ライティングの基本経路、�
 - [x] 【実装済み】Ask、Agent、文章作成、Web検索はChatGPTライクな共通下書きを正とする。機能別下書きは保持・永続化せず、固定scopeツールは追加context・下書きを使用しない。
 - [x] 【自動検証済み】GoでRepository、Service、Wails API、migration、rollbackをtest doubleと一時DBで通し検証する。`TestAppAIRecordLifecycleUsesLocalDatabaseWithoutChangingSyncState`で保存、一覧、取得、stale、orphaned、個別・一括削除とWebDAV同期表の不変性をApp公開APIから確認し、database専用テストでmigration／rollbackを確認した（2026-08-23）。
 - [x] 【自動検証済み】AI失敗後もローカル保存、編集、検索、既存同期outbox更新が継続することをApp統合テストで確認する（2026-08-23）。
-- [ ] 【未検証】AI失敗後のローカル保存、編集、検索、既存同期の継続を実画面で手動受け入れする。
-- [ ] 【未検証】実キーなしでAI設定、Q&A、ライティング、保存、削除、再生成、キーボード操作を手動受け入れする。
+- [x] 【受入済み】AI失敗後もローカル保存、編集、検索、既存同期が継続することを、利用者が実画面で手動受け入れした（2026-08-24）。
+- [x] 【受入済み】実キーなしのAI設定、Q&A、ライティング、保存、削除、再生成、キーボード操作を、利用者が実画面で手動受け入れした（2026-08-24）。
 - [x] 【実装済み】CIにv3関連テストを追加し、秘密情報・本文・endpoint・raw errorを記録しないテスト境界を維持する。
 
 ## v3完了条件（Phase 4完了条件）
 
-- [ ] v1、v2、v3の全完了条件を満たす。
-- [ ] AIアシスタント、AIライティング、明示保存・削除・再生成が利用者から確認できる。
+- [x] 【受入済み】v1、v2、v3の全完了条件を満たす（2026-08-24）。
+- [x] 【受入済み】AIアシスタント、AIライティング、明示保存・削除・再生成を利用者が確認した（2026-08-24）。
 - [x] migration、rollback、revision/CAS、削除、stale、競合を自動テストで検証済みである（2026-08-23）。
 - [x] AIデータがWebDAVへ流れず、既存同期契約が回帰していないことをApp統合テストとGo全体テストで確認済みである（2026-08-23）。
-- [ ] Go、Frontend、CI、手動受け入れ、差分レビューを完了する。
+- [x] 【受入済み】Go、Frontend、CI、手動受け入れ、差分レビューを完了した。最終CIはcommit `e8f6816f60e61c4de149aaa45f778812c0ad86a8`に対するrun [#32722645563](https://github.com/taniguchi-46/AtlasNote/actions/runs/32722645563) で全工程成功した（2026-08-24）。
 - [x] 【自動検証済み】制限付きAgentの変更提案、差分確認、編集権限設定（明示適用／検証済み自動適用）、revision/CAS・競合・保存失敗・保存中ノート切替境界を確認した。StoreのCAS・競合・保存失敗・保存中ノート切替に加え、UI権限フローで`review-required`の自動保存0回、`auto-update`の保存1回、応答待ち中の設定変更に対する送信開始時権限の固定、提案なし・送信失敗時の保存0回、自動適用失敗時の提案保持を2026-08-24に動的テストした。
-- [ ] `docs/status.md`とPhase 4 v1〜v3のscope／TODOを最終状態へ更新する。
+- [x] `docs/status.md`とPhase 4 v1〜v3のscope／TODOを最終確認し、仕様変更が不要なscope／v1 TODOは維持したまま、v2／v3 TODOとstatusを完了状態へ更新した（2026-08-24）。
 
 ## 対象外
 
