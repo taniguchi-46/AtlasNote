@@ -48,6 +48,7 @@ await writeFile(path.join(outDir, 'mock-ai.mjs'), `
 export const calls = {
   context: [],
   assistant: [],
+  cancelAssistant: [],
   saveHistory: [],
   writing: [],
   saveArtifact: [],
@@ -68,9 +69,13 @@ let source = {
   revision: 1,
   contentByte: 120,
 }
+let pendingContext
 let pendingAssistant
+let activeAssistant
 let assistantProposal
+const contextErrors = []
 const assistantErrors = []
+const assistantCancelResponses = []
 const writingErrors = []
 
 export function setSource(nextSource) {
@@ -84,12 +89,27 @@ export function deferAssistant() {
   return pendingAssistant
 }
 
+export function deferContext() {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  pendingContext = { promise, resolve }
+  return pendingContext
+}
+
 export function setAssistantProposal(nextProposal) {
   assistantProposal = nextProposal ? clone(nextProposal) : undefined
 }
 
+export function queueContextError(error) {
+  contextErrors.push(clone(error))
+}
+
 export function queueAssistantError(error) {
   assistantErrors.push(clone(error))
+}
+
+export function queueAssistantCancelResponse(response) {
+  assistantCancelResponses.push(clone(response))
 }
 
 export function queueWritingError(error) {
@@ -98,6 +118,13 @@ export function queueWritingError(error) {
 
 export async function prepareAIContext(input) {
   calls.context.push(clone(input))
+  if (pendingContext) {
+    const deferred = pendingContext
+    pendingContext = undefined
+    await deferred.promise
+  }
+  const error = contextErrors.shift()
+  if (error) return { sources: [], error }
   return { sources: [clone(source)] }
 }
 
@@ -106,7 +133,9 @@ export async function runAIAssistant(input) {
   if (pendingAssistant) {
     const deferred = pendingAssistant
     pendingAssistant = undefined
+    activeAssistant = { requestID: input.requestID, deferred }
     await deferred.promise
+    if (activeAssistant?.deferred === deferred) activeAssistant = undefined
   }
   const error = assistantErrors.shift()
   if (error) return { error }
@@ -124,6 +153,13 @@ export async function runAIAssistant(input) {
       ...(assistantProposal ? { proposal: clone(assistantProposal) } : {}),
     },
   }
+}
+
+export async function cancelAIAssistant(requestID) {
+  calls.cancelAssistant.push(requestID)
+  const queued = assistantCancelResponses.shift()
+  if (queued) return queued
+  return { canceled: activeAssistant?.requestID === requestID }
 }
 
 export async function saveAIHistory(input) {
@@ -252,6 +288,17 @@ try {
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-ai.mjs')).href)
   const { useAIAssistantStore } = await import(pathToFileURL(path.join(outDir, 'useAIAssistantStore.mjs')).href)
   const { useAIWritingStore } = await import(pathToFileURL(path.join(outDir, 'useAIWritingStore.mjs')).href)
+  const longContextSource = Object.freeze({
+    noteID: 'note-1',
+    title: '長文コンテキスト',
+    revision: 11,
+    characterCount: 24_002,
+    contentByte: 16 * 1024,
+    totalContentByte: 72_006,
+    contentTruncated: true,
+    createdAt: '2026-08-24T00:00:00Z',
+    updatedAt: '2026-08-24T01:00:00Z',
+  })
 
   const assistant = useAIAssistantStore()
   assert.equal(await assistant.previewContext({
@@ -286,11 +333,227 @@ try {
     [],
     'busy history rejection must happen before reading and replacing conversation state',
   )
+  const clearedRequestID = mock.calls.assistant.at(-1).requestID
+  assert.match(clearedRequestID, /^assistant-\S+$/, 'assistant runs must carry a non-empty request ID')
   assistant.clearConversation()
+  assert.equal(
+    mock.calls.cancelAssistant.at(-1),
+    clearedRequestID,
+    'clearing an active conversation must request best-effort backend cancellation',
+  )
   deferredAssistant.resolve()
   assert.equal(await lateAssistant, false, 'a response that arrives after clear must be discarded')
   assert.equal(assistant.state, 'idle')
   assert.deepEqual(assistant.messages, [])
+
+  const contextCallsBeforeCancel = mock.calls.context.length
+  const assistantCallsBeforeContextCancel = mock.calls.assistant.length
+  const deferredContext = mock.deferContext()
+  const contextCancelRequest = assistant.ask({
+    kind: 'qa',
+    question: 'コンテキスト確認中に停止する質問',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  })
+  for (let index = 0; index < 5 && mock.calls.context.length === contextCallsBeforeCancel; index += 1) {
+    await Promise.resolve()
+  }
+  assert.equal(assistant.state, 'loading-context')
+  assert.equal(await assistant.cancel(), true)
+  assert.equal(assistant.state, 'error')
+  assert.equal(assistant.error?.code, 'AI_CANCELLED')
+  deferredContext.resolve()
+  assert.equal(await contextCancelRequest, false)
+  assert.equal(
+    mock.calls.assistant.length,
+    assistantCallsBeforeContextCancel,
+    'canceling context preparation must stop before the provider call',
+  )
+  assert.deepEqual(assistant.messages, [])
+  assistant.clearConversation()
+
+  const cancelAgentRequest = {
+    kind: 'qa',
+    mode: 'agent',
+    question: '生成中のAgent依頼を停止する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+    agentTarget: { noteID: 'note-1', baseRevision: 1 },
+  }
+  assert.equal(await assistant.previewContext(cancelAgentRequest), true)
+  mock.setAssistantProposal({
+    targetNoteID: 'note-1',
+    targetTitle: '対象ノート',
+    baseRevision: 1,
+    reason: 'キャンセル時には採用しない',
+    before: '変更前',
+    after: '変更後',
+    affectedFields: ['content'],
+  })
+  const savesBeforeCancel = mock.calls.saveHistory.length
+  const assistantCallsBeforeCancel = mock.calls.assistant.length
+  const cancelCallsBeforeCancel = mock.calls.cancelAssistant.length
+  const deferredCanceledAssistant = mock.deferAssistant()
+  const canceledAssistant = assistant.ask(cancelAgentRequest)
+  for (let index = 0; index < 5 && mock.calls.assistant.length === assistantCallsBeforeCancel; index += 1) {
+    await Promise.resolve()
+  }
+  const canceledRequestID = mock.calls.assistant.at(-1).requestID
+  mock.queueAssistantError({ code: 'AI_CANCELLED', raw: 'raw-user-cancel' })
+  assert.equal(await assistant.cancel(), true)
+  assert.equal(assistant.state, 'canceling')
+  assert.equal(assistant.isBusy, true, 'accepted cancellation must stay busy until the run terminates')
+  assert.equal(mock.calls.cancelAssistant.at(-1), canceledRequestID)
+  assert.equal(await assistant.cancel(), false, 'a canceling request must reject duplicate stop actions')
+  assert.equal(mock.calls.cancelAssistant.length, cancelCallsBeforeCancel + 1)
+  deferredCanceledAssistant.resolve()
+  assert.equal(await canceledAssistant, false)
+  assert.equal(assistant.state, 'error')
+  assert.equal(assistant.isBusy, false)
+  assert.equal(assistant.error?.code, 'AI_CANCELLED')
+  assert.equal(assistant.error?.message, 'AI処理をキャンセルしました。')
+  assert.doesNotMatch(assistant.error?.message ?? '', /raw-user-cancel/)
+  assert.deepEqual(assistant.messages, [{ role: 'user', content: cancelAgentRequest.question }])
+  assert.equal(assistant.proposal, null, 'a canceled Agent run must not expose a proposal')
+  assert.equal(mock.calls.saveHistory.length, savesBeforeCancel, 'a canceled Agent run must not save history')
+  await Promise.resolve()
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeCancel + 1, 'cancellation must not retry automatically')
+  assistant.clearConversation()
+  mock.setAssistantProposal(null)
+  assert.equal(await assistant.ask({
+    ...cancelAgentRequest,
+    question: '停止後に明示的に再実行する',
+  }), true, 'a later run must start only after an explicit retry')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeCancel + 2)
+  assert.equal(mock.calls.saveHistory.length, savesBeforeCancel)
+  assistant.clearConversation()
+
+  const cancelFailureRequest = {
+    kind: 'qa',
+    question: '停止API失敗後も終端を監視する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }
+  assert.equal(await assistant.previewContext(cancelFailureRequest), true)
+  const deferredAfterCancelFailure = mock.deferAssistant()
+  const assistantCallsBeforeCancelFailure = mock.calls.assistant.length
+  const requestAfterCancelFailure = assistant.ask(cancelFailureRequest)
+  for (let index = 0; index < 5 && mock.calls.assistant.length === assistantCallsBeforeCancelFailure; index += 1) {
+    await Promise.resolve()
+  }
+  mock.queueAssistantCancelResponse({
+    canceled: false,
+    error: { code: 'AI_NETWORK_UNAVAILABLE', raw: 'raw-cancel-api-failure' },
+  })
+  assert.equal(await assistant.cancel(), false)
+  assert.equal(assistant.state, 'generating')
+  assert.equal(assistant.isBusy, true, 'a failed stop request must keep monitoring the original run')
+  assert.equal(assistant.error?.code, 'AI_NETWORK_UNAVAILABLE')
+  assert.equal(assistant.error?.message, 'ネットワークに接続できません。')
+  assert.doesNotMatch(assistant.error?.message ?? '', /raw-cancel-api-failure/)
+  deferredAfterCancelFailure.resolve()
+  assert.equal(await requestAfterCancelFailure, true)
+  assert.equal(assistant.state, 'success')
+  assert.equal(assistant.error, null, 'the original successful terminal result must clear the stop error')
+  assistant.clearConversation()
+
+  mock.setSource(longContextSource)
+  const assistantBoundaryQuestion = 'a'.repeat(8000)
+  const assistantCallsBeforeLongContext = mock.calls.assistant.length
+  const assistantSavesBeforeLongContext = mock.calls.saveHistory.length
+  const longAssistantRequest = {
+    kind: 'qa',
+    question: assistantBoundaryQuestion,
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }
+  assert.equal(await assistant.previewContext(longAssistantRequest), true)
+  assert.equal(
+    mock.calls.assistant.length,
+    assistantCallsBeforeLongContext,
+    'long context preview must not call the provider',
+  )
+  assert.deepEqual(
+    assistant.contextSources[0],
+    longContextSource,
+    'assistant preview must preserve the backend truncation metadata',
+  )
+  assert.equal(await assistant.ask(longAssistantRequest), true)
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeLongContext + 1)
+  assert.equal(mock.calls.assistant.at(-1).question.length, 8000)
+  assert.deepEqual(mock.calls.assistant.at(-1).expectedSources, [
+    { noteID: 'note-1', inputRevision: 11 },
+  ])
+  assert.deepEqual(
+    assistant.sources[0],
+    longContextSource,
+    'assistant result must preserve the backend truncation metadata',
+  )
+  assert.equal(
+    mock.calls.saveHistory.length,
+    assistantSavesBeforeLongContext,
+    'long assistant responses must not be saved automatically',
+  )
+  assistant.clearConversation()
+
+  const assistantCallsBeforeContextLimit = mock.calls.assistant.length
+  const assistantContextCallsBeforeLimit = mock.calls.context.length
+  const assistantSavesBeforeContextLimit = mock.calls.saveHistory.length
+  mock.queueContextError({ code: 'AI_INPUT_TOO_LARGE', raw: 'raw-assistant-context-limit' })
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    mode: 'agent',
+    question: '長文コンテキストを整理して',
+    noteIDs: ['note-1', 'note-2', 'note-3', 'note-4'],
+    searchQuery: '',
+    includeBacklinks: false,
+    agentTarget: { noteID: 'note-1', baseRevision: 11 },
+  }), false)
+  assert.equal(mock.calls.context.length, assistantContextCallsBeforeLimit + 1)
+  assert.equal(
+    mock.calls.assistant.length,
+    assistantCallsBeforeContextLimit,
+    'an oversized context must stop before the assistant provider call',
+  )
+  assert.equal(mock.calls.saveHistory.length, assistantSavesBeforeContextLimit)
+  assert.equal(assistant.state, 'error')
+  assert.equal(assistant.error?.code, 'AI_INPUT_TOO_LARGE')
+  assert.equal(
+    assistant.error?.message,
+    '送信する質問または参照資料が大きすぎます。対象を減らして再試行してください。',
+  )
+  assert.doesNotMatch(assistant.error?.message ?? '', /raw-assistant-context-limit/)
+  assert.deepEqual(assistant.messages, [])
+  assert.equal(assistant.proposal, null)
+  await Promise.resolve()
+  assert.equal(
+    mock.calls.assistant.length,
+    assistantCallsBeforeContextLimit,
+    'an oversized context must not retry automatically',
+  )
+  assistant.clearConversation()
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    mode: 'agent',
+    question: '対象を減らして再試行',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+    agentTarget: { noteID: 'note-1', baseRevision: 11 },
+  }), true, 'a smaller context must run only after an explicit retry')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeContextLimit + 1)
+  assistant.clearConversation()
+
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 1,
+    contentByte: 120,
+  })
 
   for (const failure of [
     {
@@ -302,6 +565,18 @@ try {
       code: 'AI_CANCELLED',
       message: 'AI処理をキャンセルしました。',
       question: 'キャンセル済みのAgent要求',
+    },
+    {
+      code: 'AI_INVALID_RESPONSE',
+      message: 'AI プロバイダーから有効な回答を受け取れませんでした。',
+      question: '不正応答になるAgent要求',
+      retryQuestion: '不正応答後に明示再試行',
+    },
+    {
+      code: 'AI_INPUT_TOO_LARGE',
+      message: '送信する質問または参照資料が大きすぎます。対象を減らして再試行してください。',
+      question: '入力上限になるAgent要求',
+      retryQuestion: '対象を減らして明示再試行',
     },
   ]) {
     const callsBeforeFailure = mock.calls.assistant.length
@@ -324,7 +599,23 @@ try {
     assert.doesNotMatch(assistant.error?.message ?? '', new RegExp(`raw-${failure.code}`))
     assert.deepEqual(assistant.messages, [{ role: 'user', content: failure.question }])
     assert.equal(assistant.proposal, null, `${failure.code} must not retain an Agent proposal`)
+    await Promise.resolve()
+    assert.equal(mock.calls.assistant.length, callsBeforeFailure + 1, `${failure.code} must not retry in a later tick`)
     assistant.clearConversation()
+    if (failure.retryQuestion) {
+      assert.equal(await assistant.ask({
+        kind: 'qa',
+        mode: 'agent',
+        question: failure.retryQuestion,
+        noteIDs: ['note-1'],
+        searchQuery: '',
+        includeBacklinks: false,
+        agentTarget: { noteID: 'note-1', baseRevision: 1 },
+      }), true, `${failure.code} must succeed only after an explicit retry`)
+      assert.equal(mock.calls.assistant.length, callsBeforeFailure + 2)
+      assert.equal(mock.calls.saveHistory.length, savesBeforeFailure)
+      assistant.clearConversation()
+    }
   }
 
   assert.equal(await assistant.previewContext({
@@ -413,38 +704,163 @@ try {
   assert.equal(assistant.proposal, null, 'clearing a conversation must also clear its proposed edit')
   mock.setAssistantProposal(null)
 
+  const writing = useAIWritingStore()
+  writing.clear()
+  mock.setSource(longContextSource)
+  const writingBoundaryInstruction = 'w'.repeat(12000)
+  const writingCallsBeforeLongContext = mock.calls.writing.length
+  const writingSavesBeforeLongContext = mock.calls.saveArtifact.length
+  const longWritingContext = {
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }
+  assert.equal(await writing.previewContext(longWritingContext), true)
+  assert.equal(
+    mock.calls.writing.length,
+    writingCallsBeforeLongContext,
+    'long writing context preview must not call the provider',
+  )
+  assert.deepEqual(
+    writing.contextSources[0],
+    longContextSource,
+    'writing preview must preserve the backend truncation metadata',
+  )
+  assert.equal(await writing.generate({
+    providerID: 'openrouter',
+    modelID: 'openai/gpt-test',
+    kind: 'document',
+    instruction: writingBoundaryInstruction,
+    ...longWritingContext,
+  }), true)
+  assert.equal(mock.calls.writing.length, writingCallsBeforeLongContext + 1)
+  assert.equal(mock.calls.writing.at(-1).instruction.length, 12000)
+  assert.deepEqual(mock.calls.writing.at(-1).expectedSources, [
+    { noteID: 'note-1', inputRevision: 11 },
+  ])
+  assert.deepEqual(
+    writing.sources[0],
+    longContextSource,
+    'writing result must preserve the backend truncation metadata',
+  )
+  assert.equal(mock.calls.saveArtifact.length, writingSavesBeforeLongContext)
+  writing.clear()
+
+  const writingCallsBeforeContextLimit = mock.calls.writing.length
+  const writingContextCallsBeforeLimit = mock.calls.context.length
+  const writingSavesBeforeContextLimit = mock.calls.saveArtifact.length
+  mock.queueContextError({ code: 'AI_INPUT_TOO_LARGE', raw: 'raw-writing-context-limit' })
+  assert.equal(await writing.generate({
+    providerID: 'openrouter',
+    modelID: 'openai/gpt-test',
+    kind: 'document',
+    instruction: writingBoundaryInstruction,
+    noteIDs: ['note-1', 'note-2', 'note-3', 'note-4'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), false)
+  assert.equal(mock.calls.context.length, writingContextCallsBeforeLimit + 1)
+  assert.equal(
+    mock.calls.writing.length,
+    writingCallsBeforeContextLimit,
+    'an oversized context must stop before the writing provider call',
+  )
+  assert.equal(mock.calls.saveArtifact.length, writingSavesBeforeContextLimit)
+  assert.equal(writing.state, 'error')
+  assert.equal(writing.error?.code, 'AI_INPUT_TOO_LARGE')
+  assert.equal(
+    writing.error?.message,
+    '送信する目的または参照資料が大きすぎます。対象を減らして再試行してください。',
+  )
+  assert.doesNotMatch(writing.error?.message ?? '', /raw-writing-context-limit/)
+  assert.equal(writing.content, '')
+  assert.deepEqual(writing.sources, [])
+  assert.equal(writing.targetSource, null)
+  await Promise.resolve()
+  assert.equal(
+    mock.calls.writing.length,
+    writingCallsBeforeContextLimit,
+    'an oversized writing context must not retry automatically',
+  )
+  writing.clear()
+  assert.equal(await writing.generate({
+    providerID: 'openrouter',
+    modelID: 'openai/gpt-test',
+    kind: 'document',
+    instruction: '対象を減らして文章を再生成',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true, 'a smaller writing context must run only after an explicit retry')
+  assert.equal(mock.calls.writing.length, writingCallsBeforeContextLimit + 1)
+  assert.equal(mock.calls.saveArtifact.length, writingSavesBeforeContextLimit)
+  writing.clear()
+
+  for (const failure of [
+    {
+      code: 'AI_TIMEOUT',
+      message: 'AI プロバイダーが時間内に応答しませんでした。',
+      instruction: 'タイムアウトする文章作成',
+    },
+    {
+      code: 'AI_INVALID_RESPONSE',
+      message: 'AI プロバイダーから有効な文章を受け取れませんでした。',
+      instruction: '不正応答になる文章作成',
+      retryInstruction: '不正応答後に明示再生成',
+    },
+    {
+      code: 'AI_INPUT_TOO_LARGE',
+      message: '送信する目的または参照資料が大きすぎます。対象を減らして再試行してください。',
+      instruction: writingBoundaryInstruction,
+      retryInstruction: '目的を短くして明示再生成',
+    },
+  ]) {
+    const callsBeforeFailure = mock.calls.writing.length
+    const savesBeforeFailure = mock.calls.saveArtifact.length
+    mock.queueWritingError({ code: failure.code, raw: `raw-writing-${failure.code}` })
+    assert.equal(await writing.generate({
+      providerID: 'openrouter',
+      modelID: 'openai/gpt-test',
+      kind: 'document',
+      instruction: failure.instruction,
+      noteIDs: ['note-1'],
+      searchQuery: '',
+      includeBacklinks: false,
+    }), false)
+    assert.equal(mock.calls.writing.length, callsBeforeFailure + 1, `${failure.code} must not retry automatically`)
+    assert.equal(mock.calls.saveArtifact.length, savesBeforeFailure, `${failure.code} must not save an artifact`)
+    assert.equal(writing.state, 'error')
+    assert.equal(writing.error?.code, failure.code)
+    assert.equal(writing.error?.message, failure.message)
+    assert.doesNotMatch(writing.error?.message ?? '', new RegExp(`raw-writing-${failure.code}`))
+    assert.equal(writing.content, '')
+    assert.deepEqual(writing.sources, [])
+    assert.equal(writing.targetSource, null)
+    await Promise.resolve()
+    assert.equal(mock.calls.writing.length, callsBeforeFailure + 1, `${failure.code} must not retry in a later tick`)
+    writing.clear()
+    if (failure.retryInstruction) {
+      assert.equal(await writing.generate({
+        providerID: 'openrouter',
+        modelID: 'openai/gpt-test',
+        kind: 'document',
+        instruction: failure.retryInstruction,
+        noteIDs: ['note-1'],
+        searchQuery: '',
+        includeBacklinks: false,
+      }), true, `${failure.code} must succeed only after an explicit retry`)
+      assert.equal(mock.calls.writing.length, callsBeforeFailure + 2)
+      assert.equal(mock.calls.saveArtifact.length, savesBeforeFailure)
+      writing.clear()
+    }
+  }
+
   mock.setSource({
     noteID: 'note-1',
     title: '対象ノート',
     revision: 1,
     contentByte: 120,
   })
-  const writing = useAIWritingStore()
-  writing.clear()
-  assert.equal(await writing.previewContext({
-    noteIDs: ['note-1'],
-    searchQuery: '',
-    includeBacklinks: false,
-  }), true)
-  assert.equal(mock.calls.writing.length, 0, 'writing context preview must not call the provider')
-  const artifactSavesBeforeTimeout = mock.calls.saveArtifact.length
-  mock.queueWritingError({ code: 'AI_TIMEOUT', raw: 'raw-writing-timeout' })
-  assert.equal(await writing.generate({
-    providerID: 'openrouter',
-    modelID: 'openai/gpt-test',
-    kind: 'document',
-    instruction: 'タイムアウトする文章作成',
-    noteIDs: ['note-1'],
-    searchQuery: '',
-    includeBacklinks: false,
-  }), false)
-  assert.equal(writing.state, 'error')
-  assert.equal(writing.error?.code, 'AI_TIMEOUT')
-  assert.equal(writing.error?.message, 'AI プロバイダーが時間内に応答しませんでした。')
-  assert.doesNotMatch(writing.error?.message ?? '', /raw-writing-timeout/)
-  assert.equal(writing.content, '')
-  assert.equal(mock.calls.saveArtifact.length, artifactSavesBeforeTimeout)
-  writing.clear()
   assert.equal(await writing.previewContext({
     noteIDs: ['note-1'],
     searchQuery: '',

@@ -135,8 +135,10 @@ func TestServiceStopsAgentOnContextCancellationAndClassifiesTimeout(t *testing.T
 		service, db := newV3Service(t, adapter)
 		ctx, cancel := context.WithCancel(t.Context())
 		result := make(chan error, 1)
+		input := validAgentAssistantInput()
+		input.RequestID = "externally-canceled-agent"
 		go func() {
-			_, err := service.RunAssistant(ctx, validAgentAssistantInput())
+			_, err := service.RunAssistant(ctx, input)
 			result <- err
 		}()
 
@@ -177,6 +179,51 @@ func TestServiceStopsAgentOnContextCancellationAndClassifiesTimeout(t *testing.T
 		}
 		assertAIExecutionHasNoPersistentSideEffects(t, db)
 	})
+}
+
+func TestServiceCancelAssistantStopsAgentWithoutProposalOrPersistence(t *testing.T) {
+	started := make(chan struct{}, 1)
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{},
+		structured:          `{"message":"must not complete","hasProposal":true,"reason":"must not persist","before":"current body","after":"changed body"}`,
+		started:             started,
+		release:             make(chan struct{}),
+	}
+	service, db := newV3Service(t, adapter)
+	input := validAgentAssistantInput()
+	input.RequestID = "agent-request-1"
+
+	type agentOutcome struct {
+		result AssistantResult
+		err    error
+	}
+	outcome := make(chan agentOutcome, 1)
+	go func() {
+		result, err := service.RunAssistant(t.Context(), input)
+		outcome <- agentOutcome{result: result, err: err}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Agent request did not reach the provider adapter")
+	}
+	if !service.CancelAssistant(input.RequestID) {
+		t.Fatal("matching request ID did not cancel the active Agent")
+	}
+	select {
+	case result := <-outcome:
+		if !errors.Is(result.err, ErrCancelled) || result.result.Proposal != nil || result.result.Messages != nil {
+			t.Fatalf("canceled Agent outcome = %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled Agent request did not finish")
+	}
+	if !service.tryStartGeneration() {
+		t.Fatal("canceled Agent kept the app-wide generation lock")
+	}
+	service.finishGeneration()
+	assertAIExecutionHasNoPersistentSideEffects(t, db)
 }
 
 func validAgentAssistantInput() AssistantInput {

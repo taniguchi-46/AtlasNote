@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"strings"
+	"sync"
 )
 
 const (
@@ -10,7 +11,92 @@ const (
 	aiWritingOutputTokens   = 4096
 )
 
-func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (AssistantResult, error) {
+type assistantRequest struct {
+	id      string
+	cancel  context.CancelFunc
+	cleanup func()
+
+	mu           sync.Mutex
+	userCanceled bool
+	terminal     bool
+}
+
+func (r *assistantRequest) markCanceled() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.userCanceled || r.terminal {
+		return false
+	}
+	r.userCanceled = true
+	return true
+}
+
+func (r *assistantRequest) finish() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.terminal = true
+	return r.userCanceled
+}
+
+func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (result AssistantResult, err error) {
+	requestCtx, request, err := s.startAssistantRequest(ctx, input.RequestID)
+	if err != nil {
+		return AssistantResult{}, err
+	}
+	if request == nil {
+		return s.runAssistant(ctx, input)
+	}
+	defer func() {
+		userCanceled := request.finish()
+		s.assistantMu.Lock()
+		if s.activeAssistant == request {
+			s.activeAssistant = nil
+		}
+		s.assistantMu.Unlock()
+		request.cleanup()
+		if userCanceled {
+			result = AssistantResult{}
+			err = ErrCancelled
+		}
+	}()
+	return s.runAssistant(requestCtx, input)
+}
+
+func (s *Service) startAssistantRequest(ctx context.Context, requestID string) (context.Context, *assistantRequest, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return ctx, nil, nil
+	}
+	operationCtx, cleanup := s.operationContext(ctx)
+	request := &assistantRequest{id: requestID, cancel: cleanup, cleanup: cleanup}
+
+	s.assistantMu.Lock()
+	if s.activeAssistant != nil {
+		s.assistantMu.Unlock()
+		cleanup()
+		return ctx, nil, ErrBusy
+	}
+	s.activeAssistant = request
+	s.assistantMu.Unlock()
+	return operationCtx, request, nil
+}
+
+func (s *Service) CancelAssistant(requestID string) bool {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return false
+	}
+	s.assistantMu.Lock()
+	request := s.activeAssistant
+	s.assistantMu.Unlock()
+	if request == nil || request.id != requestID || !request.markCanceled() {
+		return false
+	}
+	request.cancel()
+	return true
+}
+
+func (s *Service) runAssistant(ctx context.Context, input AssistantInput) (AssistantResult, error) {
 	providerID, err := normalizeProviderID(input.ProviderID)
 	if err != nil {
 		return AssistantResult{}, err

@@ -430,6 +430,13 @@ func (a *App) RunAIAssistant(input aiservice.AssistantInput) aiservice.Assistant
 	return aiservice.AssistantResponse{Result: &result}
 }
 
+func (a *App) CancelAIAssistant(requestID string) aiservice.AssistantCancelResponse {
+	if a.aiService == nil {
+		return aiservice.AssistantCancelResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	return aiservice.AssistantCancelResponse{Canceled: a.aiService.CancelAssistant(requestID)}
+}
+
 func (a *App) SaveAIHistory(input aiservice.SaveAIHistoryInput) aiservice.AIHistoryResponse {
 	if a.aiService == nil {
 		return aiservice.AIHistoryResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}

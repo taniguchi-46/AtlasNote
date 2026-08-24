@@ -362,6 +362,14 @@ assert.ok(
 )
 assert.match(inputShellSource, /type="submit"/)
 assert.match(inputShellSource, /:disabled="!canSubmitComposer"/)
+assert.match(
+  inputShellSource,
+  /v-if="assistantStore\.isBusy"[\s\S]*?type="button"[\s\S]*?title="AI処理を停止"[\s\S]*?aria-label="AI処理を停止"/,
+  'Assistant context loading and generation must replace send with an accessible stop button',
+)
+assert.match(inputShellSource, /:disabled="assistantStore\.state === 'canceling'"/)
+assert.match(inputShellSource, /@click="stopAssistant"[\s\S]*?<SquareIcon/)
+assert.match(inputShellSource, /v-else[\s\S]*?type="submit"/)
 assert.match(inputShellSource, /:maxlength="composerMaxLength"/)
 assert.match(inputShellSource, /:readonly="isFixedScopeToolSelected"/)
 assert.match(workspaceSource, /chatStore\.selectedTool === 'writing' \? 12000 : 8000/)
@@ -379,6 +387,9 @@ assert.match(workspaceSource, /const prompt = tool && fixedScopeTools\.has\(tool
 assert.match(workspaceSource, /const isSubmitting = ref\(false\)/)
 assert.match(workspaceSource, /if \(isSubmitting\.value\) return/)
 assert.match(workspaceSource, /isSubmitting\.value = true[\s\S]*?try \{[\s\S]*?await runComposerSubmission\(\)[\s\S]*?finally \{[\s\S]*?isSubmitting\.value = false/)
+assert.match(workspaceSource, /if \(assistantStore\.state === 'canceling'\) return 'AI処理を停止しています…'/)
+assert.match(workspaceSource, /assistantStore\.state === 'generating' && assistantStore\.error[\s\S]*?AI処理は継続しています。/)
+assert.match(workspaceSource, /async function stopAssistant\(\) \{\s*if \(assistantStore\.state === 'canceling'\) return\s*await assistantStore\.cancel\(\)/)
 assert.match(workspaceSource, /const draftSnapshot = chatStore\.draft/)
 assert.match(workspaceSource, /if \(chatStore\.draft === draftSnapshot\) chatStore\.setDraft\(''\)/)
 assert.match(workspaceTemplate, /title="保存済みの履歴と成果物を開く"[\s\S]*?:disabled="isAnyBusy"/)

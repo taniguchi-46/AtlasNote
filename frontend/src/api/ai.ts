@@ -195,6 +195,7 @@ export type AIContextResponse = {
 }
 
 export type AssistantInput = {
+  requestID: string
   providerID: AIProviderID
   modelID: string
   kind: AssistantKind
@@ -238,6 +239,11 @@ export type AgentEditProposal = {
 
 export type AssistantResponse = {
   result?: AssistantResult
+  error?: SafeAIError
+}
+
+export type AssistantCancelResponse = {
+  canceled: boolean
   error?: SafeAIError
 }
 
@@ -356,6 +362,7 @@ type AIWailsBridge = {
   CancelAILibrarian(requestID: string): Promise<LibrarianCancelResponse>
   PrepareAIContext(input: AIContextInput): Promise<AIContextResponse>
   RunAIAssistant(input: AssistantInput): Promise<AssistantResponse>
+  CancelAIAssistant(requestID: string): Promise<AssistantCancelResponse>
   SaveAIHistory(input: SaveAIHistoryInput): Promise<AIHistoryResponse>
   ListAIHistories(): Promise<AIHistoryListResponse>
   GetAIHistory(id: string): Promise<AIHistoryResponse>
@@ -430,6 +437,10 @@ export function prepareAIContext(input: AIContextInput): Promise<AIContextRespon
 
 export function runAIAssistant(input: AssistantInput): Promise<AssistantResponse> {
   return getAIWailsBridge().RunAIAssistant(input)
+}
+
+export function cancelAIAssistant(requestID: string): Promise<AssistantCancelResponse> {
+  return getAIWailsBridge().CancelAIAssistant(requestID)
 }
 
 export function saveAIHistory(input: SaveAIHistoryInput): Promise<AIHistoryResponse> {

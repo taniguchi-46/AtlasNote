@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  cancelAIAssistant,
   deleteAIHistory,
   deleteAllAIHistories,
   getAIHistory,
@@ -21,7 +22,7 @@ import {
 } from '../api/ai'
 import { useAIStore } from './useAIStore'
 
-export type AssistantState = 'idle' | 'loading-context' | 'generating' | 'success' | 'error' | 'stale' | 'orphaned'
+export type AssistantState = 'idle' | 'loading-context' | 'generating' | 'canceling' | 'success' | 'error' | 'stale' | 'orphaned'
 
 export type AssistantError = {
   code: string
@@ -122,6 +123,16 @@ function sourceKey(input: Pick<AssistantRequest, 'kind' | 'mode' | 'question' | 
   })
 }
 
+let fallbackRequestSequence = 0
+
+function createAssistantRequestID() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return `assistant-${globalThis.crypto.randomUUID()}`
+  }
+  fallbackRequestSequence += 1
+  return `assistant-${Date.now().toString(36)}-${fallbackRequestSequence.toString(36)}`
+}
+
 export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const aiStore = useAIStore()
   const state = ref<AssistantState>('idle')
@@ -135,10 +146,16 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const histories = ref<AIHistory[]>([])
   const selectedHistoryID = ref<string | null>(null)
   const activeRequest = ref<AssistantRequest | null>(null)
-  const isBusy = computed(() => state.value === 'loading-context' || state.value === 'generating')
+  const isBusy = computed(() => (
+    state.value === 'loading-context'
+    || state.value === 'generating'
+    || state.value === 'canceling'
+  ))
   let preparedContextKey = ''
   let latestContextRequest = 0
   let latestGenerationRequest = 0
+  let activeBackendRequestID: string | null = null
+  let cancelRequestedRequestID: string | null = null
   let completedMessages: AIConversationMessage[] = []
 
   function clearError() {
@@ -217,12 +234,16 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     clearError()
     state.value = 'generating'
     proposal.value = null
+    const backendRequestID = createAssistantRequestID()
+    activeBackendRequestID = backendRequestID
+    cancelRequestedRequestID = null
     messages.value = [
       ...request.messages,
       { role: 'user', content: request.question },
     ]
     try {
       const response = await runAIAssistant({
+        requestID: backendRequestID,
         providerID: request.providerID,
         modelID: request.modelID,
         kind: request.kind,
@@ -242,6 +263,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         state.value = 'error'
         return false
       }
+      clearError()
       messages.value = response.result.messages
       citations.value = response.result.citations ?? []
       proposal.value = response.result.proposal ?? null
@@ -257,6 +279,48 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       if (requestID !== latestGenerationRequest) return false
       error.value = errorFromUnknown(cause)
       state.value = 'error'
+      return false
+    } finally {
+      if (activeBackendRequestID === backendRequestID) {
+        activeBackendRequestID = null
+        cancelRequestedRequestID = null
+      }
+    }
+  }
+
+  async function cancel() {
+    if (state.value === 'loading-context') {
+      latestContextRequest += 1
+      latestGenerationRequest += 1
+      preparedContextKey = ''
+      error.value = createError('AI_CANCELLED')
+      state.value = 'error'
+      return true
+    }
+    if (state.value === 'canceling') return false
+    if (state.value !== 'generating' || !activeBackendRequestID) return false
+
+    const requestID = activeBackendRequestID
+    cancelRequestedRequestID = requestID
+    clearError()
+    state.value = 'canceling'
+    try {
+      const response = await cancelAIAssistant(requestID)
+      if (activeBackendRequestID !== requestID || state.value !== 'canceling') {
+        return response.canceled && !response.error
+      }
+      if (response.error || !response.canceled) {
+        cancelRequestedRequestID = null
+        error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
+        state.value = 'generating'
+        return false
+      }
+      return true
+    } catch (cause) {
+      if (activeBackendRequestID !== requestID || state.value !== 'canceling') return false
+      cancelRequestedRequestID = null
+      error.value = errorFromUnknown(cause)
+      state.value = 'generating'
       return false
     }
   }
@@ -382,6 +446,13 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   function clearConversation() {
+    const requestID = activeBackendRequestID
+    const shouldCancelBackend = Boolean(requestID && cancelRequestedRequestID !== requestID)
+    activeBackendRequestID = null
+    cancelRequestedRequestID = null
+    if (requestID && shouldCancelBackend) {
+      void cancelAIAssistant(requestID).catch(() => undefined)
+    }
     latestContextRequest += 1
     latestGenerationRequest += 1
     state.value = 'idle'
@@ -424,6 +495,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     refreshHistories,
     previewContext,
     ask,
+    cancel,
     save,
     loadHistory,
     removeHistory,

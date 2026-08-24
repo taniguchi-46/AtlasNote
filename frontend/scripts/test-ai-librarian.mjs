@@ -164,6 +164,11 @@ try {
     'cancel API failures must remain visible while the backend request is still active',
   )
   assert.match(workspaceSource, /completeLibrarianTimelineTrace\(/, 'terminal librarian states must update the timeline')
+  assert.match(
+    panelSource,
+    /if \(pool\.length === 0\) \{[\s\S]*?librarianStore\.setEmpty\(currentNote\.id, currentNote\.revision, requestedOperation\)[\s\S]*?return true/,
+    'a local empty candidate pool must become an empty result without starting the provider',
+  )
 
   setActivePinia(createPinia())
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-ai-librarian.mjs')).href)
@@ -202,6 +207,38 @@ try {
   }))
   assert.equal(store.state, 'success')
   assert.equal(store.result.candidates[0].noteID, 'note-2')
+
+  const emptyInput = { ...input, noteID: 'note-empty-result', baseRevision: 22 }
+  const emptyTraceID = chatStore.appendToolTrace('related', '関連メモを生成しています。')
+  const startsBeforeEmptyResult = mock.calls.start.length
+  assert.equal(await store.start(emptyInput), true)
+  mock.emit(event({
+    noteID: 'note-empty-result',
+    baseRevision: 22,
+    phase: 'completed',
+    sequence: 1,
+    result: {
+      operation: 'related',
+      quality: 'empty',
+      candidates: [],
+    },
+  }))
+  assert.equal(mock.calls.start.length, startsBeforeEmptyResult + 1)
+  assert.equal(store.state, 'empty')
+  assert.equal(store.error, null)
+  assert.deepEqual(store.result?.candidates, [])
+  assert.equal(store.isGenerating, false)
+  assert.equal(completeTimelineTrace(emptyTraceID), true)
+  const emptyTrace = chatStore.timeline.find((entry) => entry.id === emptyTraceID)
+  assert.equal(emptyTrace?.status, 'success')
+  assert.equal(emptyTrace?.content, '候補は見つかりませんでした。')
+
+  const startsBeforeLocalEmpty = mock.calls.start.length
+  store.setEmpty('note-local-empty', 23, 'related')
+  assert.equal(mock.calls.start.length, startsBeforeLocalEmpty, 'a local empty result must not start the provider')
+  assert.equal(store.state, 'empty')
+  assert.equal(store.error, null)
+  assert.deepEqual(store.result, { operation: 'related', quality: 'empty', candidates: [] })
 
   const secondInput = { ...input, noteID: 'note-3', baseRevision: 8 }
   const cancelTraceID = chatStore.appendToolTrace('related', '関連メモを生成しています。')

@@ -519,6 +519,18 @@
             <span class="ai-chat-toolbar-spacer" />
 
             <button
+              v-if="assistantStore.isBusy"
+              class="ai-chat-send-button"
+              type="button"
+              title="AI処理を停止"
+              aria-label="AI処理を停止"
+              :disabled="assistantStore.state === 'canceling'"
+              @click="stopAssistant"
+            >
+              <SquareIcon :size="15" aria-hidden="true" />
+            </button>
+            <button
+              v-else
               class="ai-chat-send-button"
               type="submit"
               :title="sendButtonLabel"
@@ -565,6 +577,7 @@ import {
   SendIcon,
   Settings2Icon,
   SparklesIcon,
+  SquareIcon,
   TagsIcon,
   UserIcon,
   WrenchIcon,
@@ -940,7 +953,11 @@ const assistantStateWarning = computed(() => {
   return ''
 })
 const composerStatus = computed(() => {
+  if (assistantStore.state === 'canceling') return 'AI処理を停止しています…'
   if (assistantStore.state === 'loading-context') return '参照ノートを確認しています…'
+  if (assistantStore.state === 'generating' && assistantStore.error) {
+    return `${assistantStore.error.message} AI処理は継続しています。`
+  }
   if (assistantStore.state === 'generating') return isWebSearchSelected.value
     ? 'Webを検索し、回答を生成しています…'
     : 'AIの回答を生成しています…'
@@ -1311,6 +1328,11 @@ async function submitComposer() {
   } finally {
     isSubmitting.value = false
   }
+}
+
+async function stopAssistant() {
+  if (assistantStore.state === 'canceling') return
+  await assistantStore.cancel()
 }
 
 async function runComposerSubmission() {

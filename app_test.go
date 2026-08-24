@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	aiservice "atlasnote/internal/ai"
 	"atlasnote/internal/credential"
@@ -42,6 +43,8 @@ type appTestAIProviderAdapter struct {
 	structuredErr    error
 	structuredInput  aiservice.StructuredGenerationInput
 	structuredCalls  int
+	started          chan<- struct{}
+	release          <-chan struct{}
 }
 
 func (a *appTestAIProviderAdapter) CheckConnection(context.Context, aiservice.ProviderID, string) error {
@@ -62,9 +65,19 @@ func (a *appTestAIProviderAdapter) GenerateSummary(context.Context, aiservice.Pr
 	return a.summaryResult, nil
 }
 
-func (a *appTestAIProviderAdapter) GenerateText(_ context.Context, _ aiservice.ProviderID, _ string, input aiservice.TextGenerationInput) (aiservice.TextGenerationResult, error) {
+func (a *appTestAIProviderAdapter) GenerateText(ctx context.Context, _ aiservice.ProviderID, _ string, input aiservice.TextGenerationInput) (aiservice.TextGenerationResult, error) {
 	a.textCalls++
 	a.textInput = input
+	if a.started != nil {
+		a.started <- struct{}{}
+	}
+	if a.release != nil {
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+			return aiservice.TextGenerationResult{}, ctx.Err()
+		}
+	}
 	if a.textErr != nil {
 		return aiservice.TextGenerationResult{}, a.textErr
 	}
@@ -600,6 +613,98 @@ func TestAppAIAssistantReturnsAgentProposalWithoutApplyingIt(t *testing.T) {
 	}
 	if strings.Contains(string(serialized), secretMarker) {
 		t.Fatal("rejected Agent response exposed an API key")
+	}
+}
+
+func TestAppCancelAIAssistantReturnsSafeCancellationWithoutPersistence(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const (
+		secretMarker   = "wails-cancel-secret-marker"
+		questionMarker = "wails-cancel-question-marker"
+		requestID      = "wails-assistant-request-1"
+	)
+	started := make(chan struct{}, 1)
+	adapter := &appTestAIProviderAdapter{
+		textResult: aiservice.TextGenerationResult{Text: "must not complete"},
+		started:    started,
+		release:    make(chan struct{}),
+	}
+	aiService := aiservice.NewServiceWithAdapter(
+		aiservice.NewRepository(db),
+		credential.NewManager(credential.NewSessionStore()),
+		adapter,
+	)
+	aiService.SetNoteContextProvider(appTestAIContextProvider{notes: map[string]aiservice.ContextNote{
+		"note-1": {NoteID: "note-1", Title: "Current", Content: "current body", Revision: 4},
+	}})
+	app := &App{ctx: t.Context(), aiService: aiService}
+	if _, err := app.ConfigureAIProvider(aiservice.ConfigureProviderInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		APIKey:     secretMarker,
+		ModelID:    "openai/cancel-test",
+	}); err != nil {
+		t.Fatalf("configure AI provider: %v", err)
+	}
+
+	response := make(chan aiservice.AssistantResponse, 1)
+	go func() {
+		response <- app.RunAIAssistant(aiservice.AssistantInput{
+			RequestID:  requestID,
+			ProviderID: aiservice.ProviderOpenRouter,
+			ModelID:    "openai/cancel-test",
+			Kind:       aiservice.AssistantKindQA,
+			Mode:       aiservice.ChatModeAsk,
+			Question:   questionMarker,
+			NoteIDs:    []string{"note-1"},
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Assistant request did not reach the Wails test adapter")
+	}
+	if canceled := app.CancelAIAssistant("wrong-request"); canceled.Error != nil || canceled.Canceled {
+		t.Fatalf("mismatched Wails cancellation = %#v", canceled)
+	}
+	canceled := app.CancelAIAssistant(requestID)
+	if canceled.Error != nil || !canceled.Canceled {
+		t.Fatalf("matching Wails cancellation = %#v", canceled)
+	}
+	select {
+	case result := <-response:
+		if result.Error == nil || result.Error.Code != aiservice.ErrorCodeCancelled || result.Result != nil {
+			t.Fatalf("canceled Wails Assistant response = %#v", result)
+		}
+		serialized, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("serialize canceled Assistant response: %v", err)
+		}
+		if strings.Contains(string(serialized), secretMarker) || strings.Contains(string(serialized), questionMarker) {
+			t.Fatal("canceled Assistant response exposed request or credential content")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled Wails Assistant request did not finish")
+	}
+	if repeated := app.CancelAIAssistant(requestID); repeated.Error != nil || repeated.Canceled {
+		t.Fatalf("terminal Wails cancellation = %#v", repeated)
+	}
+	var histories int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM ai_histories").Scan(&histories); err != nil {
+		t.Fatalf("count histories after cancellation: %v", err)
+	}
+	if histories != 0 {
+		t.Fatalf("canceled Assistant persisted %d histories", histories)
+	}
+
+	unavailable := (&App{}).CancelAIAssistant(requestID)
+	if unavailable.Error == nil || unavailable.Error.Code != aiservice.ErrorCodeConfigurationUnavailable || unavailable.Canceled {
+		t.Fatalf("unavailable Wails cancellation = %#v", unavailable)
 	}
 }
 

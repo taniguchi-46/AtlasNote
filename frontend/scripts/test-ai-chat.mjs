@@ -225,6 +225,8 @@ try {
   for (const failure of [
     { code: 'AI_TIMEOUT', message: 'AI プロバイダーが時間内に応答しませんでした。' },
     { code: 'AI_CANCELLED', message: 'AI処理をキャンセルしました。' },
+    { code: 'AI_INVALID_RESPONSE', message: 'AI プロバイダーから有効な回答を受け取れませんでした。' },
+    { code: 'AI_INPUT_TOO_LARGE', message: '送信する質問または参照資料が大きすぎます。対象を減らして再試行してください。' },
   ]) {
     setActivePinia(createPinia())
     const failureStore = useAIChatStore()

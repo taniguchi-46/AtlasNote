@@ -219,6 +219,7 @@ type AIContextResponse struct {
 }
 
 type AssistantInput struct {
+	RequestID        string                  `json:"requestID,omitempty"`
 	ProviderID       ProviderID              `json:"providerID"`
 	ModelID          string                  `json:"modelID"`
 	Kind             AssistantKind           `json:"kind"`
@@ -269,6 +270,11 @@ type AgentEditProposal struct {
 type AssistantResponse struct {
 	Result *AssistantResult `json:"result,omitempty"`
 	Error  *SafeError       `json:"error,omitempty"`
+}
+
+type AssistantCancelResponse struct {
+	Canceled bool       `json:"canceled"`
+	Error    *SafeError `json:"error,omitempty"`
 }
 
 type AIHistorySource struct {

@@ -247,6 +247,127 @@ func TestServiceSharesGenerationSlotAcrossAssistantAndWriting(t *testing.T) {
 	}
 }
 
+func TestServiceCancelAssistantCorrelatesRequestAndReleasesGenerationSlot(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	adapter := &testV3TextAdapter{
+		testProviderAdapter: &testProviderAdapter{},
+		text:                "generated",
+		started:             started,
+		release:             release,
+	}
+	service, db := newV3Service(t, adapter)
+
+	type assistantOutcome struct {
+		result AssistantResult
+		err    error
+	}
+	run := func(requestID string) <-chan assistantOutcome {
+		outcome := make(chan assistantOutcome, 1)
+		go func() {
+			result, err := service.RunAssistant(t.Context(), AssistantInput{
+				RequestID:  requestID,
+				ProviderID: ProviderOpenRouter,
+				ModelID:    "openai/test",
+				Kind:       AssistantKindQA,
+				Question:   "Question",
+				NoteIDs:    []string{"note-1"},
+			})
+			outcome <- assistantOutcome{result: result, err: err}
+		}()
+		return outcome
+	}
+
+	first := run("assistant-request-1")
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Assistant request did not reach the provider adapter")
+	}
+	if service.CancelAssistant("wrong-request") {
+		t.Fatal("a mismatched request ID canceled the active Assistant")
+	}
+	select {
+	case outcome := <-first:
+		t.Fatalf("mismatched cancellation completed Assistant: %#v", outcome)
+	default:
+	}
+	if !service.CancelAssistant("assistant-request-1") {
+		t.Fatal("matching request ID did not cancel the active Assistant")
+	}
+	if service.CancelAssistant("assistant-request-1") {
+		t.Fatal("Assistant cancellation was not idempotent")
+	}
+	select {
+	case outcome := <-first:
+		if !errors.Is(outcome.err, ErrCancelled) || outcome.result.Messages != nil {
+			t.Fatalf("canceled Assistant outcome = %#v, want ErrCancelled and no result", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled Assistant request did not finish")
+	}
+	if !service.tryStartGeneration() {
+		t.Fatal("canceled Assistant kept the app-wide generation lock")
+	}
+	service.finishGeneration()
+
+	secondStarted := make(chan struct{}, 1)
+	secondRelease := make(chan struct{})
+	adapter.started = secondStarted
+	adapter.release = secondRelease
+	second := run("assistant-request-2")
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second Assistant request did not reach the provider adapter")
+	}
+	if service.CancelAssistant("assistant-request-1") {
+		t.Fatal("a stale request ID canceled the newer Assistant")
+	}
+	select {
+	case outcome := <-second:
+		t.Fatalf("stale cancellation completed newer Assistant: %#v", outcome)
+	default:
+	}
+	close(secondRelease)
+	select {
+	case outcome := <-second:
+		if outcome.err != nil || len(outcome.result.Messages) != 2 {
+			t.Fatalf("second Assistant outcome = %#v", outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second Assistant request did not finish")
+	}
+	if service.CancelAssistant("assistant-request-2") {
+		t.Fatal("a terminal Assistant remained cancelable")
+	}
+	assertAIExecutionHasNoPersistentSideEffects(t, db)
+}
+
+func TestAssistantRequestCancellationAndTerminalStateAreAtomic(t *testing.T) {
+	for index := 0; index < 100; index++ {
+		request := &assistantRequest{}
+		start := make(chan struct{})
+		canceled := make(chan bool, 1)
+		finishedCanceled := make(chan bool, 1)
+		go func() {
+			<-start
+			canceled <- request.markCanceled()
+		}()
+		go func() {
+			<-start
+			finishedCanceled <- request.finish()
+		}()
+		close(start)
+		if cancelWon, finishSawCancel := <-canceled, <-finishedCanceled; cancelWon != finishSawCancel {
+			t.Fatalf("race %d produced inconsistent terminal state: cancel=%t finish=%t", index, cancelWon, finishSawCancel)
+		}
+		if request.markCanceled() {
+			t.Fatalf("race %d allowed cancellation after terminal state", index)
+		}
+	}
+}
+
 func TestServiceRejectsAssistantWithoutContextAndMarksSavedDataStale(t *testing.T) {
 	adapter := &testV3TextAdapter{testProviderAdapter: &testProviderAdapter{}, text: "generated"}
 	service, db := newV3Service(t, adapter)

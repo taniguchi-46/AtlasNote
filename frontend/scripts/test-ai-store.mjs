@@ -331,6 +331,50 @@ try {
   store.discardSummary()
   assert.equal(store.summary, null)
 
+  const generateCallsBeforeEmptyInput = mockAI.calls.generate.length
+  assert.equal(store.beginSummary({
+    noteID: 'note-1', title: '空のノート', content: ' \n ', baseRevision: 6,
+  }), false, 'an empty summary source must be rejected before the provider call')
+  assert.equal(store.summaryState, 'error')
+  assert.equal(store.summaryError.code, 'AI_INPUT_INVALID')
+  assert.equal(mockAI.calls.generate.length, generateCallsBeforeEmptyInput)
+
+  const savedArtifactsBeforeInvalidResponses = mockAI.calls.saveArtifact.length
+  mockAI.queueSummaryResponse({ text: '   \n' })
+  assert.equal(store.beginSummary(sourceNote), true)
+  assert.equal(await store.confirmSummary({
+    noteID: 'note-1', content: 'source-body-marker', revision: 4, hasPendingDraft: false,
+  }), false, 'a blank provider response must fail safely')
+  assert.equal(store.summaryState, 'error')
+  assert.equal(store.summaryError.code, 'AI_INVALID_RESPONSE')
+  assert.match(store.summaryError.message, /有効な応答/)
+  assert.equal(store.summary, null)
+  assert.equal(mockAI.calls.saveArtifact.length, savedArtifactsBeforeInvalidResponses, 'a blank response must not be saved')
+  const generateCallsAfterBlankResponse = mockAI.calls.generate.length
+  await Promise.resolve()
+  assert.equal(mockAI.calls.generate.length, generateCallsAfterBlankResponse, 'a blank response must not retry automatically')
+
+  const oversizedSource = {
+    noteID: 'note-1', title: 'モデル上限を超えるノート', content: '界'.repeat(30_000), baseRevision: 7,
+  }
+  mockAI.queueSummaryResponse({
+    error: { code: 'AI_INPUT_TOO_LARGE', raw: 'raw-summary-too-large-marker' },
+  })
+  assert.equal(store.beginSummary(oversizedSource), true, 'frontend must defer the provider model limit to the backend')
+  assert.equal(await store.confirmSummary({
+    noteID: 'note-1', content: oversizedSource.content, revision: 7, hasPendingDraft: false,
+  }), false)
+  assert.equal(mockAI.calls.generate.at(-1).content, oversizedSource.content, 'long UTF-8 input must reach the backend unchanged')
+  assert.equal(store.summaryState, 'error')
+  assert.equal(store.summaryError.code, 'AI_INPUT_TOO_LARGE')
+  assert.match(store.summaryError.message, /コンテキスト上限/)
+  assert.doesNotMatch(store.summaryError.message, /raw-summary-too-large-marker/)
+  assert.equal(store.summary, null)
+  assert.equal(mockAI.calls.saveArtifact.length, savedArtifactsBeforeInvalidResponses, 'an oversized response must not be saved')
+  const generateCallsAfterOversizedInput = mockAI.calls.generate.length
+  await Promise.resolve()
+  assert.equal(mockAI.calls.generate.length, generateCallsAfterOversizedInput, 'an oversized request must not retry automatically')
+
   await store.initialize()
   const connectionChecksBeforeModelOnlyUpdate = mockAI.calls.test.length
   assert.equal(store.draft.apiKey, '', 'reopened settings must keep the API Key field empty')

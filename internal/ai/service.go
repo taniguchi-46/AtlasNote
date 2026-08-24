@@ -30,6 +30,8 @@ type Service struct {
 	mu               sync.Mutex
 	generationMu     sync.Mutex
 	generating       bool
+	assistantMu      sync.Mutex
+	activeAssistant  *assistantRequest
 	librarianMu      sync.Mutex
 	activeLibrarian  *librarianRequest
 	contextProvider  NoteContextProvider
@@ -616,8 +618,8 @@ func (s *Service) operationContext(ctx context.Context) (context.Context, func()
 	}
 }
 
-// Shutdown is called only during application shutdown. v1 has no
-// user-initiated cancellation, but this stops any in-flight provider request.
+// Shutdown is called only during application shutdown. It remains separate
+// from request-scoped user cancellation and stops every in-flight operation.
 func (s *Service) Shutdown() {
 	if s.shutdownCancel != nil {
 		s.shutdownCancel()
