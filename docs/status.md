@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-24
+最終更新: 2026-08-25
 
 ## 現在のフェーズ
 
@@ -23,6 +23,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - 自動保存、dirty draft、保存失敗時の再試行・破棄、終了前flush
 - ノート選択の非同期応答逆転防止
 - データディレクトリ単位の単一writer保証
+- Pre-Phase 5「ノート保存空間の分割」。既存ルートを移動せず「メイン」として登録し、追加空間を内部ID配下へ作成する。空間ごとにSQLite、Markdown、WebDAV設定・outbox・競合、AIローカル設定・履歴・成果物、同期復旧、単一writer lockを分離する。設定画面の一覧から選択し、同期／AI busy確認とdirty draftのflush、対象空間の事前検証後に選択を保存して自動再起動する。削除・改名・外部フォルダ選択・暗号化は対象外。設計は`docs/development/storage-spaces.md`を正とする（2026-08-25）
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -145,6 +146,7 @@ npm run frontend:lint
 npm --prefix frontend run test:auto-save
 npm --prefix frontend run test:note-operation-queue
 npm --prefix frontend run test:sync
+npm --prefix frontend run test:storage-spaces
 npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
@@ -179,6 +181,7 @@ wails build
 | `docs/development/ai-chat.md` | 単一AIチャット、context、Ask／Agent、ツール実行・保存境界 |
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
+| `docs/development/storage-spaces.md` | 保存空間のディレクトリ、台帳、分離境界、再起動切替 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
 | `docs/todo/todo-phese4.md` | Phase 4 v1の実装前課題・受け入れTODO |
 | `docs/todo/todo-phese4-v2.md` | Phase 4 v2の実装・検証TODO |

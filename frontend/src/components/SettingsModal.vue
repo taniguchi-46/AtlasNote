@@ -170,6 +170,10 @@
             <AISettingsPanel />
           </TabsContent>
 
+          <TabsContent value="storage-spaces" as-child>
+            <StorageSpaceSettingsPanel />
+          </TabsContent>
+
         </main>
       </TabsRoot>
       </DialogContent>
@@ -199,14 +203,17 @@ import { useAppStore } from '../stores/useAppStore'
 import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
 import { useAIStore } from '../stores/useAIStore'
+import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
 import AISettingsPanel from './AISettingsPanel.vue'
+import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
+const storageSpaceStore = useStorageSpaceStore()
 
 const tabs = [
   { id: 'theme', name: 'テーマ' },
@@ -215,6 +222,7 @@ const tabs = [
 ]
 tabs.push({ id: 'sync', name: '同期' })
 tabs.push({ id: 'ai', name: 'AI' })
+tabs.push({ id: 'storage-spaces', name: '保存空間' })
 const activeTab = ref<SettingsTab>('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
 
@@ -225,6 +233,7 @@ watch(
       activeTab.value = requestedTab
       syncStore.resetDraft()
       aiStore.resetDraft()
+      void storageSpaceStore.initialize()
     }
   },
 )
@@ -258,8 +267,8 @@ function handleOpenChange(open: boolean) {
   background-color: var(--bg-editor);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: min(700px, calc(100vw - 32px));
-  height: min(500px, calc(100vh - 48px));
+  width: min(820px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);

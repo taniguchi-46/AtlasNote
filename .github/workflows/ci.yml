@@ -86,6 +86,9 @@ jobs:
       - name: Run sync store tests
         run: npm --prefix frontend run test:sync
 
+      - name: Run storage space tests
+        run: npm --prefix frontend run test:storage-spaces
+
       - name: Run AI store tests
         run: npm --prefix frontend run test:ai-store
 

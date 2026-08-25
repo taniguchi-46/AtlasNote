@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 
@@ -13,6 +15,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/notespace"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
 
@@ -21,12 +24,16 @@ import (
 
 type App struct {
 	ctx                context.Context
+	buildType          string
 	db                 *sql.DB
 	dataLock           *datalock.Lock
 	notes              *note.Service
 	syncService        *syncservice.Service
 	aiService          *aiservice.Service
+	spaceRegistry      *notespace.Registry
+	activeSpace        notespace.Space
 	dataDir            string
+	notesDir           string
 	startupErr         error
 	recoveryReport     note.RecoveryReport
 	syncRecoveryBackup string
@@ -34,7 +41,15 @@ type App struct {
 	closeMu            sync.Mutex
 	closeRequested     bool
 	allowClose         bool
+	restartExecutable  string
+	startProcess       func(string) error
+	quitApplication    func(context.Context)
 }
+
+var (
+	errRestartUnavailable     = errors.New("automatic restart is unavailable")
+	errRestartDevelopmentMode = errors.New("automatic restart is unavailable in Wails development mode")
+)
 
 type StartupStatus struct {
 	Ready              bool                    `json:"ready"`
@@ -43,6 +58,7 @@ type StartupStatus struct {
 	DataDir            string                  `json:"dataDir,omitempty"`
 	MissingNotes       []MissingNoteDiagnostic `json:"missingNotes"`
 	SyncRecoveryBackup string                  `json:"syncRecoveryBackup,omitempty"`
+	ActiveStorageSpace *notespace.Space        `json:"activeStorageSpace,omitempty"`
 }
 
 type MissingNoteDiagnostic struct {
@@ -59,6 +75,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.buildType = runtime.Environment(ctx).BuildType
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -106,6 +123,70 @@ func (a *App) CompleteClose() {
 	if a.ctx != nil {
 		runtime.Quit(a.ctx)
 	}
+}
+
+func (a *App) RestartApp() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return errRestartUnavailable
+	}
+	info, err := os.Stat(executable)
+	if err != nil || !info.Mode().IsRegular() {
+		return errRestartUnavailable
+	}
+
+	a.closeMu.Lock()
+	if a.ctx == nil {
+		a.closeMu.Unlock()
+		return errRestartUnavailable
+	}
+	// wails dev owns the frontend server and the generated *-dev executable.
+	// Relaunching only that child binary leaves it without its server and prevents
+	// the parent CLI from deleting the old executable on Windows.
+	if a.buildType == "dev" {
+		a.closeMu.Unlock()
+		return errRestartDevelopmentMode
+	}
+	a.restartExecutable = executable
+	a.allowClose = true
+	a.closeRequested = false
+	ctx := a.ctx
+	quitApplication := a.quitApplication
+	a.closeMu.Unlock()
+
+	if quitApplication != nil {
+		quitApplication(ctx)
+	} else {
+		runtime.Quit(ctx)
+	}
+	return nil
+}
+
+func (a *App) launchRestartIfRequested() error {
+	a.closeMu.Lock()
+	executable := a.restartExecutable
+	a.restartExecutable = ""
+	startProcess := a.startProcess
+	a.closeMu.Unlock()
+	if executable == "" {
+		return nil
+	}
+	if startProcess != nil {
+		return startProcess(executable)
+	}
+	return startDetachedProcess(executable)
+}
+
+func startDetachedProcess(executable string) error {
+	// executable is resolved by os.Executable and never comes from user input.
+	command := exec.Command(executable)
+	if err := command.Start(); err != nil {
+		return err
+	}
+	if command.Process != nil {
+		_ = command.Process.Release()
+	}
+	return nil
 }
 
 func (a *App) CancelClose() {
@@ -622,16 +703,115 @@ func (a *App) QuitForSyncRecovery() {
 	}
 }
 
+func (a *App) ListStorageSpaces() notespace.ListResult {
+	if a.spaceRegistry == nil {
+		err := a.startupErr
+		if err == nil {
+			err = notespace.ErrUnavailable
+		}
+		return notespace.ListResult{
+			Spaces: []notespace.Space{},
+			Error:  notespace.APIErrorFrom(err),
+		}
+	}
+	result, err := a.spaceRegistry.List()
+	if err != nil {
+		return notespace.ListResult{
+			Spaces: []notespace.Space{},
+			Error:  notespace.APIErrorFrom(err),
+		}
+	}
+	if a.activeSpace.ID != "" {
+		result.ActiveSpaceID = a.activeSpace.ID
+		for index := range result.Spaces {
+			result.Spaces[index].Active = result.Spaces[index].ID == a.activeSpace.ID
+		}
+	}
+	return result
+}
+
+func (a *App) CreateStorageSpace(input notespace.CreateInput) notespace.MutationResult {
+	if a.spaceRegistry == nil {
+		return notespace.MutationResult{Error: notespace.APIErrorFrom(notespace.ErrUnavailable)}
+	}
+	space, activeSpaceID, err := a.spaceRegistry.Create(a.operationContext(), input.Name, a.prepareStorageSpace)
+	if err != nil {
+		return notespace.MutationResult{Error: notespace.APIErrorFrom(err)}
+	}
+	if a.activeSpace.ID != "" {
+		activeSpaceID = a.activeSpace.ID
+		space.Active = space.ID == a.activeSpace.ID
+	}
+	return notespace.MutationResult{Space: &space, ActiveSpaceID: activeSpaceID}
+}
+
+func (a *App) SelectStorageSpace(input notespace.SelectInput) notespace.MutationResult {
+	if a.spaceRegistry == nil {
+		return notespace.MutationResult{Error: notespace.APIErrorFrom(notespace.ErrUnavailable)}
+	}
+	if input.ID == a.activeSpace.ID {
+		space := a.activeSpace
+		return notespace.MutationResult{Space: &space, ActiveSpaceID: space.ID}
+	}
+	space, restartRequired, err := a.spaceRegistry.Select(a.operationContext(), input.ID, a.prepareStorageSpace)
+	if err != nil {
+		return notespace.MutationResult{Error: notespace.APIErrorFrom(err)}
+	}
+	return notespace.MutationResult{
+		Space: &space, ActiveSpaceID: space.ID,
+		RestartRequired: restartRequired || space.ID != a.activeSpace.ID,
+	}
+}
+
+func (a *App) operationContext() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
+}
+
+func (a *App) prepareStorageSpace(ctx context.Context, dataDir string) (returnErr error) {
+	paths := config.PathsForDataDir(dataDir)
+	dataLock, err := datalock.Acquire(paths.LockPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dataLock.Release(); returnErr == nil && err != nil {
+			returnErr = err
+		}
+	}()
+
+	db, err := database.Open(ctx, paths.DatabasePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := db.Close(); returnErr == nil && err != nil {
+			returnErr = err
+		}
+	}()
+	_, err = storage.NewMarkdownStore(paths.NotesDir)
+	return err
+}
+
 func (a *App) GetStartupStatus() StartupStatus {
 	a.statusMu.RLock()
 	defer a.statusMu.RUnlock()
 
+	var activeStorageSpace *notespace.Space
+	if a.activeSpace.ID != "" {
+		active := a.activeSpace
+		activeStorageSpace = &active
+	}
+
 	if a.startupErr != nil {
 		return StartupStatus{
-			Ready:        false,
-			Message:      a.startupErr.Error(),
-			DataDir:      a.dataDir,
-			MissingNotes: []MissingNoteDiagnostic{},
+			Ready:              false,
+			Message:            a.startupErr.Error(),
+			DataDir:            a.dataDir,
+			MissingNotes:       []MissingNoteDiagnostic{},
+			ActiveStorageSpace: activeStorageSpace,
 		}
 	}
 
@@ -640,7 +820,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 		missingNotes = append(missingNotes, MissingNoteDiagnostic{
 			ID:       missing.ID,
 			Title:    missing.Title,
-			FilePath: filepath.Join(a.dataDir, "notes", missing.ContentPath),
+			FilePath: filepath.Join(a.notesDir, missing.ContentPath),
 		})
 	}
 	return StartupStatus{
@@ -649,16 +829,32 @@ func (a *App) GetStartupStatus() StartupStatus {
 		DataDir:            a.dataDir,
 		MissingNotes:       missingNotes,
 		SyncRecoveryBackup: a.syncRecoveryBackup,
+		ActiveStorageSpace: activeStorageSpace,
 	}
 }
 
 func (a *App) initialize(ctx context.Context) {
-	paths, err := config.LoadPaths()
+	basePaths, err := config.LoadPaths()
 	if err != nil {
 		a.startupErr = err
 		return
 	}
-	a.dataDir = paths.DataDir
+	a.dataDir = basePaths.DataDir
+	spaceRegistry, err := notespace.Open(basePaths.DataDir)
+	if err != nil {
+		a.startupErr = err
+		return
+	}
+	a.spaceRegistry = spaceRegistry
+	activeSpace, activeDataDir, err := spaceRegistry.Active()
+	if err != nil {
+		a.startupErr = err
+		return
+	}
+	a.activeSpace = activeSpace
+	a.dataDir = activeDataDir
+	paths := config.PathsForDataDir(activeDataDir)
+	a.notesDir = paths.NotesDir
 	dataLock, err := datalock.Acquire(paths.LockPath)
 	if err != nil {
 		a.startupErr = err

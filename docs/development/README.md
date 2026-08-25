@@ -15,6 +15,7 @@
 | 文書 | 役割 |
 | --- | --- |
 | [ノート競合・保存キュー](note-concurrency.md) | revision、CAS、保存lane |
+| [ノート保存空間](storage-spaces.md) | 保存ルート、空間ごとのSQLite・Markdown・同期・lock、再起動切替 |
 | [WebDAV同期](webdav-sync.md) | Phase 3の同期契約、競合、復旧 |
 | [検索索引](search-index.md) | Markdown全文検索の索引方式 |
 | [検索API](search-api.md) | 検索API、入力検証、エラー契約 |

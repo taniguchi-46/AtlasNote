@@ -206,6 +206,13 @@ try {
 
   assert.equal(store.draft.allowInsecureHTTP, false, 'HTTP opt-in must reset after disconnect')
   assert.equal(store.draft.failSafe, true, 'fail-safe must default to enabled')
+  const syncCallsBeforeSuspension = calls.sync
+  assert.equal(store.suspend(), true, 'an idle sync store must suspend before a storage-space switch')
+  assert.equal(store.isSuspended, true)
+  assert.equal(await store.runSync({ forceRetry: true }), null, 'manual and automatic sync must stay blocked while suspended')
+  assert.equal(calls.sync, syncCallsBeforeSuspension)
+  store.resume()
+  assert.equal(store.isSuspended, false)
   store.dispose()
   console.log('sync store tests passed')
 } finally {

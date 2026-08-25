@@ -46,6 +46,7 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
+| Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
@@ -59,6 +60,14 @@ Go Backend
 - AIワークスペースの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
+
+### ノート保存空間
+
+- `ATLAS_NOTE_DATA_DIR`はAtlas Noteの管理ルートとし、ルート直下の既存SQLite・`notes/`・`atlasnote.lock`を移動せず「メイン」として扱う。
+- 新しい保存空間は表示名ではなく128 bitの内部IDから`spaces/<ID>/`を導出し、各空間に既存のSQLite、Markdown、`.sync-recovery/`、`atlasnote.lock`を配置する。
+- 現在の空間はversion付き`storage-spaces.json`で管理し、短時間の`storage-spaces.lock`と一時ファイル・sync・renameで更新する。不正な台帳を自動上書きしない。
+- 実行中のRepository／Serviceは切り替えず、dirty draftのflush、同期の一時停止、AI／同期busy確認、対象空間の事前検証後に選択を保存する。現在プロセスのDB・lock解放後にアプリを自動再起動し、選択先を初期化する。
+- 設定画面だけで一覧・作成・選択を提供する。削除、改名、外部保存先、暗号化は後続スコープとする。詳細は`docs/development/storage-spaces.md`を正とする。
 
 ### SQLite / Markdown の整合性
 

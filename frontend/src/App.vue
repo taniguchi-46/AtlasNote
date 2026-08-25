@@ -116,7 +116,7 @@ import {
   type StartupStatus,
 } from './api/startup'
 import { ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
-import { CancelClose, CompleteClose } from '../wailsjs/go/main/App'
+import { CancelClose, CompleteClose, RestartApp } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'
@@ -125,8 +125,13 @@ import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
 import { useTagStore } from './stores/useTagStore'
 import { useSyncStore } from './stores/useSyncStore'
 import { useAIStore } from './stores/useAIStore'
+import { useAIAssistantStore } from './stores/useAIAssistantStore'
+import { useAILibrarianStore } from './stores/useAILibrarianStore'
+import { useAIWritingStore } from './stores/useAIWritingStore'
+import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import { logOperationFailure } from './utils/operationLogger'
+import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
 import {
   EDITOR_WIDTH_MIN,
   NOTE_LIST_WIDTH_MAX,
@@ -145,9 +150,34 @@ const searchStore = useSearchStore()
 const tagStore = useTagStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
+const aiAssistantStore = useAIAssistantStore()
+const aiLibrarianStore = useAILibrarianStore()
+const aiWritingStore = useAIWritingStore()
+const storageSpaceStore = useStorageSpaceStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
+storageSpaceStore.setSwitchLifecycle(
+  () => prepareStorageSpaceSwitch({
+    isSyncBusy: () => syncStore.isBusy,
+    isAIBusy: () => (
+      aiStore.isSettingsBusy
+      || aiStore.isGenerating
+      || aiAssistantStore.isBusy
+      || aiLibrarianStore.isGenerating
+      || aiWritingStore.isBusy
+    ),
+    suspendSync: () => syncStore.suspend(),
+    resumeSync: () => syncStore.resume(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    notify: (message, code) => notificationStore.notify(message, {
+      kind: 'warning', source: 'storage-space', code,
+    }),
+  }),
+  async () => {
+    await RestartApp()
+  },
+)
 const startupStatus = ref<StartupStatus | null>(null)
 const isRecoveryBusy = ref(false)
 const recoveryError = ref('')
@@ -443,6 +473,7 @@ onMounted(async () => {
 
   await syncStore.initialize().catch(() => {})
   await aiStore.initialize().catch(() => {})
+  await storageSpaceStore.initialize()
 
   // Apply initial always-on-top status
   try {
@@ -457,6 +488,7 @@ onBeforeUnmount(() => {
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
   syncStore.dispose()
+  storageSpaceStore.clearSwitchLifecycle()
   aiStore.discardSummary()
   document.body.classList.remove('is-pane-resizing')
 })

@@ -5,7 +5,7 @@ import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIco
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 export type AIWorkspacePlacement = 'right' | 'bottom'
 export type AIAgentEditPermission = 'review-required' | 'auto-update'
-export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai'
+export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai' | 'storage-spaces'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360

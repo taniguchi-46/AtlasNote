@@ -132,6 +132,7 @@ export const useSyncStore = defineStore('sync', () => {
   const statusResult = ref<SyncStatusResult | null>(null)
   const conflicts = ref<SyncConflict[]>([])
   const isBusy = ref(false)
+  const isSuspended = ref(false)
   const draft = ref<SyncSettingsDraft>(emptyDraft())
   const configurationTest = ref<SyncConfigurationTestResult | null>(null)
   const configurationTestError = ref('')
@@ -141,6 +142,7 @@ export const useSyncStore = defineStore('sync', () => {
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let retryAttempt = 0
   let retryOptions: SyncRunOptions = {}
+  let retryPaused = false
   let beforeSync: (() => Promise<unknown>) | null = null
 
   const notificationStore = useNotificationStore()
@@ -296,6 +298,7 @@ export const useSyncStore = defineStore('sync', () => {
   }
 
   async function runSync(options: SyncRunOptions = {}, allowBusy = false) {
+    if (isSuspended.value) return null
     if (isBusy.value && !allowBusy) return null
     if (options.forceRetry) clearRetryState()
     isBusy.value = true
@@ -444,7 +447,7 @@ export const useSyncStore = defineStore('sync', () => {
   }
 
   function scheduleAutoSync() {
-    if (!autoSync.value || !statusResult.value?.connection) return
+    if (isSuspended.value || !autoSync.value || !statusResult.value?.connection) return
     status.value = 'pending'
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => {
@@ -456,14 +459,14 @@ export const useSyncStore = defineStore('sync', () => {
   function startPolling(seconds = syncIntervalSeconds.value) {
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = null
-    if (seconds <= 0) return
+    if (isSuspended.value || seconds <= 0) return
     pollTimer = setInterval(() => {
       if (!isBusy.value) void runSync()
     }, seconds * 1000)
   }
 
   function scheduleRetry(options: SyncRunOptions = {}): boolean {
-    if (retryTimer || retryAttempt >= retryDelays.length || !statusResult.value?.connection) return false
+    if (isSuspended.value || retryTimer || retryAttempt >= retryDelays.length || !statusResult.value?.connection) return false
     retryOptions = {
       initializeRemote: options.initializeRemote ?? false,
       importRemote: options.importRemote ?? false,
@@ -488,6 +491,7 @@ export const useSyncStore = defineStore('sync', () => {
     retryTimer = null
     retryAttempt = 0
     retryOptions = {}
+    retryPaused = false
   }
 
   function stopPolling() {
@@ -497,9 +501,36 @@ export const useSyncStore = defineStore('sync', () => {
     debounceTimer = null
   }
 
+  function suspend() {
+    if (isBusy.value) return false
+    isSuspended.value = true
+    stopPolling()
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+      retryPaused = true
+    }
+    return true
+  }
+
+  function resume() {
+    if (!isSuspended.value) return
+    isSuspended.value = false
+    const interval = syncIntervalSeconds.value
+    if (interval > 0 && status.value !== 'auth-required' && status.value !== 'failed') {
+      startPolling(interval)
+    }
+    if (retryPaused) {
+      retryPaused = false
+      retryAttempt = Math.max(0, retryAttempt - 1)
+      scheduleRetry(retryOptions)
+    }
+  }
+
   function dispose() {
     stopPolling()
     clearRetryState()
+    isSuspended.value = false
     beforeSync = null
   }
 
@@ -513,6 +544,7 @@ export const useSyncStore = defineStore('sync', () => {
     statusResult,
     conflicts,
     isBusy,
+    isSuspended,
     draft,
     configurationTest,
     configurationTestError,
@@ -535,6 +567,8 @@ export const useSyncStore = defineStore('sync', () => {
     scheduleAutoSync,
     startPolling,
     stopPolling,
+    suspend,
+    resume,
     dispose,
     setBeforeSync,
   }

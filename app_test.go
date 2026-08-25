@@ -19,6 +19,8 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/notespace"
+	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
 )
 
@@ -1464,6 +1466,267 @@ func TestNewAppCanAcquireDataDirectoryAfterShutdown(t *testing.T) {
 	}
 }
 
+func TestNewAppBootstrapsLegacyStorageSpaceWithoutMovingExistingData(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	db, err := database.Open(t.Context(), filepath.Join(dataDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	markdown, err := storage.NewMarkdownStore(filepath.Join(dataDir, "notes"))
+	if err != nil {
+		t.Fatalf("open legacy markdown store: %v", err)
+	}
+	legacyNotes := note.NewService(note.NewRepository(db), markdown)
+	legacyNote, err := legacyNotes.Create(t.Context(), note.CreateInput{Title: "既存ノート", Content: "legacy-content"})
+	if err != nil {
+		t.Fatalf("create legacy note: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+	legacyMarkdownPath := filepath.Join(dataDir, "notes", legacyNote.ID+".md")
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	status := app.GetStartupStatus()
+	if !status.Ready || status.ActiveStorageSpace == nil || !status.ActiveStorageSpace.Legacy || status.ActiveStorageSpace.Name != "メイン" {
+		t.Fatalf("startup status = %#v", status)
+	}
+	if status.DataDir != filepath.Clean(dataDir) {
+		t.Fatalf("active data dir = %q", status.DataDir)
+	}
+	got, err := app.GetNote(legacyNote.ID)
+	if err != nil || got.Content != "legacy-content" {
+		t.Fatalf("legacy note = %#v, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "atlasnote.db")); err != nil {
+		t.Fatalf("legacy database moved: %v", err)
+	}
+	if content, err := os.ReadFile(legacyMarkdownPath); err != nil || string(content) != "legacy-content" {
+		t.Fatalf("legacy markdown = %q, %v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "spaces")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy bootstrap created a nested active space: %v", err)
+	}
+}
+
+func TestAppStorageSpacesIsolateNotesTagsAIAndSyncState(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	mainApp := NewApp()
+	mainApp.startup(t.Context())
+	if status := mainApp.GetStartupStatus(); !status.Ready {
+		t.Fatalf("main app is not ready: %s", status.Message)
+	}
+	mainSpaces := mainApp.ListStorageSpaces()
+	if mainSpaces.Error != nil || len(mainSpaces.Spaces) != 1 {
+		t.Fatalf("main spaces = %#v", mainSpaces)
+	}
+	mainSpaceID := mainSpaces.ActiveSpaceID
+	mainNote, err := mainApp.CreateNote(note.CreateInput{Title: "メインノート", Content: "main-space-content"})
+	if err != nil {
+		t.Fatalf("create main note: %v", err)
+	}
+	mainTag, err := mainApp.CreateTag(note.TagCreateInput{Name: "main-tag"})
+	if err != nil || mainTag.Tag == nil {
+		t.Fatalf("create main tag: %#v, %v", mainTag, err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := mainApp.db.ExecContext(t.Context(), `
+INSERT INTO ai_provider_settings(
+	provider_id, model_id, credential_ref, credential_storage, created_at, updated_at, is_selected
+) VALUES ('openrouter', 'main-model', 'main-ai-ref', 'persistent', ?, ?, 1)
+`, now, now); err != nil {
+		t.Fatalf("seed main AI settings: %v", err)
+	}
+	if _, err := mainApp.db.ExecContext(t.Context(), `
+INSERT INTO sync_connections(
+	id, endpoint, remote_root, username, vault_id, status, auto_sync, credential_ref, created_at, updated_at
+) VALUES (1, 'https://dav.example.test', 'atlasnote', 'main-user', 'main-vault', 'idle', 0, 'main-sync-ref', ?, ?)
+`, now, now); err != nil {
+		t.Fatalf("seed main sync settings: %v", err)
+	}
+
+	createdSpace := mainApp.CreateStorageSpace(notespace.CreateInput{Name: "仕事"})
+	if createdSpace.Error != nil || createdSpace.Space == nil {
+		t.Fatalf("create work space = %#v", createdSpace)
+	}
+	workSpaceID := createdSpace.Space.ID
+	if createdSpace.ActiveSpaceID != mainSpaceID || createdSpace.Space.Active {
+		t.Fatalf("creating a space changed active selection: %#v", createdSpace)
+	}
+	selection := mainApp.SelectStorageSpace(notespace.SelectInput{ID: workSpaceID})
+	if selection.Error != nil || !selection.RestartRequired {
+		t.Fatalf("select work space = %#v", selection)
+	}
+	mainApp.shutdown(t.Context())
+
+	workApp := NewApp()
+	workApp.startup(t.Context())
+	if status := workApp.GetStartupStatus(); !status.Ready || status.ActiveStorageSpace == nil || status.ActiveStorageSpace.ID != workSpaceID {
+		t.Fatalf("work startup status = %#v", status)
+	}
+	if notes, err := workApp.ListNotes(); err != nil || len(notes) != 0 {
+		t.Fatalf("work notes = %#v, %v", notes, err)
+	}
+	if tags, err := workApp.ListTags(); err != nil || len(tags) != 0 {
+		t.Fatalf("work tags = %#v, %v", tags, err)
+	}
+	if countDatabaseRows(t, workApp.db, "ai_provider_settings") != 0 || countDatabaseRows(t, workApp.db, "sync_connections") != 0 {
+		t.Fatal("work space inherited main AI or sync settings")
+	}
+	workNote, err := workApp.CreateNote(note.CreateInput{Title: "仕事ノート", Content: "work-space-content"})
+	if err != nil {
+		t.Fatalf("create work note: %v", err)
+	}
+	backToMain := workApp.SelectStorageSpace(notespace.SelectInput{ID: mainSpaceID})
+	if backToMain.Error != nil || !backToMain.RestartRequired {
+		t.Fatalf("select main space = %#v", backToMain)
+	}
+	workApp.shutdown(t.Context())
+
+	reopenedMain := NewApp()
+	reopenedMain.startup(t.Context())
+	t.Cleanup(func() { reopenedMain.shutdown(t.Context()) })
+	if status := reopenedMain.GetStartupStatus(); !status.Ready || status.ActiveStorageSpace == nil || status.ActiveStorageSpace.ID != mainSpaceID {
+		t.Fatalf("reopened main status = %#v", status)
+	}
+	mainNotes, err := reopenedMain.ListNotes()
+	if err != nil || len(mainNotes) != 1 || mainNotes[0].ID != mainNote.ID {
+		t.Fatalf("reopened main notes = %#v, %v", mainNotes, err)
+	}
+	mainTags, err := reopenedMain.ListTags()
+	if err != nil || len(mainTags) != 1 || mainTags[0].ID != mainTag.Tag.ID {
+		t.Fatalf("reopened main tags = %#v, %v", mainTags, err)
+	}
+	if countDatabaseRows(t, reopenedMain.db, "ai_provider_settings") != 1 || countDatabaseRows(t, reopenedMain.db, "sync_connections") != 1 {
+		t.Fatal("main AI or sync settings were not preserved")
+	}
+	if _, err := reopenedMain.GetNote(workNote.ID); !errors.Is(err, note.ErrNotFound) {
+		t.Fatalf("work note leaked into main space: %v", err)
+	}
+	assertAppTestFileContent(t, filepath.Join(dataDir, "notes", mainNote.ID+".md"), "main-space-content")
+	assertAppTestFileContent(t, filepath.Join(dataDir, "spaces", workSpaceID, "notes", workNote.ID+".md"), "work-space-content")
+}
+
+func TestSelectStorageSpaceLeavesActiveSelectionWhenTargetIsLocked(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	initial := app.ListStorageSpaces()
+	created := app.CreateStorageSpace(notespace.CreateInput{Name: "仕事"})
+	if initial.Error != nil || created.Error != nil || created.Space == nil {
+		t.Fatalf("space fixtures = %#v / %#v", initial, created)
+	}
+	targetLock, err := datalock.Acquire(filepath.Join(dataDir, "spaces", created.Space.ID, "atlasnote.lock"))
+	if err != nil {
+		t.Fatalf("lock target space: %v", err)
+	}
+	defer targetLock.Release()
+
+	selection := app.SelectStorageSpace(notespace.SelectInput{ID: created.Space.ID})
+	if selection.Error == nil || selection.Error.Code != notespace.ErrorCodeInUse {
+		t.Fatalf("locked selection = %#v", selection)
+	}
+	after := app.ListStorageSpaces()
+	if after.Error != nil || after.ActiveSpaceID != initial.ActiveSpaceID {
+		t.Fatalf("locked selection changed active space: %#v", after)
+	}
+}
+
+func TestDifferentStorageSpacesHaveIndependentWriterLocks(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	mainApp := NewApp()
+	mainApp.startup(t.Context())
+	created := mainApp.CreateStorageSpace(notespace.CreateInput{Name: "仕事"})
+	if created.Error != nil || created.Space == nil {
+		t.Fatalf("create work space = %#v", created)
+	}
+	if selected := mainApp.SelectStorageSpace(notespace.SelectInput{ID: created.Space.ID}); selected.Error != nil {
+		t.Fatalf("select work space = %#v", selected)
+	}
+	mainSessionSpaces := mainApp.ListStorageSpaces()
+	if mainSessionSpaces.ActiveSpaceID == created.Space.ID || !mainSessionSpaces.Spaces[0].Active {
+		t.Fatalf("running main session lost its active-space indicator: %#v", mainSessionSpaces)
+	}
+
+	workApp := NewApp()
+	workApp.startup(t.Context())
+	if status := workApp.GetStartupStatus(); !status.Ready {
+		t.Fatalf("different-space writer was rejected: %s", status.Message)
+	}
+	if _, err := mainApp.CreateNote(note.CreateInput{Title: "main", Content: "main"}); err != nil {
+		t.Fatalf("main writer stopped after selecting another space: %v", err)
+	}
+	if _, err := workApp.CreateNote(note.CreateInput{Title: "work", Content: "work"}); err != nil {
+		t.Fatalf("work writer failed: %v", err)
+	}
+
+	secondWorkApp := NewApp()
+	if status := secondWorkApp.GetStartupStatus(); status.Ready || !strings.Contains(status.Message, datalock.ErrAlreadyLocked.Error()) {
+		t.Fatalf("second work writer status = %#v", status)
+	}
+	secondWorkApp.shutdown(t.Context())
+	workApp.shutdown(t.Context())
+	mainApp.shutdown(t.Context())
+}
+
+func TestNewAppRejectsCorruptStorageSpaceCatalogWithoutOverwrite(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	first := NewApp()
+	first.shutdown(t.Context())
+	catalogPath := filepath.Join(dataDir, "storage-spaces.json")
+	invalid := []byte(`{"version":1,"activeSpaceId":"invalid","spaces":[]}`)
+	if err := os.WriteFile(catalogPath, invalid, 0o600); err != nil {
+		t.Fatalf("write corrupt catalog: %v", err)
+	}
+
+	app := NewApp()
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	status := app.GetStartupStatus()
+	if status.Ready || !strings.Contains(status.Message, notespace.ErrCatalogInvalid.Error()) {
+		t.Fatalf("corrupt catalog startup status = %#v", status)
+	}
+	spaces := app.ListStorageSpaces()
+	if spaces.Error == nil || spaces.Error.Code != notespace.ErrorCodeCatalogInvalid {
+		t.Fatalf("corrupt catalog list result = %#v", spaces)
+	}
+	encoded, err := os.ReadFile(catalogPath)
+	if err != nil || string(encoded) != string(invalid) {
+		t.Fatalf("corrupt catalog was changed: %q, %v", encoded, err)
+	}
+}
+
+func countDatabaseRows(t *testing.T, db *sql.DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+		t.Fatalf("count %s rows: %v", table, err)
+	}
+	return count
+}
+
+func assertAppTestFileContent(t *testing.T, path string, expected string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(content) != expected {
+		t.Fatalf("content at %s = %q, want %q", path, content, expected)
+	}
+}
+
 func TestAppReportsDegradedRecoveryAndKeepsHealthyNotesAvailable(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
@@ -1567,5 +1830,125 @@ func TestCompleteCloseAllowsNextCloseRequest(t *testing.T) {
 	}
 	if app.closeRequested {
 		t.Fatal("expected pending close request to be cleared")
+	}
+}
+
+func TestStartupCapturesWailsDevelopmentBuildType(t *testing.T) {
+	ctx := context.WithValue(t.Context(), "buildtype", "dev")
+	app := &App{}
+
+	app.startup(ctx)
+
+	if app.ctx != ctx {
+		t.Fatal("startup context was not retained")
+	}
+	if app.buildType != "dev" {
+		t.Fatalf("startup build type = %q, want dev", app.buildType)
+	}
+}
+
+func TestRestartAppQueuesRelaunchUntilWailsStops(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	events := make([]string, 0, 2)
+	app := &App{
+		ctx:            context.Background(),
+		buildType:      "production",
+		closeRequested: true,
+		quitApplication: func(context.Context) {
+			events = append(events, "quit")
+		},
+		startProcess: func(path string) error {
+			if path != executable {
+				t.Fatalf("restart executable = %q, want %q", path, executable)
+			}
+			events = append(events, "start")
+			return nil
+		},
+	}
+
+	if err := app.RestartApp(); err != nil {
+		t.Fatalf("queue restart: %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"quit"}) {
+		t.Fatalf("events before Wails stops = %#v", events)
+	}
+	if !app.allowClose || app.closeRequested {
+		t.Fatalf("close state = allow:%v requested:%v", app.allowClose, app.closeRequested)
+	}
+	if err := app.launchRestartIfRequested(); err != nil {
+		t.Fatalf("launch restart: %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"quit", "start"}) {
+		t.Fatalf("restart events = %#v", events)
+	}
+	if err := app.launchRestartIfRequested(); err != nil {
+		t.Fatalf("launch cleared restart: %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"quit", "start"}) {
+		t.Fatalf("restart launched more than once: %#v", events)
+	}
+}
+
+func TestRestartAppDoesNotRelaunchWailsDevelopmentBinary(t *testing.T) {
+	quitCalled := false
+	started := false
+	app := &App{
+		ctx:            context.Background(),
+		buildType:      "dev",
+		closeRequested: true,
+		quitApplication: func(context.Context) {
+			quitCalled = true
+		},
+		startProcess: func(string) error {
+			started = true
+			return nil
+		},
+	}
+
+	if err := app.RestartApp(); !errors.Is(err, errRestartDevelopmentMode) {
+		t.Fatalf("development restart error = %v", err)
+	}
+	if quitCalled || started {
+		t.Fatalf("development restart side effects = quit:%v started:%v", quitCalled, started)
+	}
+	if app.allowClose || !app.closeRequested || app.restartExecutable != "" {
+		t.Fatalf(
+			"development restart changed close state = allow:%v requested:%v executable:%q",
+			app.allowClose,
+			app.closeRequested,
+			app.restartExecutable,
+		)
+	}
+	if err := app.launchRestartIfRequested(); err != nil {
+		t.Fatalf("launch development restart: %v", err)
+	}
+	if started {
+		t.Fatal("development restart launched the Wails child binary")
+	}
+}
+
+func TestRestartAppDoesNotCloseWithoutWailsContext(t *testing.T) {
+	started := false
+	app := &App{
+		startProcess: func(string) error {
+			started = true
+			return nil
+		},
+	}
+
+	if err := app.RestartApp(); !errors.Is(err, errRestartUnavailable) {
+		t.Fatalf("restart error = %v", err)
+	}
+	if app.allowClose || app.restartExecutable != "" {
+		t.Fatalf("unavailable restart changed close state: %#v", app)
+	}
+	if err := app.launchRestartIfRequested(); err != nil {
+		t.Fatalf("launch unavailable restart: %v", err)
+	}
+	if started {
+		t.Fatal("restart process started without Wails context")
 	}
 }

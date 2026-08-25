@@ -77,6 +77,7 @@ npm run frontend:build
 npm run frontend:typecheck
 npm run frontend:lint
 go test ./...
+npm --prefix frontend run test:storage-spaces
 npm --prefix frontend run test:auto-save
 npm --prefix frontend run test:note-operation-queue
 npm --prefix frontend run test:note-batch
@@ -173,7 +174,7 @@ Wasm は初期段階では採用しない。
 - WebDAV 認証情報
 - AI API 認証情報
 
-`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
+`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。この値は個別の保存空間ではなくAtlas Noteの管理ルートを指定し、既存ルートを「メイン」、追加空間を管理ルート内の`spaces/<内部ID>/`として扱う。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
 
 キー名だけを記載した `.env.example` を使用する。
 

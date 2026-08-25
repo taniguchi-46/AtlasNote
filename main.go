@@ -27,8 +27,8 @@ func main() {
 		OnStartup:        app.startup,
 		// OnBeforeCloseをフックすることで、ユーザーが「×」ボタンでウィンドウを閉じようとした際に、
 		// 未保存の入力データをDBやファイルに保存し終わるまでアプリの終了を待機させる。
-		OnBeforeClose:    app.beforeClose,
-		OnShutdown:       app.shutdown,
+		OnBeforeClose: app.beforeClose,
+		OnShutdown:    app.shutdown,
 		// フロントエンド（JS/TS）からGoのメソッドを呼び出せるようにバインディングを登録する。
 		Bind: []interface{}{
 			app,
@@ -36,5 +36,10 @@ func main() {
 	})
 	if err != nil {
 		println("Error:", err.Error())
+		return
+	}
+	// wails.Run returns after OnShutdown, so the current DB and writer lock are already released.
+	if err := app.launchRestartIfRequested(); err != nil {
+		println("Error: Atlas Note could not restart automatically")
 	}
 }

@@ -26,10 +26,16 @@ func LoadPaths() (Paths, error) {
 
 	dataDir = filepath.Clean(dataDir)
 
+	return PathsForDataDir(dataDir), nil
+}
+
+func PathsForDataDir(dataDir string) Paths {
+	dataDir = filepath.Clean(dataDir)
+
 	return Paths{
 		DataDir:      dataDir,
 		DatabasePath: filepath.Join(dataDir, "atlasnote.db"),
 		NotesDir:     filepath.Join(dataDir, "notes"),
 		LockPath:     filepath.Join(dataDir, "atlasnote.lock"),
-	}, nil
+	}
 }
