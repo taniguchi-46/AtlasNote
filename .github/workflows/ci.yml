@@ -89,6 +89,9 @@ jobs:
       - name: Run storage space tests
         run: npm --prefix frontend run test:storage-spaces
 
+      - name: Run note import tests
+        run: npm --prefix frontend run test:note-import
+
       - name: Run AI store tests
         run: npm --prefix frontend run test:ai-store
 

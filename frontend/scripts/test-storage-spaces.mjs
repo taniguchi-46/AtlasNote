@@ -87,6 +87,7 @@ try {
   assert.match(appSource, /aiAssistantStore\.isBusy/, 'assistant work must block switching')
   assert.match(appSource, /aiLibrarianStore\.isGenerating/, 'librarian work must block switching')
   assert.match(appSource, /aiWritingStore\.isBusy/, 'writing work must block switching')
+  assert.match(appSource, /noteImportStore\.isBusy/, 'note import work must block switching')
 
   setActivePinia(createPinia())
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-storage-spaces.mjs')).href)
@@ -158,13 +159,20 @@ try {
   const events = []
   let syncBusy = false
   let aiBusy = false
+  let importBusy = false
+  let startImportDuringFlush = false
   let flushResult = true
   const dependencies = {
     isSyncBusy: () => syncBusy,
     isAIBusy: () => aiBusy,
+    isImportBusy: () => importBusy,
     suspendSync: () => { events.push('suspend'); return true },
     resumeSync: () => { events.push('resume') },
-    flushAllDirtyNotes: async () => { events.push('flush'); return flushResult },
+    flushAllDirtyNotes: async () => {
+      events.push('flush')
+      if (startImportDuringFlush) importBusy = true
+      return flushResult
+    },
     notify: (_message, code) => { events.push(code) },
   }
 
@@ -178,6 +186,11 @@ try {
   assert.deepEqual(events, ['STORAGE_SPACE_AI_BUSY'])
   aiBusy = false
   events.length = 0
+  importBusy = true
+  assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)
+  assert.deepEqual(events, ['STORAGE_SPACE_IMPORT_BUSY'])
+  importBusy = false
+  events.length = 0
   flushResult = false
   assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)
   assert.deepEqual(events, ['suspend', 'flush', 'resume', 'STORAGE_SPACE_DRAFT_SAVE_FAILED'])
@@ -189,6 +202,13 @@ try {
   await prepared.rollback()
   await prepared.rollback()
   assert.deepEqual(events, ['suspend', 'flush', 'resume'], 'rollback must resume sync exactly once')
+
+  events.length = 0
+  startImportDuringFlush = true
+  assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)
+  assert.deepEqual(events, ['suspend', 'flush', 'resume', 'STORAGE_SPACE_IMPORT_BUSY'])
+  startImportDuringFlush = false
+  importBusy = false
 
   console.log('storage space tests passed')
 } finally {

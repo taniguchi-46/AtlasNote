@@ -6,6 +6,7 @@ export type StorageSpaceSwitchPreparation = {
 export type StorageSpaceSwitchDependencies = {
   isSyncBusy: () => boolean
   isAIBusy: () => boolean
+  isImportBusy: () => boolean
   suspendSync: () => boolean
   resumeSync: () => void
   flushAllDirtyNotes: () => Promise<boolean>
@@ -21,6 +22,10 @@ export async function prepareStorageSpaceSwitch(
   }
   if (dependencies.isAIBusy()) {
     dependencies.notify('AI処理の完了またはキャンセル後に保存空間を切り替えてください', 'STORAGE_SPACE_AI_BUSY')
+    return { ready: false }
+  }
+  if (dependencies.isImportBusy()) {
+    dependencies.notify('インポートの完了後に保存空間を切り替えてください', 'STORAGE_SPACE_IMPORT_BUSY')
     return { ready: false }
   }
   if (!dependencies.suspendSync()) {
@@ -49,6 +54,11 @@ export async function prepareStorageSpaceSwitch(
     if (dependencies.isAIBusy()) {
       rollback()
       dependencies.notify('AI処理が開始されたため、保存空間を切り替えませんでした', 'STORAGE_SPACE_AI_BUSY')
+      return { ready: false }
+    }
+    if (dependencies.isImportBusy()) {
+      rollback()
+      dependencies.notify('インポートが開始されたため、保存空間を切り替えませんでした', 'STORAGE_SPACE_IMPORT_BUSY')
       return { ready: false }
     }
     return { ready: true, rollback }

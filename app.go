@@ -17,6 +17,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
@@ -32,6 +33,7 @@ type App struct {
 	markdownStore      *storage.MarkdownStore
 	contentLocks       *contentlock.Manager
 	notes              *note.Service
+	noteImporter       *noteimport.Service
 	syncService        *syncservice.Service
 	aiService          *aiservice.Service
 	spaceRegistry      *notespace.Registry
@@ -46,6 +48,8 @@ type App struct {
 	closeMu            sync.Mutex
 	closeRequested     bool
 	allowClose         bool
+	importMu           sync.Mutex
+	openImportFiles    func(context.Context, runtime.OpenDialogOptions) ([]string, error)
 	restartExecutable  string
 	startProcess       func(string) error
 	quitApplication    func(context.Context)
@@ -103,6 +107,7 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
+	a.noteImporter = nil
 	if a.db != nil {
 		_ = a.db.Close()
 		a.db = nil
@@ -226,6 +231,44 @@ func (a *App) CreateNote(input note.CreateInput) (note.Note, error) {
 		return note.Note{}, errors.New("note service is not initialized")
 	}
 	return a.notes.Create(a.ctx, input)
+}
+
+// ImportNotes opens the native file picker in the backend so source paths are
+// never accepted from the frontend bridge. The note import service delegates
+// every write to note.Service and therefore keeps the existing journal, index,
+// sync, and content-lock guarantees intact.
+func (a *App) ImportNotes(input noteimport.Input) (noteimport.Result, error) {
+	if a.noteImporter == nil {
+		return noteimport.NewResult(), errors.New("note import service is not initialized")
+	}
+	if !a.importMu.TryLock() {
+		return noteimport.NewErrorResult(noteimport.ErrorCodeBusy, "別のインポート処理が実行中です。", true), nil
+	}
+	defer a.importMu.Unlock()
+
+	paths, err := a.selectImportFiles(a.operationContext())
+	if err != nil {
+		return noteimport.NewResult(), err
+	}
+	if len(paths) == 0 {
+		result := noteimport.NewResult()
+		result.Cancelled = true
+		return result, nil
+	}
+	return a.noteImporter.Import(a.operationContext(), paths, input), nil
+}
+
+func (a *App) selectImportFiles(ctx context.Context) ([]string, error) {
+	options := runtime.OpenDialogOptions{
+		Title: "ノートをインポート",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "ノートファイル (*.md, *.txt, *.html, *.htm)", Pattern: "*.md;*.txt;*.html;*.htm"},
+		},
+	}
+	if a.openImportFiles != nil {
+		return a.openImportFiles(ctx, options)
+	}
+	return runtime.OpenMultipleFilesDialog(ctx, options)
 }
 
 func (a *App) ListNotes() ([]note.Summary, error) {
@@ -1129,6 +1172,7 @@ func (a *App) quiesceLockedSpace() {
 		a.aiService.Shutdown()
 	}
 	a.notes = nil
+	a.noteImporter = nil
 	a.syncService = nil
 	a.aiService = nil
 	a.statusMu.Lock()
@@ -1345,6 +1389,7 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 		return err
 	}
 	a.notes = service
+	a.noteImporter = noteimport.NewService(service)
 	a.syncService = syncService
 	a.aiService = aiService
 	a.recoveryReport = recoveryReport

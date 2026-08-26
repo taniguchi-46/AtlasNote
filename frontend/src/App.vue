@@ -12,6 +12,7 @@
       @sync="handleSync"
       @search="handleSearch"
       @new-note="handleNewNote"
+      @import-notes="handleOpenNoteImport"
       @toggle-always-on-top="handleToggleAlwaysOnTop"
       @open-settings="handleOpenSettings"
     />
@@ -103,6 +104,11 @@
     </div>
 
     <!-- Modals -->
+    <NoteImportModal
+      :open="isNoteImportOpen"
+      @close="isNoteImportOpen = false"
+      @completed="handleNoteImportCompleted"
+    />
     <SettingsModal />
     <ContentUnlockDialog />
     <NotificationCenter />
@@ -116,6 +122,7 @@ import AppTopBar from './components/AppTopBar.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
+import NoteImportModal from './components/NoteImportModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
 import StorageSpaceUnlockScreen from './components/StorageSpaceUnlockScreen.vue'
@@ -141,7 +148,9 @@ import { useAILibrarianStore } from './stores/useAILibrarianStore'
 import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
 import { useContentLockStore } from './stores/useContentLockStore'
+import { useNoteImportStore } from './stores/useNoteImportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
+import type { NoteImportResult } from './api/noteImport'
 import { logOperationFailure } from './utils/operationLogger'
 import { createContentLockAutoLock } from './utils/contentLockAutoLock'
 import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
@@ -168,6 +177,7 @@ const aiLibrarianStore = useAILibrarianStore()
 const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
 const contentLockStore = useContentLockStore()
+const noteImportStore = useNoteImportStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 
@@ -183,6 +193,7 @@ storageSpaceStore.setSwitchLifecycle(
       || aiLibrarianStore.isGenerating
       || aiWritingStore.isBusy
     ),
+    isImportBusy: () => noteImportStore.isBusy,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
@@ -195,6 +206,7 @@ storageSpaceStore.setSwitchLifecycle(
   },
 )
 const startupStatus = ref<StartupStatus | null>(null)
+const isNoteImportOpen = ref(false)
 const isRecoveryBusy = ref(false)
 const recoveryError = ref('')
 const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true')
@@ -345,6 +357,41 @@ async function handleLockedTargets(targets: { type: 'space' | 'notebook' | 'note
       kind: 'warning', source: 'content-lock', code: 'CONTENT_LOCK_AFTER_LOCK_REFRESH_FAILED',
     })
   }
+}
+
+function handleOpenNoteImport() {
+  isNoteImportOpen.value = true
+  void notebookStore.fetchNotebooks()
+}
+
+async function handleNoteImportCompleted(result: NoteImportResult) {
+  if (result.imported.length === 0) return
+
+  try {
+    await Promise.all([
+      notebookStore.fetchNotebooks(),
+      noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent'),
+    ])
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch {
+    notificationStore.notify('インポート後の一覧を更新できませんでした。', {
+      kind: 'warning', source: 'note-import', code: 'NOTE_IMPORT_REFRESH_FAILED',
+    })
+  } finally {
+    syncStore.scheduleAutoSync()
+  }
+
+  if (!result.error && result.failures.length === 0) {
+    isNoteImportOpen.value = false
+    notificationStore.notify(`${result.imported.length}件のノートを取り込みました。`, {
+      kind: 'success', source: 'note-import', code: 'NOTE_IMPORT_COMPLETED',
+    })
+    return
+  }
+
+  notificationStore.notify(`${result.imported.length}件のノートを取り込みました。一部のファイルは確認してください。`, {
+    kind: 'warning', source: 'note-import', code: 'NOTE_IMPORT_PARTIAL',
+  })
 }
 
 watch(() => contentLockStore.lastLockedTarget, async (target) => {

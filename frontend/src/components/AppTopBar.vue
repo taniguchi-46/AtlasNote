@@ -19,6 +19,11 @@
     </div>
 
     <div class="topbar-right">
+      <!-- ノートをインポート -->
+      <button class="icon-btn" title="ノートをインポート" type="button" @click="$emit('import-notes')">
+        <UploadIcon :size="18" />
+      </button>
+
       <!-- 新しいノート -->
       <button class="icon-btn" title="新しいノート" type="button" @click="$emit('new-note')">
         <FilePlusIcon :size="18" />
@@ -48,6 +53,7 @@ import {
   RefreshCwIcon, 
   SearchIcon, 
   FilePlusIcon, 
+  UploadIcon,
   AppWindowIcon, 
   SettingsIcon 
 } from '@lucide/vue'
@@ -60,6 +66,7 @@ defineEmits<{
   (e: 'sync'): void
   (e: 'search', query: string): void
   (e: 'new-note'): void
+  (e: 'import-notes'): void
   (e: 'toggle-always-on-top'): void
   (e: 'open-settings'): void
 }>()

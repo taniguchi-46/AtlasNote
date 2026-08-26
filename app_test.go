@@ -20,9 +20,12 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type appTestAIConnectionChecker struct {
@@ -2115,5 +2118,146 @@ func TestRestartAppDoesNotCloseWithoutWailsContext(t *testing.T) {
 	}
 	if started {
 		t.Fatal("restart process started without Wails context")
+	}
+}
+
+func TestAppImportNotesUsesNativeSelectionAndExistingNoteService(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	if status := app.GetStartupStatus(); !status.Ready {
+		t.Fatalf("test app is not ready: %#v", status)
+	}
+
+	sourceDir := t.TempDir()
+	markdownPath := filepath.Join(sourceDir, "source.md")
+	if err := os.WriteFile(markdownPath, []byte("# Imported heading\r\nraw <span>Markdown HTML remains source text</span>"), 0o600); err != nil {
+		t.Fatalf("write markdown source: %v", err)
+	}
+	htmlPath := filepath.Join(sourceDir, "source.html")
+	if err := os.WriteFile(htmlPath, []byte("<title>HTML metadata</title><p>converted <strong>HTML</strong></p>"), 0o600); err != nil {
+		t.Fatalf("write HTML source: %v", err)
+	}
+
+	app.openImportFiles = func(_ context.Context, options runtime.OpenDialogOptions) ([]string, error) {
+		if options.Title != "ノートをインポート" || len(options.Filters) != 1 || options.Filters[0].Pattern != "*.md;*.txt;*.html;*.htm" {
+			t.Fatalf("native file dialog options = %#v", options)
+		}
+		return []string{markdownPath, htmlPath}, nil
+	}
+
+	newNotebookName := "取り込み"
+	result, err := app.ImportNotes(noteimport.Input{NewNotebookName: &newNotebookName})
+	if err != nil {
+		t.Fatalf("import notes: %v", err)
+	}
+	if result.Cancelled || result.Error != nil || result.CreatedNotebook == nil || len(result.Imported) != 2 || len(result.Failures) != 0 {
+		t.Fatalf("import result = %#v", result)
+	}
+
+	first, err := app.GetNote(result.Imported[0].NoteID)
+	if err != nil {
+		t.Fatalf("get imported markdown: %v", err)
+	}
+	if first.NotebookID == nil || *first.NotebookID != result.CreatedNotebook.ID || first.Title != "Imported heading" || first.Content != "# Imported heading\r\nraw <span>Markdown HTML remains source text</span>" {
+		t.Fatalf("imported markdown = %#v", first)
+	}
+	second, err := app.GetNote(result.Imported[1].NoteID)
+	if err != nil {
+		t.Fatalf("get imported HTML: %v", err)
+	}
+	if second.NotebookID == nil || *second.NotebookID != result.CreatedNotebook.ID || second.Title != "HTML metadata" || second.Content != "converted **HTML**" {
+		t.Fatalf("imported HTML = %#v", second)
+	}
+}
+
+func TestAppImportNotesTreatsCancelledSelectionAsNoop(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	app.openImportFiles = func(context.Context, runtime.OpenDialogOptions) ([]string, error) {
+		return []string{}, nil
+	}
+
+	result, err := app.ImportNotes(noteimport.Input{})
+	if err != nil {
+		t.Fatalf("cancelled import: %v", err)
+	}
+	if !result.Cancelled || result.Error != nil || len(result.Imported) != 0 || len(result.Failures) != 0 {
+		t.Fatalf("cancelled import result = %#v", result)
+	}
+	items, err := app.ListNotes()
+	if err != nil || len(items) != 0 {
+		t.Fatalf("cancelled import changed notes: %#v, %v", items, err)
+	}
+}
+
+func TestAppImportNotesRespectsNotebookContentLock(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	notebook, err := app.CreateNotebook(note.NotebookCreateInput{Name: "保護ノートブック"})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+	enabled := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNotebook,
+		TargetID:   notebook.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if enabled.Error != nil || !enabled.Unlocked {
+		t.Fatalf("enable content lock = %#v", enabled)
+	}
+	locked := app.LockContentTargetsNow([]contentlock.Target{{Type: contentlock.TargetNotebook, ID: notebook.ID}})
+	if locked.Error != nil {
+		t.Fatalf("lock notebook: %#v", locked)
+	}
+
+	sourcePath := filepath.Join(t.TempDir(), "protected.md")
+	if err := os.WriteFile(sourcePath, []byte("protected imported body"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	app.openImportFiles = func(context.Context, runtime.OpenDialogOptions) ([]string, error) {
+		return []string{sourcePath}, nil
+	}
+
+	result, err := app.ImportNotes(noteimport.Input{NotebookID: &notebook.ID})
+	if err != nil {
+		t.Fatalf("locked import call: %v", err)
+	}
+	if result.Error == nil || len(result.Imported) != 0 || len(result.Failures) != 1 {
+		t.Fatalf("locked import must fail without a note: %#v", result)
+	}
+
+	unlocked := app.UnlockContentLock(contentlock.UnlockInput{
+		TargetType: contentlock.TargetNotebook,
+		TargetID:   notebook.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if unlocked.Error != nil || !unlocked.Unlocked {
+		t.Fatalf("unlock notebook: %#v", unlocked)
+	}
+	result, err = app.ImportNotes(noteimport.Input{NotebookID: &notebook.ID})
+	if err != nil {
+		t.Fatalf("unlocked import: %v", err)
+	}
+	if result.Error != nil || len(result.Imported) != 1 {
+		t.Fatalf("unlocked import result = %#v", result)
+	}
+	stored, err := os.ReadFile(filepath.Join(app.notesDir, result.Imported[0].NoteID+".md"))
+	if err != nil {
+		t.Fatalf("read encrypted Markdown: %v", err)
+	}
+	if bytes.Contains(stored, []byte("protected imported body")) {
+		t.Fatal("protected imported body was written as plaintext")
 	}
 }
