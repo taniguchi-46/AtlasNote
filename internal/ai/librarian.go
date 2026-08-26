@@ -86,8 +86,23 @@ func (r *librarianRequest) emit(event LibrarianEvent) {
 }
 
 func (s *Service) StartLibrarian(ctx context.Context, input LibrarianInput, sink func(LibrarianEvent)) (LibrarianStartResponse, error) {
+	releaseContent := s.beginAIContentAccess(ctx)
+	releaseOnReturn := true
+	defer func() {
+		if releaseOnReturn {
+			releaseContent()
+		}
+	}()
 	normalized, err := normalizeLibrarianInput(input)
 	if err != nil {
+		return LibrarianStartResponse{}, err
+	}
+	noteIDs := make([]string, 0, len(normalized.Candidates)+1)
+	noteIDs = append(noteIDs, normalized.NoteID)
+	for _, candidate := range normalized.Candidates {
+		noteIDs = append(noteIDs, candidate.NoteID)
+	}
+	if err := s.assertAIAllowedNoteIDs(ctx, noteIDs); err != nil {
 		return LibrarianStartResponse{}, err
 	}
 	if err := s.validateLibrarianSnapshot(ctx, normalized); err != nil {
@@ -114,8 +129,11 @@ func (s *Service) StartLibrarian(ctx context.Context, input LibrarianInput, sink
 		baseRevision: normalized.BaseRevision,
 		operation:    normalized.Operation,
 		cancel:       operationCleanup,
-		cleanup:      operationCleanup,
-		sink:         sink,
+		cleanup: func() {
+			operationCleanup()
+			releaseContent()
+		},
+		sink: sink,
 	}
 
 	s.librarianMu.Lock()
@@ -128,6 +146,7 @@ func (s *Service) StartLibrarian(ctx context.Context, input LibrarianInput, sink
 	s.activeLibrarian = request
 	s.librarianMu.Unlock()
 
+	releaseOnReturn = false
 	go s.runLibrarian(operationCtx, adapter, normalized, request)
 	return LibrarianStartResponse{RequestID: requestID}, nil
 }

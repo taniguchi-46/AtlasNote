@@ -87,6 +87,39 @@ func TestCreateUsesGeneratedInternalDirectoryAndKeepsCurrentActive(t *testing.T)
 	}
 }
 
+func TestDataDirResolvesExistingInactiveSpaceWithoutSelectingIt(t *testing.T) {
+	registry, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open registry: %v", err)
+	}
+	initial, err := registry.List()
+	if err != nil {
+		t.Fatalf("list initial spaces: %v", err)
+	}
+	created, _, err := registry.Create(t.Context(), "個人", createPreparedDirectory)
+	if err != nil {
+		t.Fatalf("create space: %v", err)
+	}
+
+	space, dataDir, err := registry.DataDir(created.ID)
+	if err != nil {
+		t.Fatalf("resolve inactive data directory: %v", err)
+	}
+	if space.ID != created.ID || space.Active || dataDir != filepath.Join(registry.root, spacesDirectory, created.ID) {
+		t.Fatalf("resolved space = %#v, data directory = %q", space, dataDir)
+	}
+	after, err := registry.List()
+	if err != nil {
+		t.Fatalf("list after data directory resolution: %v", err)
+	}
+	if after.ActiveSpaceID != initial.ActiveSpaceID {
+		t.Fatalf("data directory resolution changed active space to %q", after.ActiveSpaceID)
+	}
+	if _, _, err := registry.DataDir("not-a-space-id"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("invalid data directory lookup error = %v", err)
+	}
+}
+
 func TestCreateReleasesCatalogLockDuringPreflight(t *testing.T) {
 	root := t.TempDir()
 	registry, err := Open(root)

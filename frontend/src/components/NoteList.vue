@@ -116,23 +116,68 @@
             }"
             role="listitem"
           >
-            <button
-              :id="`note-item-${note.id}`"
-              class="note-item-btn"
-              type="button"
-              @click="handleNoteClick($event, note)"
-            >
-              <!-- Icons row -->
-              <div class="note-item-meta">
-                <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
-                <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
-                <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
-              </div>
-              <p class="note-item-title">{{ note.title || '(無題)' }}</p>
-              <p v-if="searchSnippet(note.id)" class="note-item-snippet">
-                {{ searchSnippet(note.id) }}
-              </p>
-            </button>
+            <div class="note-item-layout">
+              <button
+                :id="`note-item-${note.id}`"
+                class="note-item-btn"
+                type="button"
+                @click="handleNoteClick($event, note)"
+              >
+                <!-- Icons row -->
+                <div class="note-item-meta">
+                  <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
+                  <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
+                  <LockKeyholeIcon v-if="isNoteLocked(note)" :size="12" class="meta-icon locked" />
+                  <LockIcon v-else-if="isNoteProtected(note)" :size="12" class="meta-icon protected" />
+                  <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
+                </div>
+                <p class="note-item-title">{{ note.title || '(無題)' }}</p>
+                <p v-if="searchSnippet(note.id)" class="note-item-snippet">
+                  {{ searchSnippet(note.id) }}
+                </p>
+              </button>
+              <PopoverRoot :open="editingNoteId === note.id" @update:open="setEditingNoteOpen(note, $event)">
+                <PopoverTrigger as-child>
+                  <button
+                    class="note-item-edit-button"
+                    type="button"
+                    title="編集・ロック設定"
+                    aria-label="編集・ロック設定"
+                    @click.stop="openNoteEditor(note)"
+                  >
+                    <Edit2Icon :size="14" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverPortal>
+                  <PopoverContent
+                    class="note-edit-popover"
+                    side="right"
+                    align="start"
+                    :side-offset="8"
+                    @click.stop
+                  >
+                    <form class="note-edit-form" @submit.prevent="saveNoteEditor(note)">
+                      <label :for="`note-title-${note.id}`">タイトル</label>
+                      <input :id="`note-title-${note.id}`" ref="editTitleInput" v-model="editTitle" type="text" maxlength="200" />
+                      <ContentLockControls
+                        :ref="(instance) => setNoteLockControls(note.id, instance)"
+                        :target="{ type: 'note', id: note.id }"
+                        :target-label="note.title || '無題のノート'"
+                        defer-save
+                        @changed="refreshAfterNoteLockChange"
+                      />
+                      <p v-if="noteEditorError" class="note-edit-error" role="alert">{{ noteEditorError }}</p>
+                      <div class="note-edit-actions">
+                        <button type="button" :disabled="isSavingNoteEditor" @click="cancelNoteEditor(note)">キャンセル</button>
+                        <button class="save-note-button" type="submit" :disabled="isSavingNoteEditor">
+                          {{ isSavingNoteEditor ? '保存中...' : '保存' }}
+                        </button>
+                      </div>
+                    </form>
+                  </PopoverContent>
+                </PopoverPortal>
+              </PopoverRoot>
+            </div>
           </li>
         </ContextMenuTrigger>
 
@@ -216,7 +261,10 @@ import {
   CheckIcon,
   ChevronRightIcon,
   FileTextIcon,
+  Edit2Icon,
   FolderInputIcon,
+  LockIcon,
+  LockKeyholeIcon,
   PlusIcon,
   StarIcon,
   PinIcon,
@@ -243,6 +291,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuRoot,
   DropdownMenuTrigger,
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
 } from 'reka-ui'
 import type { note } from '../../wailsjs/go/models'
 import { useNoteStore } from '../stores/useNoteStore'
@@ -252,6 +304,7 @@ import { useSearchStore } from '../stores/useSearchStore'
 import { useTagStore } from '../stores/useTagStore'
 import { NoteDeleteError } from '../utils/deleteNotesSequentially'
 import { NoteUpdateError } from '../utils/updateNotesSequentially'
+import ContentLockControls from './ContentLockControls.vue'
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
@@ -270,6 +323,16 @@ const selectedNoteIds = ref<Set<string>>(new Set())
 const lastSelectedNoteId = ref<string | null>(null)
 const noteListRef = ref<HTMLUListElement | null>(null)
 const loadMoreSentinel = ref<HTMLLIElement | null>(null)
+const editingNoteId = ref<string | null>(null)
+const editTitle = ref('')
+const editTitleInput = ref<HTMLInputElement | null>(null)
+type ContentLockEditorHandle = {
+  save: () => Promise<boolean>
+  reset: () => void
+}
+const noteLockControls = new Map<string, ContentLockEditorHandle>()
+const isSavingNoteEditor = ref(false)
+const noteEditorError = ref('')
 let loadMoreObserver: IntersectionObserver | null = null
 
 const contextMenu = ref({
@@ -289,6 +352,80 @@ function handleNoteClick(event: MouseEvent, note: note.Summary) {
   selectedNoteIds.value = new Set()
   lastSelectedNoteId.value = note.id
   noteStore.selectNote(note.id)
+}
+
+function isNoteProtected(item: note.Summary) {
+  return Boolean((item as note.Summary & { protected?: boolean }).protected)
+}
+
+function isNoteLocked(item: note.Summary) {
+  return Boolean((item as note.Summary & { locked?: boolean }).locked)
+}
+
+function openNoteEditor(item: note.Summary) {
+  if (editingNoteId.value && editingNoteId.value !== item.id) {
+    noteLockControls.get(editingNoteId.value)?.reset()
+  }
+  noteLockControls.get(item.id)?.reset()
+  noteEditorError.value = ''
+  editTitle.value = item.title
+  editingNoteId.value = item.id
+  void nextTick(() => {
+    editTitleInput.value?.focus()
+    editTitleInput.value?.select()
+  })
+}
+
+function setEditingNoteOpen(item: note.Summary, open: boolean) {
+  if (open) {
+    openNoteEditor(item)
+    return
+  }
+  if (editingNoteId.value === item.id) cancelNoteEditor(item)
+}
+
+function setNoteLockControls(noteId: string, instance: unknown) {
+  const handle = instance as Partial<ContentLockEditorHandle> | null
+  if (handle && typeof handle.save === 'function' && typeof handle.reset === 'function') {
+    noteLockControls.set(noteId, handle as ContentLockEditorHandle)
+    return
+  }
+  noteLockControls.delete(noteId)
+}
+
+async function saveNoteEditor(item: note.Summary) {
+  const lockControls = noteLockControls.get(item.id)
+  if (isSavingNoteEditor.value) return
+  if (!lockControls) {
+    noteEditorError.value = 'ロック設定の読み込みが完了していません。編集画面を開き直してください。'
+    return
+  }
+  noteEditorError.value = ''
+  isSavingNoteEditor.value = true
+  try {
+    if (!(await lockControls.save())) return
+
+    const title = editTitle.value.trim()
+    if (!title || title === item.title) {
+      editingNoteId.value = null
+      return
+    }
+    if (await noteStore.saveNote(item.id, { title })) editingNoteId.value = null
+  } finally {
+    isSavingNoteEditor.value = false
+  }
+}
+
+function cancelNoteEditor(item: note.Summary) {
+  if (isSavingNoteEditor.value) return
+  noteLockControls.get(item.id)?.reset()
+  noteEditorError.value = ''
+  if (editingNoteId.value === item.id) editingNoteId.value = null
+}
+
+async function refreshAfterNoteLockChange() {
+  await noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent')
+  if (searchStore.isActive) await searchStore.refresh()
 }
 
 function toggleNoteSelection(noteId: string) {
@@ -823,5 +960,106 @@ function formatDate(iso: string): string {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   outline: none;
+}
+
+.note-item-layout {
+  display: flex;
+  align-items: stretch;
+}
+
+.note-item-layout .note-item-btn {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.note-item-edit-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  margin: 8px 7px 8px 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.note-item-edit-button:hover,
+.note-item-edit-button:focus-visible {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--brand-primary);
+  outline: none;
+}
+
+.meta-icon.locked {
+  color: var(--color-danger, #c0392b);
+}
+
+.meta-icon.protected {
+  color: var(--brand-primary);
+}
+
+/* PopoverContent is teleported outside this component, so its root must not
+   rely on Vue's scoped attribute to receive the opaque surface styles. */
+:global(.note-edit-popover) {
+  z-index: 1302;
+  display: grid;
+  gap: 12px;
+  width: min(340px, calc(100vw - 28px));
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background-color: var(--bg-sidebar);
+  opacity: 1;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.note-edit-form {
+  display: grid;
+  gap: 7px;
+}
+
+.note-edit-form label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-edit-form input {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.note-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.note-edit-error {
+  margin: 0;
+  color: var(--color-danger, #c0392b);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.note-edit-actions button {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.note-edit-actions .save-note-button {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: white;
 }
 </style>

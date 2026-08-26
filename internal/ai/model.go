@@ -136,11 +136,12 @@ type ModelListResult struct {
 	RetrievedAt time.Time   `json:"retrievedAt"`
 }
 
-// GenerateSummaryInput contains only the selected provider/model and the
-// current note body. API keys are resolved internally from CredentialStore.
+// GenerateSummaryInput contains the selected provider/model and a saved note
+// snapshot. API keys are resolved internally from CredentialStore.
 type GenerateSummaryInput struct {
 	ProviderID ProviderID `json:"providerID"`
 	ModelID    string     `json:"modelID"`
+	NoteID     string     `json:"noteID"`
 	Content    string     `json:"content"`
 }
 
@@ -647,7 +648,12 @@ func normalizeSummaryInput(input GenerateSummaryInput) (GenerateSummaryInput, er
 	if len([]byte(input.Content)) > summaryInputLimitBytes {
 		return GenerateSummaryInput{}, ErrInputTooLarge
 	}
-	return GenerateSummaryInput{ProviderID: providerID, ModelID: modelID, Content: input.Content}, nil
+	return GenerateSummaryInput{
+		ProviderID: providerID,
+		ModelID:    modelID,
+		NoteID:     strings.TrimSpace(input.NoteID),
+		Content:    input.Content,
+	}, nil
 }
 
 func normalizeSummaryModelID(providerID ProviderID, value string) (string, error) {

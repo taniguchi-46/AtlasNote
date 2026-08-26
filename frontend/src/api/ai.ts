@@ -79,6 +79,7 @@ export type ModelListResponse = {
 export type GenerateSummaryInput = {
   providerID: AIProviderID
   modelID: string
+  noteID: string
   content: string
 }
 

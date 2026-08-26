@@ -22,23 +22,93 @@ type cachedModelMetadata struct {
 }
 
 type Service struct {
-	repository       *Repository
-	credentials      *credential.Manager
-	checker          ConnectionChecker
-	adapter          ProviderAdapter
-	newCredentialRef func() (string, error)
-	mu               sync.Mutex
-	generationMu     sync.Mutex
-	generating       bool
-	assistantMu      sync.Mutex
-	activeAssistant  *assistantRequest
-	librarianMu      sync.Mutex
-	activeLibrarian  *librarianRequest
-	contextProvider  NoteContextProvider
-	shutdownCtx      context.Context
-	shutdownCancel   context.CancelFunc
-	modelMetadataMu  sync.Mutex
-	modelMetadata    map[ProviderID]cachedModelMetadata
+	repository         *Repository
+	credentials        *credential.Manager
+	checker            ConnectionChecker
+	adapter            ProviderAdapter
+	newCredentialRef   func() (string, error)
+	mu                 sync.Mutex
+	generationMu       sync.Mutex
+	generating         bool
+	assistantMu        sync.Mutex
+	activeAssistant    *assistantRequest
+	librarianMu        sync.Mutex
+	activeLibrarian    *librarianRequest
+	contextProvider    NoteContextProvider
+	contentAccessGuard ContentAccessGuard
+	shutdownCtx        context.Context
+	shutdownCancel     context.CancelFunc
+	modelMetadataMu    sync.Mutex
+	modelMetadata      map[ProviderID]cachedModelMetadata
+}
+
+func (s *Service) SetContentAccessGuard(guard ContentAccessGuard) {
+	s.mu.Lock()
+	s.contentAccessGuard = guard
+	s.mu.Unlock()
+}
+
+type contentAccessGate interface {
+	BeginContentAccess(context.Context) func()
+}
+
+type aiContentAccessGate interface {
+	BeginAIContentAccess(context.Context) func()
+}
+
+func (s *Service) currentContentAccessGuard() ContentAccessGuard {
+	s.mu.Lock()
+	guard := s.contentAccessGuard
+	s.mu.Unlock()
+	return guard
+}
+
+// beginAIRecordAccess keeps an AI history/artifact save inside the same gate
+// as a lock conversion. That makes the enable-time count/deletion decision
+// stable: a newly saved record cannot appear after the count but before the
+// content lock becomes visible.
+func (s *Service) beginAIRecordAccess(ctx context.Context) func() {
+	guard := s.currentContentAccessGuard()
+	if gate, ok := guard.(contentAccessGate); ok {
+		return gate.BeginContentAccess(ctx)
+	}
+	return func() {}
+}
+
+// beginAIContentAccess holds a dedicated read gate until a provider request
+// finishes. A content-lock conversion takes the matching writer gate before
+// it can make the note protected, so it cannot race a send of a body snapshot
+// that was valid at request start.
+func (s *Service) beginAIContentAccess(ctx context.Context) func() {
+	guard := s.currentContentAccessGuard()
+	if gate, ok := guard.(aiContentAccessGate); ok {
+		return gate.BeginAIContentAccess(ctx)
+	}
+	if gate, ok := guard.(contentAccessGate); ok {
+		return gate.BeginContentAccess(ctx)
+	}
+	return func() {}
+}
+
+func (s *Service) assertAIAllowedSources(ctx context.Context, sources []AIHistorySource) error {
+	noteIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		noteIDs = append(noteIDs, source.NoteID)
+	}
+	return s.assertAIAllowedNoteIDs(ctx, noteIDs)
+}
+
+func (s *Service) assertAIAllowedNoteIDs(ctx context.Context, noteIDs []string) error {
+	guard := s.currentContentAccessGuard()
+	if guard == nil {
+		return nil
+	}
+	for _, noteID := range noteIDs {
+		if err := guard.AssertAIAllowed(ctx, noteID); err != nil {
+			return ErrInputInvalid
+		}
+	}
+	return nil
 }
 
 func NewService(repository *Repository, credentials *credential.Manager, checker ConnectionChecker) *Service {
@@ -305,6 +375,8 @@ func (s *Service) UpdateProviderModel(ctx context.Context, input UpdateProviderM
 // GenerateSummary resolves a saved credential internally. It never mutates
 // Markdown or sync state; callers may separately persist a local AI record.
 func (s *Service) GenerateSummary(ctx context.Context, input GenerateSummaryInput) (SummaryResult, error) {
+	releaseContent := s.beginAIContentAccess(ctx)
+	defer releaseContent()
 	normalized, err := normalizeSummaryInput(input)
 	if err != nil {
 		return SummaryResult{}, err

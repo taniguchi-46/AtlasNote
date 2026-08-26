@@ -10,13 +10,25 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 var safeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type MarkdownStore struct {
-	rootDir string
+	rootDir     string
+	protectorMu sync.RWMutex
+	protector   ContentProtector
+}
+
+// ContentProtector is an optional boundary around the canonical Markdown
+// bytes. It deliberately lives in storage so the lock implementation can
+// protect files without making the storage package depend on application
+// policy or the database.
+type ContentProtector interface {
+	Encode(context.Context, string, []byte) ([]byte, error)
+	Decode(context.Context, string, []byte) ([]byte, error)
 }
 
 type ManagedFile struct {
@@ -32,6 +44,15 @@ func NewMarkdownStore(rootDir string) (*MarkdownStore, error) {
 	return &MarkdownStore{rootDir: rootDir}, nil
 }
 
+// SetContentProtector installs the in-process content protection boundary.
+// It is configured once during application initialization before note service
+// methods become available.
+func (s *MarkdownStore) SetContentProtector(protector ContentProtector) {
+	s.protectorMu.Lock()
+	s.protector = protector
+	s.protectorMu.Unlock()
+}
+
 func (s *MarkdownStore) ContentPath(id string) (string, error) {
 	if err := validateID(id); err != nil {
 		return "", err
@@ -45,20 +66,49 @@ func (s *MarkdownStore) Read(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 
-	path, err := s.fullPath(id)
+	content, err := s.ReadRaw(ctx, id)
 	if err != nil {
 		return "", err
 	}
-
-	content, err := os.ReadFile(path)
+	decoded, err := s.decode(ctx, id, content)
 	if err != nil {
-		return "", fmt.Errorf("read markdown content: %w", err)
+		return "", fmt.Errorf("decode markdown content: %w", err)
 	}
-
-	return string(content), nil
+	return string(decoded), nil
 }
 
 func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, operationID string, content string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoded, err := s.encode(ctx, id, []byte(content))
+	if err != nil {
+		return fmt.Errorf("encode markdown content: %w", err)
+	}
+	return s.WriteTempRaw(ctx, id, operationID, encoded)
+}
+
+// ReadRaw reads the stored bytes without content transformation. It is only
+// used by the lock transaction and opaque recovery paths; regular note code
+// must use Read.
+func (s *MarkdownStore) ReadRaw(ctx context.Context, id string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := s.fullPath(id)
+	if err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read markdown content: %w", err)
+	}
+	return content, nil
+}
+
+// WriteTempRaw stages already encoded canonical bytes. Callers are responsible
+// for using it only where the encoding lifecycle is explicitly controlled.
+func (s *MarkdownStore) WriteTempRaw(ctx context.Context, id string, operationID string, content []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -82,7 +132,7 @@ func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, operationID st
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if _, err := file.WriteString(content); err != nil {
+	if _, err := file.Write(content); err != nil {
 		return fmt.Errorf("write markdown temp content: %w", err)
 	}
 	if err := file.Sync(); err != nil {
@@ -255,7 +305,35 @@ func (s *MarkdownStore) TempContentMatches(ctx context.Context, id string, opera
 	if err != nil {
 		return false, fmt.Errorf("read markdown temp content: %w", err)
 	}
+	decoded, err := s.decode(ctx, id, content)
+	if err != nil {
+		return false, fmt.Errorf("decode markdown temp content: %w", err)
+	}
+	return HashContent(string(decoded)) == expectedHash, nil
+}
 
+// RawContentMatches and RawTempContentMatches are for opaque encrypted sync
+// recovery. They never attempt to decrypt and therefore never expose content.
+func (s *MarkdownStore) RawContentMatches(ctx context.Context, id string, expectedHash string) (bool, error) {
+	content, err := s.ReadRaw(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return HashContent(string(content)) == expectedHash, nil
+}
+
+func (s *MarkdownStore) RawTempContentMatches(ctx context.Context, id string, operationID string, expectedHash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	path, err := s.tempPath(id, operationID)
+	if err != nil {
+		return false, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read markdown temp content: %w", err)
+	}
 	return HashContent(string(content)) == expectedHash, nil
 }
 
@@ -403,6 +481,26 @@ func (s *MarkdownStore) fullPath(id string) (string, error) {
 	}
 
 	return filepath.Join(s.rootDir, contentPath), nil
+}
+
+func (s *MarkdownStore) encode(ctx context.Context, id string, content []byte) ([]byte, error) {
+	s.protectorMu.RLock()
+	protector := s.protector
+	s.protectorMu.RUnlock()
+	if protector == nil {
+		return content, nil
+	}
+	return protector.Encode(ctx, id, content)
+}
+
+func (s *MarkdownStore) decode(ctx context.Context, id string, content []byte) ([]byte, error) {
+	s.protectorMu.RLock()
+	protector := s.protector
+	s.protectorMu.RUnlock()
+	if protector == nil {
+		return content, nil
+	}
+	return protector.Decode(ctx, id, content)
 }
 
 func (s *MarkdownStore) tempPath(id string, operationID string) (string, error) {

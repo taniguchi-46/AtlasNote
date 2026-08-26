@@ -121,6 +121,35 @@ func (r *Registry) Active() (Space, string, error) {
 	return active, dataDir, err
 }
 
+// DataDir resolves an existing storage space to its internally managed data
+// directory without changing the active-space selection. Callers use this for
+// read-only status checks and maintenance operations on an inactive space.
+func (r *Registry) DataDir(id string) (Space, string, error) {
+	if !spaceIDPattern.MatchString(id) {
+		return Space{}, "", ErrNotFound
+	}
+
+	var space Space
+	var dataDir string
+	err := r.withLock(func() error {
+		current, err := r.readCatalog()
+		if err != nil {
+			return err
+		}
+		entry, ok := findSpace(current, id)
+		if !ok {
+			return ErrNotFound
+		}
+		dataDir, err = r.existingDataDir(entry)
+		if err != nil {
+			return err
+		}
+		space = publicSpace(entry, current.ActiveSpaceID)
+		return nil
+	})
+	return space, dataDir, err
+}
+
 func (r *Registry) List() (ListResult, error) {
 	result := ListResult{Spaces: make([]Space, 0)}
 	err := r.withLock(func() error {

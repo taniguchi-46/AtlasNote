@@ -26,6 +26,17 @@ type testLibrarianAdapter struct {
 	receivedLibrarianIn StructuredGenerationInput
 }
 
+type rejectingContentAccessGuard struct {
+	protected map[string]bool
+}
+
+func (g rejectingContentAccessGuard) AssertAIAllowed(_ context.Context, noteID string) error {
+	if g.protected[noteID] {
+		return errors.New("protected content")
+	}
+	return nil
+}
+
 func (a *testLibrarianAdapter) GenerateStructured(ctx context.Context, _ ProviderID, _ string, input StructuredGenerationInput, onChunk func(string) error) (string, error) {
 	a.mu.Lock()
 	a.librarianCalls++
@@ -130,6 +141,29 @@ func TestServiceLibrarianStreamsStructuredResultAndSharesGenerationLock(t *testi
 		t.Fatalf("librarian schema is not strict: %#v", schema)
 	}
 	assertAIExecutionHasNoPersistentSideEffects(t, db)
+}
+
+func TestServiceLibrarianRejectsProtectedTargetOrCandidateBeforeProviderRequest(t *testing.T) {
+	for _, protectedNoteID := range []string{"note-1", "candidate-1"} {
+		t.Run(protectedNoteID, func(t *testing.T) {
+			adapter := &testLibrarianAdapter{
+				testProviderAdapter: &testProviderAdapter{},
+				librarianResult:     `{"candidates":[{"noteId":"candidate-1","score":0.9}]}`,
+			}
+			service, _ := newTestServiceWithAdapter(t, newMemoryCredentialStore(), adapter)
+			service.SetContentAccessGuard(rejectingContentAccessGuard{protected: map[string]bool{protectedNoteID: true}})
+
+			if _, err := service.StartLibrarian(t.Context(), testLibrarianInput(LibrarianOperationRelated), nil); !errors.Is(err, ErrInputInvalid) {
+				t.Fatalf("protected librarian source error = %v, want ErrInputInvalid", err)
+			}
+			adapter.mu.Lock()
+			calls := adapter.librarianCalls
+			adapter.mu.Unlock()
+			if calls != 0 {
+				t.Fatalf("provider was called %d times for protected librarian input", calls)
+			}
+		})
+	}
 }
 
 func TestServiceLibrarianReportsKnownCapabilityMismatchWithoutCallingProvider(t *testing.T) {

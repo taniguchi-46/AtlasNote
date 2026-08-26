@@ -15,6 +15,7 @@ import (
 	"time"
 
 	aiservice "atlasnote/internal/ai"
+	"atlasnote/internal/contentlock"
 	"atlasnote/internal/credential"
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
@@ -1094,6 +1095,7 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 	success := app.GenerateAISummary(aiservice.GenerateSummaryInput{
 		ProviderID: aiservice.ProviderOpenRouter,
 		ModelID:    "openai/d07-summary-model",
+		NoteID:     created.ID,
 		Content:    before.Note.Content,
 	})
 	if success.Error != nil || success.Text != summaryMarker {
@@ -1104,6 +1106,7 @@ func TestAppAIConfigurationAndSummaryPreserveLocalAndSyncArtifacts(t *testing.T)
 	failure := app.GenerateAISummary(aiservice.GenerateSummaryInput{
 		ProviderID: aiservice.ProviderOpenRouter,
 		ModelID:    "openai/d07-summary-model",
+		NoteID:     created.ID,
 		Content:    before.Note.Content,
 	})
 	if failure.Error == nil || failure.Error.Code != aiservice.ErrorCodeProviderUnavailable || failure.Text != "" {
@@ -1678,6 +1681,168 @@ func TestDifferentStorageSpacesHaveIndependentWriterLocks(t *testing.T) {
 	secondWorkApp.shutdown(t.Context())
 	workApp.shutdown(t.Context())
 	mainApp.shutdown(t.Context())
+}
+
+func TestAppConfiguresInactiveStorageSpaceLockAndStartsLocked(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	if status := app.GetStartupStatus(); !status.Ready {
+		t.Fatalf("initial app status = %#v", status)
+	}
+	created := app.CreateStorageSpace(notespace.CreateInput{Name: "個人"})
+	if created.Error != nil || created.Space == nil {
+		t.Fatalf("create storage space = %#v", created)
+	}
+
+	enabled := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetSpace,
+		TargetID:   created.Space.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if enabled.Error != nil || enabled.Lock == nil || enabled.Unlocked {
+		t.Fatalf("enable inactive storage-space lock = %#v", enabled)
+	}
+	statuses := app.ListStorageSpaceLockStatuses()
+	if statuses.Error != nil {
+		t.Fatalf("list storage-space lock statuses = %#v", statuses)
+	}
+	var inactiveStatus *StorageSpaceLockStatus
+	for index := range statuses.Statuses {
+		if statuses.Statuses[index].SpaceID == created.Space.ID {
+			inactiveStatus = &statuses.Statuses[index]
+			break
+		}
+	}
+	if inactiveStatus == nil || !inactiveStatus.Protected || !inactiveStatus.Locked || inactiveStatus.Error != nil {
+		t.Fatalf("inactive storage-space status = %#v", inactiveStatus)
+	}
+	selection := app.SelectStorageSpace(notespace.SelectInput{ID: created.Space.ID})
+	if selection.Error != nil || !selection.RestartRequired {
+		t.Fatalf("select locked storage space = %#v", selection)
+	}
+	app.shutdown(t.Context())
+
+	lockedApp := NewApp()
+	lockedApp.startup(t.Context())
+	t.Cleanup(func() { lockedApp.shutdown(t.Context()) })
+	lockedStatus := lockedApp.GetStartupStatus()
+	if lockedStatus.Ready || !lockedStatus.Locked || lockedApp.notes != nil {
+		t.Fatalf("locked storage-space startup status = %#v", lockedStatus)
+	}
+	unlocked := lockedApp.UnlockContentLock(contentlock.UnlockInput{
+		TargetType: contentlock.TargetSpace,
+		TargetID:   created.Space.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if unlocked.Error != nil || !unlocked.Unlocked {
+		t.Fatalf("unlock storage space = %#v", unlocked)
+	}
+	if status := lockedApp.GetStartupStatus(); !status.Ready || status.Locked || lockedApp.notes == nil {
+		t.Fatalf("status after unlock = %#v", status)
+	}
+}
+
+func TestAppListsRequiredContentLocksAndBatchLocks(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+
+	created, err := app.CreateNote(note.CreateInput{Title: "保護", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	enabled := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNote,
+		TargetID:   created.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if enabled.Error != nil || !enabled.Unlocked {
+		t.Fatalf("enable content lock = %#v", enabled)
+	}
+	if required := app.ListRequiredContentLocks(contentlock.Target{Type: contentlock.TargetNote, ID: created.ID}); required.Error != nil || len(required.Locks) != 0 {
+		t.Fatalf("required locks while unlocked = %#v", required)
+	}
+
+	locked := app.LockContentTargetsNow([]contentlock.Target{{Type: contentlock.TargetNote, ID: created.ID}})
+	if locked.Error != nil || len(locked.Locks) != 1 || locked.Locks[0].TargetID != created.ID {
+		t.Fatalf("batch lock result = %#v", locked)
+	}
+	required := app.ListRequiredContentLocks(contentlock.Target{Type: contentlock.TargetNote, ID: created.ID})
+	if required.Error != nil || len(required.Locks) != 1 || required.Locks[0].TargetID != created.ID {
+		t.Fatalf("required locks after batch lock = %#v", required)
+	}
+}
+
+func TestAppDisablesSyncWhenContentLocksExist(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "保護", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	enabled := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNote,
+		TargetID:   created.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if enabled.Error != nil {
+		t.Fatalf("enable content lock = %#v", enabled)
+	}
+	if err := app.ensureSyncAllowed(); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("sync guard error = %v, want protected content sync error", err)
+	}
+	if _, err := app.ConfigureSync(syncservice.ConnectionInput{}); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("configure sync error = %v, want protected content sync error", err)
+	}
+	if _, err := app.TestSyncConfiguration(syncservice.ConnectionInput{}); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("test sync configuration error = %v, want protected content sync error", err)
+	}
+	if err := app.ResolveSyncConflict(syncservice.ConflictResolutionInput{}); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("resolve sync conflict error = %v, want protected content sync error", err)
+	}
+	if _, err := app.PrepareSyncRecovery("redownload"); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("prepare sync recovery error = %v, want protected content sync error", err)
+	}
+	if _, err := app.ExecuteSyncRecovery(syncservice.RecoveryExecutionInput{}); !errors.Is(err, errProtectedContentSync) {
+		t.Fatalf("execute sync recovery error = %v, want protected content sync error", err)
+	}
+}
+
+func TestAppRejectsAISummaryForProtectedNote(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "要約禁止", Content: "protected summary body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	locked := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNote,
+		TargetID:   created.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if locked.Error != nil {
+		t.Fatalf("enable content lock = %#v", locked)
+	}
+	response := app.GenerateAISummary(aiservice.GenerateSummaryInput{
+		ProviderID: aiservice.ProviderOpenRouter,
+		ModelID:    "openai/test",
+		NoteID:     created.ID,
+		Content:    created.Content,
+	})
+	if response.Error == nil || response.Error.Code != aiservice.ErrorCodeInputInvalid || response.Text != "" {
+		t.Fatalf("protected summary response = %#v", response)
+	}
 }
 
 func TestNewAppRejectsCorruptStorageSpaceCatalogWithoutOverwrite(t *testing.T) {

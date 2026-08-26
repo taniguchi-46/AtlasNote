@@ -12,6 +12,9 @@ type Summary struct {
 	Revision   int64     `json:"revision"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+	Protected  bool      `json:"protected"`
+	Locked     bool      `json:"locked"`
+	LockSource string    `json:"lockSource,omitempty"`
 }
 
 const (
@@ -79,6 +82,9 @@ type Note struct {
 	Revision   int64     `json:"revision"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+	Protected  bool      `json:"protected"`
+	Locked     bool      `json:"locked"`
+	LockSource string    `json:"lockSource,omitempty"`
 }
 
 type CreateInput struct {
@@ -301,12 +307,15 @@ type RecoveryReport struct {
 }
 
 type Notebook struct {
-	ID        string    `json:"id"`
-	ParentID  *string   `json:"parentId"`
-	Name      string    `json:"name"`
-	Icon      string    `json:"icon"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID         string    `json:"id"`
+	ParentID   *string   `json:"parentId"`
+	Name       string    `json:"name"`
+	Icon       string    `json:"icon"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+	Protected  bool      `json:"protected"`
+	Locked     bool      `json:"locked"`
+	LockSource string    `json:"lockSource,omitempty"`
 }
 
 type NotebookCreateInput struct {

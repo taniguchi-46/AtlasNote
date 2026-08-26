@@ -814,6 +814,9 @@ const isAnyBusy = computed(() => (
 const hasUsableNote = computed(() => Boolean(
   noteStore.activeNote && !noteStore.activeNote.isTrashed,
 ))
+const activeNoteProtected = computed(() => Boolean(
+  (noteStore.activeNote as { protected?: boolean } | null)?.protected,
+))
 const hasBlockingDraft = computed(() => (
   noteStore.activeDraft?.status === 'conflicted'
   || noteStore.activeDraft?.status === 'failed'
@@ -868,6 +871,7 @@ const hasUnreadyNotebookContext = computed(() => (
 const canSubmitComposer = computed(() => {
   if (
     !hasUsableNote.value
+    || activeNoteProtected.value
     || noteStore.isLoading
     || hasBlockingDraft.value
     || isAnyBusy.value
@@ -928,6 +932,7 @@ const sendButtonLabel = computed(() => {
 const submitBlockedMessage = computed(() => {
   if (noteStore.isLoading) return 'ノートを読み込んでいます。完了後に送信できます。'
   if (!hasUsableNote.value) return 'AIを使うにはゴミ箱以外のノートを開いてください。'
+  if (activeNoteProtected.value) return '保護されたノートはAI機能では利用できません。'
   if (hasBlockingDraft.value) return 'ノートの保存競合または保存失敗を解消してから送信してください。'
   if (!aiStore.configuredSetting?.modelID) return '送信前にAI設定でモデルを選択してください。'
   if (agentCapabilityUnavailableMessage.value) return agentCapabilityUnavailableMessage.value

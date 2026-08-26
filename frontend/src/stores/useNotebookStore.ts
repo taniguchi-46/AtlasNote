@@ -6,6 +6,7 @@ import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
 import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
 import { useNoteStore } from './useNoteStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
+import { useContentLockStore } from './useContentLockStore'
 
 export interface NotebookNode extends note.Notebook {
 	children: NotebookNode[]
@@ -94,6 +95,17 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		} finally {
 			isLoading.value = false
 		}
+	}
+
+	async function selectNotebook(id: string) {
+		const notebook = notebooks.value.find((candidate) => candidate.id === id)
+		const accessAllowed = await useContentLockStore().requestAccess(
+			{ type: 'notebook', id },
+			notebook?.name ?? 'ノートブック',
+		)
+		if (!accessAllowed) return false
+		activeNotebookId.value = id
+		return true
 	}
 
 	async function newNotebook(name: string, parentId: string | null = null, icon = DEFAULT_NOTEBOOK_ICON) {
@@ -227,6 +239,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		error,
 		notebookTree,
 		fetchNotebooks,
+		selectNotebook,
 		newNotebook,
 		renameNotebook,
 		moveNotebook,

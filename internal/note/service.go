@@ -28,10 +28,28 @@ var (
 type Service struct {
 	repository          *Repository
 	store               markdownStore
+	contentLocks        contentLockGuard
 	mu                  sync.Mutex
 	syncGate            sync.RWMutex
 	searchIndexFailed   bool
 	noteLinkIndexFailed bool
+}
+
+// contentLockGuard is kept as a narrow interface to avoid coupling note
+// persistence to the user-lock package. The storage layer enforces encryption;
+// this guard adds authorization and derived-index policy.
+type contentLockGuard interface {
+	BeginContentAccess(context.Context) func()
+	AssertNoteAccess(context.Context, string) error
+	AssertNotebookAccess(context.Context, string) error
+	AssertNoteDeletion(context.Context, string) error
+	AssertNotebookDeletion(context.Context, string) error
+	HasContentLocks(context.Context) (bool, error)
+	PrepareNewNote(context.Context, string, *string) (func(), error)
+	PrepareNoteWrite(context.Context, string, *string) (func(), error)
+	IsNoteProtected(context.Context, string) (bool, error)
+	NoteLockStatus(context.Context, string) (bool, bool, string, error)
+	NotebookLockStatus(context.Context, string) (bool, bool, string, error)
 }
 
 type markdownStore interface {
@@ -61,7 +79,106 @@ func NewService(repository *Repository, store markdownStore) *Service {
 	}
 }
 
+func (s *Service) SetContentLockGuard(guard contentLockGuard) {
+	s.contentLocks = guard
+}
+
+func (s *Service) beginContentAccess(ctx context.Context) func() {
+	if s.contentLocks == nil {
+		return func() {}
+	}
+	return s.contentLocks.BeginContentAccess(ctx)
+}
+
+func (s *Service) noteProtected(ctx context.Context, noteID string) bool {
+	if s.contentLocks == nil {
+		return false
+	}
+	protected, err := s.contentLocks.IsNoteProtected(ctx, noteID)
+	// Content protection must fail closed. A transient status lookup failure may
+	// leave a derived index stale, but must never cause a protected body to be
+	// copied into a plaintext sync payload or an index.
+	return err != nil || protected
+}
+
+func (s *Service) noteSyncChanges(ctx context.Context, changeSetID string, record Record, content string) ([]SyncChange, error) {
+	// A protected body must never be copied into the local plaintext sync
+	// outbox. Lock enable also purges pre-existing note payloads. Synchronizing
+	// protected content itself is intentionally unavailable until the separate
+	// encrypted sync protocol is introduced.
+	if s.noteProtected(ctx, record.ID) {
+		return nil, nil
+	}
+	change, err := NewNoteSyncChange(changeSetID, record, content)
+	if err != nil {
+		return nil, err
+	}
+	return []SyncChange{change}, nil
+}
+
+// assertExistingNoteAccess keeps callers' established not-found contracts.
+// Mutations that previously returned a structured missing-note result must not
+// be changed into a lock validation error merely because the ID is unknown.
+func (s *Service) assertExistingNoteAccess(ctx context.Context, noteID string) error {
+	if s.contentLocks == nil {
+		return nil
+	}
+	if _, err := s.repository.Get(ctx, noteID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	return s.contentLocks.AssertNoteAccess(ctx, noteID)
+}
+
+func (s *Service) annotateSummary(ctx context.Context, summary Summary) Summary {
+	if s.contentLocks == nil {
+		return summary
+	}
+	protected, locked, source, err := s.contentLocks.NoteLockStatus(ctx, summary.ID)
+	if err != nil {
+		return summary
+	}
+	summary.Protected = protected
+	summary.Locked = locked
+	summary.LockSource = source
+	return summary
+}
+
+func (s *Service) annotateNote(ctx context.Context, item Note) Note {
+	if s.contentLocks == nil {
+		return item
+	}
+	protected, locked, source, err := s.contentLocks.NoteLockStatus(ctx, item.ID)
+	if err != nil {
+		return item
+	}
+	item.Protected = protected
+	item.Locked = locked
+	item.LockSource = source
+	return item
+}
+
+func (s *Service) annotateNotebook(ctx context.Context, item Notebook) Notebook {
+	if s.contentLocks == nil {
+		return item
+	}
+	protected, locked, source, err := s.contentLocks.NotebookLockStatus(ctx, item.ID)
+	if err != nil {
+		return item
+	}
+	item.Protected = protected
+	item.Locked = locked
+	item.LockSource = source
+	return item
+}
+
 func (s *Service) updateSearchIndexLocked(ctx context.Context, record Record, content string) {
+	if s.noteProtected(ctx, record.ID) {
+		s.deleteSearchIndexLocked(ctx, record.ID)
+		return
+	}
 	contentMTime, _ := s.store.ModTime(ctx, record.ID)
 	if err := s.repository.UpsertSearchIndex(ctx, SearchDocument{
 		NoteID:       record.ID,
@@ -82,6 +199,10 @@ func (s *Service) deleteSearchIndexLocked(ctx context.Context, noteID string) {
 }
 
 func (s *Service) refreshSearchIndexStateLocked(ctx context.Context, record Record, content string) {
+	if s.noteProtected(ctx, record.ID) {
+		s.deleteSearchIndexLocked(ctx, record.ID)
+		return
+	}
 	if err := s.repository.RefreshSearchIndexState(
 		ctx,
 		record.ID,
@@ -93,6 +214,10 @@ func (s *Service) refreshSearchIndexStateLocked(ctx context.Context, record Reco
 }
 
 func (s *Service) updateNoteLinkIndexLocked(ctx context.Context, record Record, content string) {
+	if s.noteProtected(ctx, record.ID) {
+		s.deleteNoteLinkIndexLocked(ctx, record.ID)
+		return
+	}
 	contentMTime, _ := s.store.ModTime(ctx, record.ID)
 	if err := s.repository.ReplaceNoteLinks(ctx, NoteLinkDocument{
 		SourceNoteID:  record.ID,
@@ -112,6 +237,10 @@ func (s *Service) deleteNoteLinkIndexLocked(ctx context.Context, noteID string) 
 }
 
 func (s *Service) refreshNoteLinkIndexStateLocked(ctx context.Context, record Record, content string) {
+	if s.noteProtected(ctx, record.ID) {
+		s.deleteNoteLinkIndexLocked(ctx, record.ID)
+		return
+	}
 	if err := s.repository.RefreshNoteLinkIndexState(
 		ctx,
 		record.ID,
@@ -125,6 +254,8 @@ func (s *Service) refreshNoteLinkIndexStateLocked(ctx context.Context, record Re
 func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	// 複数リクエストやバックグラウンドのリカバリ処理が同時にデータを書き換えるのを防ぐため、排他ロックを取得する
 	s.mu.Lock()
@@ -149,6 +280,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	var finishPendingWrite func()
+	if s.contentLocks != nil {
+		finishPendingWrite, err = s.contentLocks.PrepareNewNote(ctx, id, input.NotebookID)
+		if err != nil {
+			return Note{}, err
+		}
+		defer finishPendingWrite()
+	}
 
 	contentPath, err := s.store.ContentPath(id)
 	if err != nil {
@@ -172,7 +311,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		ContentHash: storage.HashContent(content),
 		CreatedAt:   now,
 	}
-	noteChange, err := NewNoteSyncChange(operationID, record, content)
+	noteChanges, err := s.noteSyncChanges(ctx, operationID, record, content)
 	if err != nil {
 		return Note{}, err
 	}
@@ -186,7 +325,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	}
 
 	// 2. DBにノート本体のレコードと「保存中(upsert)」を示す StorageOperation レコードを同一トランザクションで書き込む
-	if err := s.repository.CreateWithStorageOperationAndSync(ctx, record, operation, []SyncChange{noteChange}); err != nil {
+	if err := s.repository.CreateWithStorageOperationAndSync(ctx, record, operation, noteChanges); err != nil {
 		_ = s.store.RollbackTemp(context.Background(), id, operationID)
 		return Note{}, fmt.Errorf("create note record: %w", err)
 	}
@@ -206,7 +345,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 	// 4. 保存完了の印として StorageOperation レコードを削除する
 	_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 
-	return Note{
+	return s.annotateNote(ctx, Note{
 		ID:         record.ID,
 		NotebookID: record.NotebookID,
 		Title:      record.Title,
@@ -217,28 +356,48 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Note, error) {
 		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
-	}, nil
+	}), nil
 }
 
 func (s *Service) List(ctx context.Context) ([]Summary, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return nil, err
 	}
-	return s.repository.List(ctx)
+	items, err := s.repository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index] = s.annotateSummary(ctx, items[index])
+	}
+	return items, nil
 }
 
 func (s *Service) ListPage(ctx context.Context, input NoteListInput) (NoteListResult, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return NoteListResult{Items: make([]Summary, 0)}, err
 	}
-	return s.repository.ListPage(ctx, input)
+	result, err := s.repository.ListPage(ctx, input)
+	if err != nil {
+		return result, err
+	}
+	for index := range result.Items {
+		result.Items[index] = s.annotateSummary(ctx, result.Items[index])
+	}
+	return result, nil
 }
 
 func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -246,6 +405,12 @@ func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, 
 		return SearchResult{Items: make([]SearchItem, 0)}, err
 	}
 	result, err := s.repository.Search(ctx, input)
+	for index := range result.Items {
+		result.Items[index].Note = s.annotateSummary(ctx, result.Items[index].Note)
+		if result.Items[index].Note.Protected {
+			result.Items[index].Snippet = ""
+		}
+	}
 	if err != nil || result.Error != nil || strings.TrimSpace(input.Query) == "" || !s.searchIndexFailed {
 		return result, err
 	}
@@ -262,6 +427,8 @@ func (s *Service) Search(ctx context.Context, input SearchInput) (SearchResult, 
 }
 
 func (s *Service) ListBacklinks(ctx context.Context, input BacklinkListInput) (BacklinkListResult, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -274,10 +441,19 @@ func (s *Service) ListBacklinks(ctx context.Context, input BacklinkListInput) (B
 	if _, err := s.repository.Get(ctx, input.NoteID); err != nil {
 		return BacklinkListResult{Items: make([]Summary, 0)}, err
 	}
-	return s.repository.ListBacklinks(ctx, input)
+	result, err := s.repository.ListBacklinks(ctx, input)
+	if err != nil {
+		return result, err
+	}
+	for index := range result.Items {
+		result.Items[index] = s.annotateSummary(ctx, result.Items[index])
+	}
+	return result, nil
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Note, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
@@ -288,13 +464,18 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNoteAccess(ctx, record.ID); err != nil {
+			return Note{}, err
+		}
+	}
 
 	content, err := s.store.Read(ctx, record.ID)
 	if err != nil {
 		return Note{}, err
 	}
 
-	return Note{
+	return s.annotateNote(ctx, Note{
 		ID:         record.ID,
 		NotebookID: record.NotebookID,
 		Title:      record.Title,
@@ -305,12 +486,14 @@ func (s *Service) Get(ctx context.Context, id string) (Note, error) {
 		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
-	}, nil
+	}), nil
 }
 
 func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Note, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -322,10 +505,14 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	if err != nil {
 		return Note{}, err
 	}
-
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return Note{}, err
+	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNoteAccess(ctx, record.ID); err != nil {
+			return Note{}, err
+		}
 	}
 	if record.Revision != expectedRevision {
 		return Note{}, revisionConflict(record.ID, expectedRevision, record.Revision)
@@ -366,7 +553,17 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 	record.Title = title
 	record.UpdatedAt = time.Now().UTC()
 
-	if input.Content != nil {
+	needsContentWrite := input.Content != nil || !sameStringPointer(previous.NotebookID, record.NotebookID)
+	var finishPendingWrite func()
+	if needsContentWrite && s.contentLocks != nil {
+		finishPendingWrite, err = s.contentLocks.PrepareNoteWrite(ctx, record.ID, record.NotebookID)
+		if err != nil {
+			return Note{}, err
+		}
+		defer finishPendingWrite()
+	}
+
+	if needsContentWrite {
 		operationID, err := newID()
 		if err != nil {
 			return Note{}, err
@@ -378,7 +575,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 			ContentHash: storage.HashContent(content),
 			CreatedAt:   time.Now().UTC(),
 		}
-		noteChange, err := NewNoteSyncChange(operationID, record, content)
+		noteChanges, err := s.noteSyncChanges(ctx, operationID, record, content)
 		if err != nil {
 			return Note{}, err
 		}
@@ -388,18 +585,33 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		if err := s.store.WriteTemp(ctx, record.ID, operationID, content); err != nil {
 			return Note{}, err
 		}
-		nextRevision, err := s.repository.UpdateWithStorageOperationCASAndSync(ctx, record, operation, expectedRevision, []SyncChange{noteChange})
+		nextRevision, err := s.repository.UpdateWithStorageOperationCASAndSync(ctx, record, operation, expectedRevision, noteChanges)
 		if err != nil {
 			_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
 		record.Revision = nextRevision
 		if err := s.store.CommitTemp(ctx, record.ID, operationID); err != nil {
-			rollbackChange, changeErr := NewNoteSyncChange(operationID, previous, previousContent)
+			// The database still describes the new notebook scope until the
+			// rollback transaction below commits. Reinstall the previous scope
+			// while deriving rollback sync changes so a failed move from a
+			// protected notebook cannot write its old plaintext body to the
+			// local sync outbox.
+			var finishRollbackPendingWrite func()
+			if s.contentLocks != nil {
+				var prepareRollbackErr error
+				finishRollbackPendingWrite, prepareRollbackErr = s.contentLocks.PrepareNoteWrite(ctx, record.ID, previous.NotebookID)
+				if prepareRollbackErr != nil {
+					return Note{}, fmt.Errorf("commit markdown update: %w; prepare sync rollback: %v", err, prepareRollbackErr)
+				}
+				defer finishRollbackPendingWrite()
+			}
+			rollbackChanges, changeErr := s.noteSyncChanges(ctx, operationID, previous, previousContent)
 			if changeErr != nil {
 				return Note{}, fmt.Errorf("commit markdown update: %w; build sync rollback: %v", err, changeErr)
 			}
-			rollbackErr := s.repository.RollbackUpdatedNote(context.WithoutCancel(ctx), previous, operationID, []SyncChange{rollbackChange})
+			discardFailedSyncPayload := len(noteChanges) > 0 && len(rollbackChanges) == 0
+			rollbackErr := s.repository.RollbackUpdatedNote(context.WithoutCancel(ctx), previous, operationID, rollbackChanges, discardFailedSyncPayload)
 			if rollbackErr == nil {
 				_ = s.store.RollbackTemp(context.Background(), record.ID, operationID)
 				return Note{}, fmt.Errorf("commit markdown update: %w", err)
@@ -414,11 +626,11 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		if err != nil {
 			return Note{}, err
 		}
-		noteChange, err := NewNoteSyncChange(changeSetID, record, content)
+		noteChanges, err := s.noteSyncChanges(ctx, changeSetID, record, content)
 		if err != nil {
 			return Note{}, err
 		}
-		nextRevision, err := s.repository.UpdateCASWithSync(ctx, record, expectedRevision, []SyncChange{noteChange})
+		nextRevision, err := s.repository.UpdateCASWithSync(ctx, record, expectedRevision, noteChanges)
 		if err != nil {
 			return Note{}, fmt.Errorf("update note record: %w", err)
 		}
@@ -431,7 +643,7 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		s.refreshNoteLinkIndexStateLocked(ctx, record, content)
 	}
 
-	return Note{
+	return s.annotateNote(ctx, Note{
 		ID:         record.ID,
 		NotebookID: record.NotebookID,
 		Title:      record.Title,
@@ -442,12 +654,14 @@ func (s *Service) Update(ctx context.Context, id string, input UpdateInput) (Not
 		Revision:   record.Revision,
 		CreatedAt:  record.CreatedAt,
 		UpdatedAt:  record.UpdatedAt,
-	}, nil
+	}), nil
 }
 
 func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) error {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -462,6 +676,11 @@ func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) erro
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNoteDeletion(ctx, record.ID); err != nil {
+			return err
+		}
 	}
 	if record.Revision != input.ExpectedRevision {
 		return revisionConflict(record.ID, input.ExpectedRevision, record.Revision)
@@ -529,6 +748,8 @@ func revisionConflict(noteID string, expectedRevision int64, actualRevision int6
 func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -561,6 +782,15 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
 		}
 		expected[contentPath] = struct{}{}
+		if s.noteProtected(ctx, record.ID) {
+			if err := s.repository.DeleteSearchIndex(ctx, record.ID); err != nil {
+				return RecoveryReport{}, err
+			}
+			if err := s.repository.DeleteNoteLinkIndex(ctx, record.ID); err != nil {
+				return RecoveryReport{}, err
+			}
+			continue
+		}
 		managedFile, exists := managedFiles[contentPath]
 		if !exists {
 			report.MissingNotes = append(report.MissingNotes, MissingContent{
@@ -620,6 +850,9 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 		if record.ContentPath != contentPath {
 			return RecoveryReport{}, fmt.Errorf("note %s has invalid content path", record.ID)
 		}
+		if s.noteProtected(ctx, record.ID) {
+			continue
+		}
 		managedFile, exists := managedFiles[contentPath]
 		if !exists {
 			continue
@@ -644,11 +877,11 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 			if changeSetErr != nil {
 				return RecoveryReport{}, changeSetErr
 			}
-			noteChange, changeErr := NewNoteSyncChange(changeSetID, record, content)
+			noteChanges, changeErr := s.noteSyncChanges(ctx, changeSetID, record, content)
 			if changeErr != nil {
 				return RecoveryReport{}, changeErr
 			}
-			nextRevision, updateErr := s.repository.UpdateCASWithSync(ctx, record, record.Revision, []SyncChange{noteChange})
+			nextRevision, updateErr := s.repository.UpdateCASWithSync(ctx, record, record.Revision, noteChanges)
 			if updateErr != nil {
 				return RecoveryReport{}, fmt.Errorf("reconcile external markdown for %s: %w", record.ID, updateErr)
 			}
@@ -686,6 +919,8 @@ func (s *Service) Recover(ctx context.Context) (RecoveryReport, error) {
 func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -696,6 +931,11 @@ func (s *Service) DeleteMissing(ctx context.Context, id string) error {
 	record, err := s.repository.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNoteAccess(ctx, record.ID); err != nil {
+			return err
+		}
 	}
 	contentPath, err := s.store.ContentPath(record.ID)
 	if err != nil {
@@ -739,6 +979,22 @@ func (s *Service) recoverPendingLocked(ctx context.Context) error {
 	}
 
 	for _, operation := range operations {
+		if s.contentLocks != nil {
+			if _, recordErr := s.repository.Get(ctx, operation.NoteID); recordErr == nil {
+				protected, locked, _, statusErr := s.contentLocks.NoteLockStatus(ctx, operation.NoteID)
+				if statusErr != nil {
+					return statusErr
+				}
+				if protected && locked {
+					// The operation remains journaled until the user unlocks the
+					// relevant target. This avoids treating ciphertext as plaintext
+					// or requiring a passphrase during application startup.
+					continue
+				}
+			} else if !errors.Is(recordErr, ErrNotFound) {
+				return recordErr
+			}
+		}
 		switch operation.Type {
 		case StorageOperationUpsert:
 			if err := s.recoverUpsertLocked(ctx, operation); err != nil {
@@ -855,6 +1111,13 @@ func validateInput(title string, content string) (string, string, error) {
 	}
 
 	return title, content, nil
+}
+
+func sameStringPointer(left *string, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func newID() (string, error) {

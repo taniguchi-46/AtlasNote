@@ -594,7 +594,7 @@ func (r *Repository) RollbackCreatedNote(ctx context.Context, noteID string, ope
 	return nil
 }
 
-func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, operationID string, changes []SyncChange) error {
+func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, operationID string, changes []SyncChange, discardFailedSyncPayload bool) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin note update rollback tx: %w", err)
@@ -606,6 +606,16 @@ func (r *Repository) RollbackUpdatedNote(ctx context.Context, previous Record, o
 	}
 	if err := deleteStorageOperation(ctx, tx, operationID); err != nil {
 		return err
+	}
+	if discardFailedSyncPayload {
+		// The failed update staged a new note payload before its Markdown file
+		// was committed, but the rollback state is protected and intentionally
+		// has no replacement plaintext sync change. This path is only used for
+		// newly local sync state, so DiscardUnsyncedChanges cannot erase a
+		// synchronized remote/base version.
+		if err := r.discardUnsyncedChanges(ctx, tx, []string{SyncEntityKey(SyncEntityNote, previous.ID)}); err != nil {
+			return err
+		}
 	}
 	if err := r.recordSyncChanges(ctx, tx, changes); err != nil {
 		return err

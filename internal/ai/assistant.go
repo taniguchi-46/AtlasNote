@@ -39,6 +39,8 @@ func (r *assistantRequest) finish() bool {
 }
 
 func (s *Service) RunAssistant(ctx context.Context, input AssistantInput) (result AssistantResult, err error) {
+	releaseContent := s.beginAIContentAccess(ctx)
+	defer releaseContent()
 	requestCtx, request, err := s.startAssistantRequest(ctx, input.RequestID)
 	if err != nil {
 		return AssistantResult{}, err
@@ -190,6 +192,8 @@ func (s *Service) runAssistant(ctx context.Context, input AssistantInput) (Assis
 }
 
 func (s *Service) RunWriting(ctx context.Context, input WritingInput) (WritingResult, error) {
+	releaseContent := s.beginAIContentAccess(ctx)
+	defer releaseContent()
 	providerID, err := normalizeProviderID(input.ProviderID)
 	if err != nil {
 		return WritingResult{}, err

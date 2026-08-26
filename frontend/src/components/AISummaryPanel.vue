@@ -14,12 +14,17 @@
       現在のノート本文だけを送信します。成功した要約はこの端末の履歴へ保存され、WebDAV同期はされません。
     </p>
 
+    <p v-if="isActiveNoteProtected" class="ai-summary-privacy" role="status">
+      保護されたノートはAI機能では利用できません。
+    </p>
+
     <div v-if="!props.timeline && aiStore.summaryState === 'idle'" class="ai-summary-actions">
       <button
         class="ai-summary-action ai-summary-generate"
         type="button"
         title="要約を生成"
         aria-label="要約を生成"
+        :disabled="isActiveNoteProtected"
         @click="handleAISummary"
       >
         <SparklesIcon :size="16" aria-hidden="true" />
@@ -134,6 +139,10 @@ const isAISummaryStale = computed(() => (
   && visibleAISummary.value!.baseRevision !== noteStore.activeNote!.revision
 ))
 
+const isActiveNoteProtected = computed(() => Boolean(
+  (noteStore.activeNote as { protected?: boolean } | null)?.protected,
+))
+
 watch(
   () => noteStore.activeNote,
   (note) => {
@@ -157,6 +166,10 @@ onBeforeUnmount(() => {
 async function handleAISummary() {
   const selectedNote = noteStore.activeNote
   if (!selectedNote) return false
+  if (isActiveNoteProtected.value) {
+    aiStore.setSummaryPreconditionError('AI_CONTENT_PROTECTED', selectedNote.id)
+    return false
+  }
 
   if (!aiStore.isSummaryReady) {
     aiStore.setSummaryPreconditionError('AI_SUMMARY_NOT_READY', selectedNote.id)

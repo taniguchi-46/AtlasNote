@@ -11,6 +11,10 @@
       <span v-else-if="librarianStore.state === 'canceled'">キャンセル済み</span>
     </div>
 
+    <p v-if="isActiveNoteProtected" class="ai-librarian-warning" role="status">
+      保護されたノートはAI機能では利用できません。
+    </p>
+
     <div v-if="!props.timeline" class="ai-librarian-actions" role="group" aria-label="AI司書の操作">
       <button
         v-for="item in operations"
@@ -19,7 +23,7 @@
         type="button"
         :title="item.label"
         :aria-label="item.label"
-        :disabled="librarianStore.isGenerating || noteStore.isSaving"
+        :disabled="isActiveNoteProtected || librarianStore.isGenerating || noteStore.isSaving"
         @click="startOperation(item.value)"
       >
         <component :is="item.icon" :size="15" aria-hidden="true" />
@@ -123,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import {
   CheckIcon,
@@ -159,6 +163,10 @@ const settingsStore = useSettingsStore()
 const candidatePool = ref<LibrarianCandidateContext[]>([])
 const lastOperation = ref<LibrarianOperation | null>(null)
 let activeNoteID: string | null = null
+
+const isActiveNoteProtected = computed(() => Boolean(
+  (noteStore.activeNote as { protected?: boolean } | null)?.protected,
+))
 
 const operations: Array<{ value: LibrarianOperation; label: string; icon: Component }> = [
   { value: 'title', label: 'タイトル候補', icon: SparklesIcon },
@@ -245,6 +253,7 @@ async function buildCandidatePool(note: note.Note) {
 async function startOperation(requestedOperation: LibrarianOperation) {
   const selectedNote = noteStore.activeNote
   if (!selectedNote) return false
+  if (isActiveNoteProtected.value) return false
   if (!aiStore.configuredSetting) {
     settingsStore.openSettings('ai')
     librarianStore.setApplyError('AI_CONFIGURATION_UNAVAILABLE')

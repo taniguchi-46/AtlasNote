@@ -174,6 +174,10 @@
             <StorageSpaceSettingsPanel />
           </TabsContent>
 
+          <TabsContent value="locks" as-child>
+            <ContentLockSettingsPanel />
+          </TabsContent>
+
         </main>
       </TabsRoot>
       </DialogContent>
@@ -208,6 +212,7 @@ import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
 import AISettingsPanel from './AISettingsPanel.vue'
 import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
+import ContentLockSettingsPanel from './ContentLockSettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()
@@ -223,6 +228,7 @@ const tabs = [
 tabs.push({ id: 'sync', name: '同期' })
 tabs.push({ id: 'ai', name: 'AI' })
 tabs.push({ id: 'storage-spaces', name: '保存空間' })
+tabs.push({ id: 'locks', name: 'ロック' })
 const activeTab = ref<SettingsTab>('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
 

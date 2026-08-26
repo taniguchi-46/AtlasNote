@@ -4,7 +4,7 @@
 
 ## 目的
 
-ノート、同期設定、AIのローカル管理データを保存空間ごとに分離し、後続のユーザー向けロック、インポート、エクスポートの安全な保存境界を提供する。
+ノート、同期設定、AIのローカル管理データを保存空間ごとに分離し、ユーザー向けロック、インポート、エクスポートの安全な保存境界を提供する。
 
 ## ディレクトリ構成
 
@@ -35,7 +35,7 @@ ATLAS_NOTE_DATA_DIR/
 保存空間ごとに次を独立させる。
 
 - SQLite全体。ノート、Notebook、タグ、リンク、検索索引、操作journal、WebDAV接続・outbox・競合、AI設定・履歴・成果物を含む。
-- Markdown正本と回復用ファイル。
+- Markdown正本と回復用ファイル。本文ロックを設定したノートのMarkdown本文は、この保存空間のSQLite内のロック情報を用いて暗号化する。
 - `atlasnote.lock` によるOSレベルの単一writer保証。
 - WebDAV再ダウンロード用の `.sync-recovery/`。
 
@@ -56,20 +56,23 @@ WebDAVパスワードとAI API Keyは従来どおりOS CredentialStoreへ保存�
 - 台帳が不正、巨大、未知version、重複ID、重複名、不正IDの場合は起動を安全側で停止し、台帳を自動修復・上書きしない。
 - 新規空間のパスは管理ルート配下から内部導出し、`..`、絶対パス、symlinkを経由する保存先を受け付けない。
 - 同じ保存空間の2つ目のwriterは拒否する。別の保存空間は独立したlockを使う。
-- 現スコープでは削除、改名、外部フォルダ選択、暗号化を提供しない。
+- 保存空間の削除、改名、外部フォルダ選択は提供しない。保存空間別の本文ロックは「設定 > 保存空間」で設定し、ロック状態の保存空間を次回起動時に解除できる。
 
 ## 互換性
 
-- DBスキーマの追加migrationはない。保存空間ごとに既存schemaをそのまま使用する。
+- 本文ロックのためのschema version 15 migrationは、各保存空間を開く際に個別に適用する。
 - 旧バージョンは従来どおりルート直下の「メイン」を開ける。`spaces/` 内の保存空間は削除されず、旧バージョンから見えない。
+- 本文ロックを設定した保存空間は、暗号化本文を復号できない旧バージョンで開かない。
 - 管理台帳を手動削除・編集すると選択情報を失うため、復旧操作として扱わない。
 
 ## 確認コマンド
 
 ```bash
 go test ./internal/config ./internal/notespace -count=1
+go test ./internal/contentlock -count=1
 go test ./... -count=1
 npm --prefix frontend run test:storage-spaces
+npm --prefix frontend run test:content-locks
 npm --prefix frontend run test:sync
 npm run frontend:typecheck
 wails build -clean

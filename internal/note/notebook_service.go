@@ -20,11 +20,18 @@ var notebookIconPattern = regexp.MustCompile(`^(default|user):[A-Za-z0-9_-]+$`)
 func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput) (Notebook, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return Notebook{}, err
+	}
+	if input.ParentID != nil && s.contentLocks != nil {
+		if err := s.contentLocks.AssertNotebookAccess(ctx, *input.ParentID); err != nil {
+			return Notebook{}, err
+		}
 	}
 
 	name := strings.TrimSpace(input.Name)
@@ -60,21 +67,32 @@ func (s *Service) CreateNotebook(ctx context.Context, input NotebookCreateInput)
 		return Notebook{}, fmt.Errorf("create notebook: %w", err)
 	}
 
-	return nb, nil
+	return s.annotateNotebook(ctx, nb), nil
 }
 
 func (s *Service) ListNotebooks(ctx context.Context) ([]Notebook, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return nil, err
 	}
-	return s.repository.ListNotebooks(ctx)
+	items, err := s.repository.ListNotebooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index] = s.annotateNotebook(ctx, items[index])
+	}
+	return items, nil
 }
 
 func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookUpdateInput) (Notebook, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,6 +103,25 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 	nb, err := s.repository.GetNotebook(ctx, id)
 	if err != nil {
 		return Notebook{}, err
+	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNotebookAccess(ctx, nb.ID); err != nil {
+			return Notebook{}, err
+		}
+		if input.ParentID != nil {
+			if err := s.contentLocks.AssertNotebookAccess(ctx, *input.ParentID); err != nil {
+				return Notebook{}, err
+			}
+		}
+		if input.ParentID != nil || (input.ClearParent != nil && *input.ClearParent) {
+			hasLocks, err := s.contentLocks.HasContentLocks(ctx)
+			if err != nil {
+				return Notebook{}, err
+			}
+			if hasLocks {
+				return Notebook{}, ErrValidation
+			}
+		}
 	}
 
 	if input.Name != nil {
@@ -133,17 +170,37 @@ func (s *Service) UpdateNotebook(ctx context.Context, id string, input NotebookU
 		return Notebook{}, fmt.Errorf("update notebook: %w", err)
 	}
 
-	return nb, nil
+	return s.annotateNotebook(ctx, nb), nil
 }
 
 func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookDeleteInput) error {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
 		return err
+	}
+	if s.contentLocks != nil {
+		if err := s.contentLocks.AssertNotebookDeletion(ctx, id); err != nil {
+			return err
+		}
+		if input.Mode == NotebookDeleteModeKeepNotes {
+			hasLocks, err := s.contentLocks.HasContentLocks(ctx)
+			if err != nil {
+				return err
+			}
+			// Keeping notes moves both those notes and child notebooks. That can
+			// change the effective key set of every descendant, so it needs the
+			// same dedicated multi-file re-encryption operation as hierarchy drag
+			// and drop before it can be supported safely.
+			if hasLocks {
+				return fmt.Errorf("%w: notebook hierarchy cannot be moved while content locks are configured", ErrValidation)
+			}
+		}
 	}
 
 	switch input.Mode {
@@ -166,18 +223,24 @@ func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookD
 			changes = append(changes, NewNotebookTombstoneChange(changeSetID, notebook.ID))
 		}
 		for _, record := range records {
+			record.IsTrashed = true
+			record.Revision++
+			record.UpdatedAt = now
+			if s.noteProtected(ctx, record.ID) {
+				// Metadata-only notebook deletion may proceed for an unlocked
+				// inherited lock, but its protected body must never be recreated in
+				// the plaintext sync outbox.
+				continue
+			}
 			content, readErr := s.store.Read(ctx, record.ID)
 			if readErr != nil {
 				return fmt.Errorf("read notebook note %s for sync: %w", record.ID, readErr)
 			}
-			record.IsTrashed = true
-			record.Revision++
-			record.UpdatedAt = now
-			change, changeErr := NewNoteSyncChange(changeSetID, record, content)
+			noteChanges, changeErr := s.noteSyncChanges(ctx, changeSetID, record, content)
 			if changeErr != nil {
 				return changeErr
 			}
-			changes = append(changes, change)
+			changes = append(changes, noteChanges...)
 		}
 		return s.repository.DeleteNotebookWithNotesTrashedAndSync(ctx, id, now, changes)
 	case NotebookDeleteModeKeepNotes:
@@ -219,11 +282,11 @@ func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookD
 			record.NotebookID = nil
 			record.Revision++
 			record.UpdatedAt = now
-			change, changeErr := NewNoteSyncChange(changeSetID, record, content)
+			noteChanges, changeErr := s.noteSyncChanges(ctx, changeSetID, record, content)
 			if changeErr != nil {
 				return changeErr
 			}
-			changes = append(changes, change)
+			changes = append(changes, noteChanges...)
 		}
 		return s.repository.DeleteNotebookKeepingNotesAndSync(ctx, id, now, changes)
 	default:

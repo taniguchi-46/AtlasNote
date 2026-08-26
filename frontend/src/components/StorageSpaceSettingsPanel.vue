@@ -25,7 +25,7 @@
       保存空間を読み込んでいます…
     </p>
     <ul v-else class="storage-space-list" aria-label="保存空間の一覧">
-      <li v-for="space in storageSpaceStore.spaces" :key="space.id">
+      <li v-for="space in storageSpaceStore.spaces" :key="space.id" class="storage-space-entry">
         <button
           class="storage-space-row"
           :class="{ 'is-active': space.active }"
@@ -37,6 +37,16 @@
           <span class="storage-space-name">{{ space.name }}</span>
           <span v-if="space.active" class="active-space-badge">使用中</span>
           <CheckIcon v-if="space.active" class="active-space-check" :size="20" aria-hidden="true" />
+        </button>
+        <button
+          class="space-lock-button"
+          type="button"
+          :disabled="storageSpaceStore.isBusy || contentLockStore.isBusy"
+          @click="openSpaceLockDialog(space)"
+        >
+          <LockKeyholeIcon v-if="spaceLockStatus(space.id)?.locked" :size="15" aria-hidden="true" />
+          <LockIcon v-else :size="15" aria-hidden="true" />
+          {{ spaceLockLabel(space.id) }}
         </button>
       </li>
     </ul>
@@ -111,12 +121,34 @@
         </DialogContent>
       </DialogPortal>
     </DialogRoot>
+
+    <DialogRoot :open="lockSpace !== null" @update:open="handleLockDialogOpen">
+      <DialogPortal>
+        <DialogOverlay class="nested-dialog-overlay" />
+        <DialogContent class="nested-dialog-content lock-dialog-content">
+          <DialogTitle as="h3">{{ lockSpace?.name }}のロック</DialogTitle>
+          <DialogDescription class="nested-dialog-description">
+            保存空間全体の本文を保護します。{{ lockSpace?.active
+              ? 'ロック中の保存空間は、次回起動時にパスフレーズを求めます。'
+              : '別の保存空間は設定だけを変更します。開くには保存空間を選択して再起動してください。' }}
+          </DialogDescription>
+          <ContentLockControls
+            v-if="lockSpace"
+            :target="{ type: 'space', id: lockSpace.id }"
+            :target-label="lockSpace.name"
+            :session-unlock-available="lockSpace.active"
+            :show-lock-now="lockSpace.active"
+            @changed="handleSpaceLockChanged"
+          />
+        </DialogContent>
+      </DialogPortal>
+    </DialogRoot>
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
-import { CheckIcon, PlusIcon, RefreshCwIcon } from '@lucide/vue'
+import { nextTick, onMounted, ref } from 'vue'
+import { CheckIcon, LockIcon, LockKeyholeIcon, PlusIcon, RefreshCwIcon } from '@lucide/vue'
 import {
   DialogContent,
   DialogDescription,
@@ -127,13 +159,17 @@ import {
 } from 'reka-ui'
 import type { StorageSpace } from '../api/storageSpaces'
 import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
+import { useContentLockStore } from '../stores/useContentLockStore'
+import ContentLockControls from './ContentLockControls.vue'
 
 const storageSpaceStore = useStorageSpaceStore()
+const contentLockStore = useContentLockStore()
 const createDialogOpen = ref(false)
 const createName = ref('')
 const createValidationError = ref('')
 const createNameInput = ref<HTMLInputElement | null>(null)
 const pendingSpace = ref<StorageSpace | null>(null)
+const lockSpace = ref<StorageSpace | null>(null)
 
 function openCreateDialog() {
   storageSpaceStore.clearError()
@@ -155,7 +191,10 @@ async function handleCreate() {
   }
   createValidationError.value = ''
   const created = await storageSpaceStore.create(name)
-  if (created) createDialogOpen.value = false
+  if (created) {
+    createDialogOpen.value = false
+    await contentLockStore.refreshSpaceStatuses()
+  }
 }
 
 function requestSwitch(space: StorageSpace) {
@@ -174,6 +213,33 @@ async function handleSwitch() {
   const switched = await storageSpaceStore.switchTo(target.id)
   if (!switched) pendingSpace.value = null
 }
+
+function spaceLockStatus(spaceID: string) {
+  return contentLockStore.spaceStatuses[spaceID]
+}
+
+function spaceLockLabel(spaceID: string) {
+  const status = spaceLockStatus(spaceID)
+  if (status?.locked) return 'ロック中'
+  if (status?.protected) return 'ロックを管理'
+  return 'ロックを設定'
+}
+
+function openSpaceLockDialog(space: StorageSpace) {
+  lockSpace.value = space
+}
+
+function handleLockDialogOpen(open: boolean) {
+  if (!open && !contentLockStore.isBusy) lockSpace.value = null
+}
+
+async function handleSpaceLockChanged() {
+  await contentLockStore.refreshSpaceStatuses()
+}
+
+onMounted(() => {
+  void contentLockStore.refreshSpaceStatuses()
+})
 </script>
 
 <style scoped>
@@ -227,6 +293,12 @@ async function handleSwitch() {
   border-top: 1px solid var(--border);
 }
 
+.storage-space-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
 .storage-space-row {
   width: 100%;
   min-height: 54px;
@@ -240,6 +312,33 @@ async function handleSwitch() {
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
+}
+
+.space-lock-button {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-right: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-editor);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.space-lock-button:hover:not(:disabled) {
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.space-lock-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .storage-space-row:hover:not(:disabled),
@@ -347,6 +446,10 @@ async function handleSwitch() {
   background: var(--bg-editor);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
   color: var(--text-primary);
+}
+
+.lock-dialog-content {
+  width: min(460px, calc(100vw - 40px));
 }
 
 .nested-dialog-content h3 {

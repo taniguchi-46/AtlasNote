@@ -37,24 +37,51 @@
         </PopoverPortal>
       </PopoverRoot>
 
-      <input
-        v-if="isEditing"
-        ref="inputRef"
-        v-model="editName"
-        class="notebook-rename-input"
-        type="text"
-        @blur="saveRename"
-        @keydown.enter="saveRename"
-      />
-      <span v-else class="notebook-name">{{ node.name }}</span>
+      <span class="notebook-name">
+        {{ node.name }}
+        <LockKeyholeIcon v-if="node.locked" class="notebook-lock-icon" :size="13" aria-label="ロック中" />
+        <LockIcon v-else-if="node.protected" class="notebook-lock-icon" :size="13" aria-label="保護中" />
+      </span>
 
       <div class="notebook-actions" @click.stop>
         <button class="notebook-action-btn" type="button" title="子ノートブックを追加" @click="openChildCreateModal">
           <PlusIcon :size="12" />
         </button>
-        <button class="notebook-action-btn" type="button" title="名前を変更" @click="startRename">
-          <Edit2Icon :size="12" />
-        </button>
+        <PopoverRoot v-model:open="isEditPopoverOpen">
+          <PopoverTrigger as-child>
+            <button class="notebook-action-btn" type="button" title="編集・ロック設定" @click="openEditor">
+              <Edit2Icon :size="12" />
+            </button>
+          </PopoverTrigger>
+          <PopoverPortal>
+            <PopoverContent
+              class="notebook-edit-popover"
+              side="right"
+              align="start"
+              :side-offset="6"
+              @click.stop
+            >
+              <form class="notebook-edit-form" @submit.prevent="saveNotebook">
+                <label :for="`notebook-name-${node.id}`">名前</label>
+                <input :id="`notebook-name-${node.id}`" ref="inputRef" v-model="editName" type="text" maxlength="100" />
+                <ContentLockControls
+                  ref="lockControlsRef"
+                  :target="{ type: 'notebook', id: node.id }"
+                  :target-label="node.name"
+                  defer-save
+                  @changed="refreshAfterLockChange"
+                />
+                <p v-if="editorError" class="notebook-edit-error" role="alert">{{ editorError }}</p>
+                <div class="notebook-edit-actions">
+                  <button type="button" :disabled="isSavingEditor" @click="cancelEditor">キャンセル</button>
+                  <button class="save-notebook-button" type="submit" :disabled="isSavingEditor">
+                    {{ isSavingEditor ? '保存中...' : '保存' }}
+                  </button>
+                </div>
+              </form>
+            </PopoverContent>
+          </PopoverPortal>
+        </PopoverRoot>
         <button
           class="notebook-action-btn danger"
           type="button"
@@ -93,7 +120,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { Edit2Icon, PlusIcon, Trash2Icon } from '@lucide/vue'
+import { Edit2Icon, LockIcon, LockKeyholeIcon, PlusIcon, Trash2Icon } from '@lucide/vue'
 import {
   PopoverContent,
   PopoverPortal,
@@ -109,6 +136,7 @@ import NotebookDeleteModal from './NotebookDeleteModal.vue'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import { resolveNotebookIcon } from '../utils/notebookIcons'
 import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
+import ContentLockControls from './ContentLockControls.vue'
 
 const props = defineProps<{
   node: NotebookNode
@@ -118,9 +146,19 @@ const notebookStore = useNotebookStore()
 const appStore = useAppStore()
 const noteStore = useNoteStore()
 
-const isEditing = ref(false)
+const isEditPopoverOpen = ref(false)
+// Keep the existing drag contract: editing, including the new popover form,
+// disables notebook hierarchy drag and drop.
+const isEditing = computed(() => isEditPopoverOpen.value)
 const editName = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
+type ContentLockEditorHandle = {
+  save: () => Promise<boolean>
+  reset: () => void
+}
+const lockControlsRef = ref<ContentLockEditorHandle | null>(null)
+const isSavingEditor = ref(false)
+const editorError = ref('')
 const isChildCreateModalOpen = ref(false)
 const isDeleteModalOpen = ref(false)
 const isDeleting = ref(false)
@@ -139,7 +177,7 @@ const canAcceptDrop = computed(() => {
 })
 
 function handleDragStart(event: DragEvent) {
-  if (isEditing.value) return
+  if (isEditPopoverOpen.value) return
   notebookStore.beginNotebookDrag(props.node.id)
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = 'move'
@@ -181,10 +219,10 @@ async function selectIcon(iconName: string) {
   isIconPickerOpen.value = false
 }
 
-function selectNotebook() {
-  notebookStore.activeNotebookId = props.node.id
+async function selectNotebook() {
+  if (!(await notebookStore.selectNotebook(props.node.id))) return
   appStore.setSidebarSection('notes')
-  void noteStore.fetchNotes([], null)
+  await noteStore.fetchNotes([], null)
 }
 
 function openChildCreateModal() {
@@ -202,21 +240,47 @@ function closeDeleteModal() {
   deleteError.value = ''
 }
 
-function startRename() {
+function openEditor() {
+  lockControlsRef.value?.reset()
+  editorError.value = ''
   editName.value = props.node.name
-  isEditing.value = true
+  isEditPopoverOpen.value = true
   nextTick(() => {
     inputRef.value?.focus()
+    inputRef.value?.select()
   })
 }
 
-function saveRename() {
-  if (!isEditing.value) return
-  isEditing.value = false
-  const trimmed = editName.value.trim()
-  if (trimmed && trimmed !== props.node.name) {
-    notebookStore.renameNotebook(props.node.id, trimmed)
+async function saveNotebook() {
+  if (isSavingEditor.value) return
+  if (!lockControlsRef.value) {
+    editorError.value = 'ロック設定の読み込みが完了していません。編集画面を開き直してください。'
+    return
   }
+  editorError.value = ''
+  isSavingEditor.value = true
+  try {
+    if (!(await lockControlsRef.value.save())) return
+
+    const trimmed = editName.value.trim()
+    if (trimmed && trimmed !== props.node.name) {
+      await notebookStore.renameNotebook(props.node.id, trimmed)
+    }
+    isEditPopoverOpen.value = false
+  } finally {
+    isSavingEditor.value = false
+  }
+}
+
+function cancelEditor() {
+  if (isSavingEditor.value) return
+  lockControlsRef.value?.reset()
+  editorError.value = ''
+  isEditPopoverOpen.value = false
+}
+
+async function refreshAfterLockChange() {
+  await notebookStore.fetchNotebooks()
 }
 
 async function deleteSelf(mode: NotebookDeleteMode) {
@@ -231,6 +295,7 @@ async function deleteSelf(mode: NotebookDeleteMode) {
     isDeleting.value = false
   }
 }
+
 </script>
 
 <style scoped>
@@ -262,6 +327,81 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   border-radius: 8px;
   background: var(--bg-editor);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.notebook-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.notebook-lock-icon {
+  flex: 0 0 auto;
+  color: var(--brand-primary);
+}
+
+/* PopoverContent is teleported outside this component, so its root must not
+   rely on Vue's scoped attribute to receive the opaque surface styles. */
+:global(.notebook-edit-popover) {
+  z-index: 1200;
+  display: grid;
+  gap: 12px;
+  width: min(340px, calc(100vw - 28px));
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background-color: var(--bg-sidebar);
+  opacity: 1;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.notebook-edit-form {
+  display: grid;
+  gap: 7px;
+}
+
+.notebook-edit-form label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.notebook-edit-form input {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.notebook-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.notebook-edit-error {
+  margin: 0;
+  color: var(--color-danger, #c0392b);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.notebook-edit-actions button {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.notebook-edit-actions .save-notebook-button {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: white;
 }
 
 </style>

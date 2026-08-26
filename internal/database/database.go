@@ -418,6 +418,56 @@ CREATE UNIQUE INDEX idx_ai_provider_settings_one_selected
 	ON ai_provider_settings(is_selected)
 	WHERE is_selected = 1;
 	`,
+	`
+CREATE TABLE IF NOT EXISTS content_locks (
+	id TEXT PRIMARY KEY,
+	target_type TEXT NOT NULL CHECK(target_type IN ('space', 'notebook', 'note')),
+	target_id TEXT NOT NULL,
+	kdf_salt BLOB NOT NULL,
+	kdf_memory_kib INTEGER NOT NULL CHECK(kdf_memory_kib >= 8192),
+	kdf_iterations INTEGER NOT NULL CHECK(kdf_iterations >= 1),
+	kdf_parallelism INTEGER NOT NULL CHECK(kdf_parallelism >= 1),
+	wrap_nonce BLOB NOT NULL,
+	wrapped_key BLOB NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	UNIQUE(target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_locks_target
+	ON content_locks(target_type, target_id);
+
+-- Lock conversion is staged before metadata becomes visible.  After the
+-- metadata transaction commits, all temporary files are already present and
+-- can be atomically promoted without requiring a passphrase during startup
+-- recovery.
+CREATE TABLE IF NOT EXISTS content_lock_operations (
+	operation_id TEXT PRIMARY KEY,
+	operation_kind TEXT NOT NULL CHECK(operation_kind IN ('enable', 'disable')),
+	target_type TEXT NOT NULL CHECK(target_type IN ('space', 'notebook', 'note')),
+	target_id TEXT NOT NULL,
+	lock_id TEXT NOT NULL,
+	kdf_salt BLOB,
+	kdf_memory_kib INTEGER,
+	kdf_iterations INTEGER,
+	kdf_parallelism INTEGER,
+	wrap_nonce BLOB,
+	wrapped_key BLOB,
+	delete_ai_records BOOLEAN NOT NULL DEFAULT 0,
+	stage TEXT NOT NULL CHECK(stage IN ('staging', 'committing')),
+	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS content_lock_operation_notes (
+	operation_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	PRIMARY KEY(operation_id, note_id),
+	FOREIGN KEY(operation_id) REFERENCES content_lock_operations(operation_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_lock_operation_notes_note
+	ON content_lock_operation_notes(note_id);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

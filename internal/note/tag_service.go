@@ -205,11 +205,16 @@ func (s *Service) DeleteTag(ctx context.Context, id string) (TagDeleteResult, er
 func (s *Service) SetNoteTags(ctx context.Context, noteID string, input SetNoteTagsInput) (NoteTagsResult, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := NoteTagsResult{Tags: make([]Tag, 0)}
 	if err := s.recoverPendingLocked(ctx); err != nil {
+		return result, err
+	}
+	if err := s.assertExistingNoteAccess(ctx, noteID); err != nil {
 		return result, err
 	}
 
@@ -246,11 +251,16 @@ func (s *Service) SetNoteTags(ctx context.Context, noteID string, input SetNoteT
 func (s *Service) SetNoteTagsWithExpectedRevision(ctx context.Context, noteID string, input SetNoteTagsWithExpectedRevisionInput) (NoteTagsResult, error) {
 	ctx, unlockMutation := s.lockMutation(ctx)
 	defer unlockMutation()
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result := NoteTagsResult{Tags: make([]Tag, 0)}
 	if err := s.recoverPendingLocked(ctx); err != nil {
+		return result, err
+	}
+	if err := s.assertExistingNoteAccess(ctx, noteID); err != nil {
 		return result, err
 	}
 	if input.ExpectedRevision < 1 {

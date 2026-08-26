@@ -98,6 +98,7 @@ const safeMessages: Record<string, string> = {
   AI_SUMMARY_NOT_READY: 'AI の接続確認とモデル選択を完了してから要約してください。',
   AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、要約を送信しません。',
   AI_NOTE_UNAVAILABLE: 'このノートは要約できません。',
+  AI_CONTENT_PROTECTED: '保護されたノートはAI機能では利用できません。',
   AI_HISTORY_SAVE_FAILED: '要約は生成されましたが、履歴を保存できませんでした。もう一度保存してください。',
   AI_ARTIFACT_NOT_FOUND: '要約履歴が見つかりません。',
 }
@@ -339,7 +340,7 @@ export const useAIStore = defineStore('ai', () => {
   }
 
   function setSummaryPreconditionError(
-    code: 'AI_SUMMARY_NOT_READY' | 'AI_DRAFT_NOT_SAVED' | 'AI_NOTE_UNAVAILABLE' | 'AI_INPUT_TOO_LARGE' | 'AI_INPUT_INVALID' | 'AI_BUSY',
+    code: 'AI_SUMMARY_NOT_READY' | 'AI_DRAFT_NOT_SAVED' | 'AI_NOTE_UNAVAILABLE' | 'AI_CONTENT_PROTECTED' | 'AI_INPUT_TOO_LARGE' | 'AI_INPUT_INVALID' | 'AI_BUSY',
     noteID: string | null = null,
   ) {
     pendingSummary.value = null
@@ -589,6 +590,7 @@ export const useAIStore = defineStore('ai', () => {
       const response = await generateAISummary({
         providerID: snapshot.providerID,
         modelID: snapshot.modelID,
+        noteID: snapshot.noteID,
         content: snapshot.content,
       })
       if (request.discarded) return false

@@ -40,8 +40,16 @@ type NoteContextProvider interface {
 	ListBacklinks(ctx context.Context, noteID string, limit int) ([]ContextNote, error)
 }
 
+// ContentAccessGuard keeps protected note bodies out of every AI path. It is
+// deliberately defined at the AI boundary so the lock implementation need not
+// depend on this package.
+type ContentAccessGuard interface {
+	AssertAIAllowed(context.Context, string) error
+}
+
 type noteServiceContextProvider struct {
 	service *note.Service
+	guard   ContentAccessGuard
 }
 
 func NewNoteContextProvider(service *note.Service) NoteContextProvider {
@@ -51,7 +59,19 @@ func NewNoteContextProvider(service *note.Service) NoteContextProvider {
 	return noteServiceContextProvider{service: service}
 }
 
+func NewNoteContextProviderWithAccessGuard(service *note.Service, guard ContentAccessGuard) NoteContextProvider {
+	if service == nil {
+		return nil
+	}
+	return noteServiceContextProvider{service: service, guard: guard}
+}
+
 func (p noteServiceContextProvider) Get(ctx context.Context, noteID string) (ContextNote, error) {
+	if p.guard != nil {
+		if err := p.guard.AssertAIAllowed(ctx, noteID); err != nil {
+			return ContextNote{}, err
+		}
+	}
 	current, err := p.service.Get(ctx, noteID)
 	if err != nil {
 		return ContextNote{}, err
@@ -84,6 +104,11 @@ func (p noteServiceContextProvider) Search(ctx context.Context, query string, li
 
 	items := make([]ContextNote, 0, len(result.Items))
 	for _, item := range result.Items {
+		if p.guard != nil {
+			if err := p.guard.AssertAIAllowed(ctx, item.Note.ID); err != nil {
+				continue
+			}
+		}
 		current, err := p.Get(ctx, item.Note.ID)
 		if err != nil {
 			return nil, err
@@ -106,6 +131,11 @@ func (p noteServiceContextProvider) ListBacklinks(ctx context.Context, noteID st
 
 	items := make([]ContextNote, 0, len(result.Items))
 	for _, item := range result.Items {
+		if p.guard != nil {
+			if err := p.guard.AssertAIAllowed(ctx, item.ID); err != nil {
+				continue
+			}
+		}
 		current, err := p.Get(ctx, item.ID)
 		if err != nil {
 			return nil, err

@@ -13,6 +13,7 @@ export type MissingNoteDiagnostic = {
 
 export type StartupStatus = {
   ready: boolean
+  locked?: boolean
   degraded: boolean
   message?: string
   dataDir?: string

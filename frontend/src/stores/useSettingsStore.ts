@@ -5,7 +5,8 @@ import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIco
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 export type AIWorkspacePlacement = 'right' | 'bottom'
 export type AIAgentEditPermission = 'review-required' | 'auto-update'
-export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai' | 'storage-spaces'
+export type ContentLockAutoLockMinutes = 0 | 1 | 5 | 15 | 30 | 60
+export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai' | 'storage-spaces' | 'locks'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360
@@ -21,6 +22,7 @@ const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26] as const
 const FIRST_LINE_STYLE_OPTIONS: EditorFirstLineStyle[] = ['heading1', 'heading2', 'heading3', 'paragraph']
 const AI_WORKSPACE_PLACEMENT_OPTIONS = ['right', 'bottom'] as const
 const AI_AGENT_EDIT_PERMISSION_OPTIONS = ['review-required', 'auto-update'] as const
+export const CONTENT_LOCK_AUTO_LOCK_MINUTE_OPTIONS = [0, 1, 5, 15, 30, 60] as const
 
 function readNumberOption<T extends readonly number[]>(key: string, fallback: T[number], options: T) {
   const value = Number(localStorage.getItem(key))
@@ -82,6 +84,13 @@ export const useSettingsStore = defineStore('settings', () => {
       AI_WORKSPACE_BOTTOM_HEIGHT_MAX,
     ),
   )
+  const contentLockAutoLockMinutes = ref<ContentLockAutoLockMinutes>(
+    readNumberOption(
+      'atlas-content-lock-auto-lock-minutes',
+      0,
+      CONTENT_LOCK_AUTO_LOCK_MINUTE_OPTIONS,
+    ),
+  )
   
   // Editor Settings
   const fontFamily = ref(localStorage.getItem('atlas-font-family') ?? 'Meiryo')
@@ -119,6 +128,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(aiWorkspaceBottomHeight, (newHeight) => {
     localStorage.setItem('atlas-ai-workspace-bottom-height', String(newHeight))
+  }, { immediate: true })
+
+  watch(contentLockAutoLockMinutes, (newMinutes) => {
+    localStorage.setItem('atlas-content-lock-auto-lock-minutes', String(newMinutes))
   }, { immediate: true })
   
   watch(fontFamily, (newFont) => {
@@ -202,6 +215,7 @@ export const useSettingsStore = defineStore('settings', () => {
     aiAgentEditPermission,
     aiWorkspaceRightWidth,
     aiWorkspaceBottomHeight,
+    contentLockAutoLockMinutes,
     fontFamily,
     editorFontSize,
     editorFirstLineStyle,

@@ -9,6 +9,8 @@ import (
 // remote import preparation. It reads all canonical note content through the
 // Markdown store; SQLite-derived indexes are intentionally not exported.
 func (s *Service) ExportSyncChanges(ctx context.Context) ([]SyncChange, error) {
+	releaseContent := s.beginContentAccess(ctx)
+	defer releaseContent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.recoverPendingLocked(ctx); err != nil {
@@ -49,6 +51,12 @@ func (s *Service) ExportSyncChanges(ctx context.Context) ([]SyncChange, error) {
 		return nil, err
 	}
 	for _, record := range records {
+		// Protected content has no encrypted sync representation in the current
+		// protocol. Never materialize its plaintext body (or its tag relations)
+		// in an initial-sync snapshot.
+		if s.noteProtected(ctx, record.ID) {
+			continue
+		}
 		content, err := s.store.Read(ctx, record.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read note %s for sync export: %w", record.ID, err)

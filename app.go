@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	aiservice "atlasnote/internal/ai"
 	"atlasnote/internal/config"
+	"atlasnote/internal/contentlock"
 	"atlasnote/internal/credential"
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
@@ -27,6 +29,8 @@ type App struct {
 	buildType          string
 	db                 *sql.DB
 	dataLock           *datalock.Lock
+	markdownStore      *storage.MarkdownStore
+	contentLocks       *contentlock.Manager
 	notes              *note.Service
 	syncService        *syncservice.Service
 	aiService          *aiservice.Service
@@ -35,6 +39,7 @@ type App struct {
 	dataDir            string
 	notesDir           string
 	startupErr         error
+	startupLocked      bool
 	recoveryReport     note.RecoveryReport
 	syncRecoveryBackup string
 	statusMu           sync.RWMutex
@@ -49,10 +54,12 @@ type App struct {
 var (
 	errRestartUnavailable     = errors.New("automatic restart is unavailable")
 	errRestartDevelopmentMode = errors.New("automatic restart is unavailable in Wails development mode")
+	errProtectedContentSync   = errors.New("本文ロックが設定されている保存空間では同期できません。保護済み本文を同期する暗号化形式は未対応です")
 )
 
 type StartupStatus struct {
 	Ready              bool                    `json:"ready"`
+	Locked             bool                    `json:"locked"`
 	Degraded           bool                    `json:"degraded"`
 	Message            string                  `json:"message,omitempty"`
 	DataDir            string                  `json:"dataDir,omitempty"`
@@ -65,6 +72,20 @@ type MissingNoteDiagnostic struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	FilePath string `json:"filePath"`
+}
+
+// StorageSpaceLockStatus is deliberately limited to lock metadata so the
+// settings screen can show every storage space without opening its notes.
+type StorageSpaceLockStatus struct {
+	SpaceID   string                `json:"spaceId"`
+	Protected bool                  `json:"protected"`
+	Locked    bool                  `json:"locked"`
+	Error     *contentlock.APIError `json:"error,omitempty"`
+}
+
+type StorageSpaceLockStatusResult struct {
+	Statuses []StorageSpaceLockStatus `json:"statuses"`
+	Error    *contentlock.APIError    `json:"error,omitempty"`
 }
 
 func NewApp() *App {
@@ -86,6 +107,11 @@ func (a *App) shutdown(ctx context.Context) {
 		_ = a.db.Close()
 		a.db = nil
 	}
+	if a.contentLocks != nil {
+		a.contentLocks.Close()
+		a.contentLocks = nil
+	}
+	a.markdownStore = nil
 	if a.dataLock != nil {
 		_ = a.dataLock.Release()
 		a.dataLock = nil
@@ -380,12 +406,18 @@ func (a *App) ConfigureSync(input syncservice.ConnectionInput) (syncservice.Stat
 	if a.syncService == nil {
 		return syncservice.StatusResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
 	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return syncservice.StatusResult{Status: syncservice.StatusDisabled}, err
+	}
 	return a.syncService.Configure(a.ctx, input)
 }
 
 func (a *App) TestSyncConfiguration(input syncservice.ConnectionInput) (syncservice.ConfigurationTestResult, error) {
 	if a.syncService == nil {
 		return syncservice.ConfigurationTestResult{}, errors.New("sync service is not initialized")
+	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return syncservice.ConfigurationTestResult{}, err
 	}
 	return a.syncService.TestConfiguration(a.ctx, input)
 }
@@ -394,12 +426,32 @@ func (a *App) SyncNow(input syncservice.SyncNowInput) (syncservice.SyncResult, e
 	if a.syncService == nil {
 		return syncservice.SyncResult{Status: syncservice.StatusDisabled}, errors.New("sync service is not initialized")
 	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return syncservice.SyncResult{Status: syncservice.StatusDisabled, Message: err.Error()}, err
+	}
 	return a.syncService.SyncNow(a.ctx, input)
+}
+
+func (a *App) ensureSyncAllowed() error {
+	if a.contentLocks == nil {
+		return nil
+	}
+	hasLocks, err := a.contentLocks.HasContentLocks(a.operationContext())
+	if err != nil {
+		return err
+	}
+	if hasLocks {
+		return errProtectedContentSync
+	}
+	return nil
 }
 
 func (a *App) ResolveSyncConflict(input syncservice.ConflictResolutionInput) error {
 	if a.syncService == nil {
 		return errors.New("sync service is not initialized")
+	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return err
 	}
 	return a.syncService.ResolveConflict(a.ctx, input)
 }
@@ -482,11 +534,40 @@ func (a *App) GenerateAISummary(input aiservice.GenerateSummaryInput) aiservice.
 	if a.aiService == nil {
 		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
 	}
+	if err := a.validateAISummarySource(input); err != nil {
+		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(err)}
+	}
 	result, err := a.aiService.GenerateSummary(a.ctx, input)
 	if err != nil {
 		return aiservice.SummaryResponse{Error: aiservice.SafeErrorFrom(err)}
 	}
 	return aiservice.SummaryResponse{Text: result.Text}
+}
+
+// validateAISummarySource keeps the raw-body summary endpoint tied to the
+// saved note it claims to summarize. In particular, a renderer cannot submit
+// a protected note body while naming an unrelated unprotected note.
+func (a *App) validateAISummarySource(input aiservice.GenerateSummaryInput) error {
+	if a.notes == nil {
+		// Service-only callers used by non-Wails tests do not have a note
+		// repository. The production application always initializes notes before
+		// exposing this endpoint, where the source binding below is mandatory.
+		return nil
+	}
+	noteID := strings.TrimSpace(input.NoteID)
+	if noteID == "" {
+		return aiservice.ErrInputInvalid
+	}
+	if a.contentLocks != nil {
+		if err := a.contentLocks.AssertAIAllowed(a.operationContext(), noteID); err != nil {
+			return aiservice.ErrInputInvalid
+		}
+	}
+	item, err := a.notes.Get(a.operationContext(), noteID)
+	if err != nil || item.IsTrashed || item.Content != input.Content {
+		return aiservice.ErrInputInvalid
+	}
+	return nil
 }
 
 func (a *App) PrepareAIContext(input aiservice.AIContextInput) aiservice.AIContextResponse {
@@ -687,12 +768,18 @@ func (a *App) PrepareSyncRecovery(action string) (syncservice.RecoveryPreview, e
 	if a.syncService == nil {
 		return syncservice.RecoveryPreview{}, errors.New("sync service is not initialized")
 	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return syncservice.RecoveryPreview{}, err
+	}
 	return a.syncService.PrepareRecovery(a.ctx, action)
 }
 
 func (a *App) ExecuteSyncRecovery(input syncservice.RecoveryExecutionInput) (syncservice.RecoveryResult, error) {
 	if a.syncService == nil {
 		return syncservice.RecoveryResult{}, errors.New("sync service is not initialized")
+	}
+	if err := a.ensureSyncAllowed(); err != nil {
+		return syncservice.RecoveryResult{}, err
 	}
 	return a.syncService.ExecuteRecovery(a.ctx, input)
 }
@@ -763,6 +850,293 @@ func (a *App) SelectStorageSpace(input notespace.SelectInput) notespace.Mutation
 	}
 }
 
+func (a *App) ListContentLocks() contentlock.ListResult {
+	if a.contentLocks == nil {
+		return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(contentlock.ErrNotFound)}
+	}
+	locks, err := a.contentLocks.List(a.operationContext())
+	if err != nil {
+		return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(err)}
+	}
+	return contentlock.ListResult{Locks: locks}
+}
+
+// ListRequiredContentLocks reports the still-locked keys needed to open a
+// note or notebook. The result is metadata-only and does not expose any key
+// or encrypted body data.
+func (a *App) ListRequiredContentLocks(target contentlock.Target) contentlock.ListResult {
+	var locks []contentlock.Lock
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var listErr error
+		locks, listErr = manager.ListRequiredLocks(a.operationContext(), target)
+		return listErr
+	})
+	if err != nil {
+		return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(err)}
+	}
+	return contentlock.ListResult{Locks: locks}
+}
+
+// ListStorageSpaceLockStatuses inspects each internally managed space under
+// its own single-writer lock. Inactive spaces are opened only for the duration
+// of the metadata check and never become the active application space.
+func (a *App) ListStorageSpaceLockStatuses() StorageSpaceLockStatusResult {
+	result := StorageSpaceLockStatusResult{Statuses: make([]StorageSpaceLockStatus, 0)}
+	if a.spaceRegistry == nil {
+		result.Error = contentlock.APIErrorFrom(contentlock.ErrNotFound)
+		return result
+	}
+	spaces, err := a.spaceRegistry.List()
+	if err != nil {
+		result.Error = contentlock.APIErrorFrom(err)
+		return result
+	}
+	result.Statuses = make([]StorageSpaceLockStatus, 0, len(spaces.Spaces))
+	for _, space := range spaces.Spaces {
+		status := StorageSpaceLockStatus{SpaceID: space.ID}
+		target := contentlock.Target{Type: contentlock.TargetSpace, ID: space.ID}
+		var lockStatus contentlock.TargetStatus
+		err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+			var statusErr error
+			lockStatus, statusErr = manager.GetTargetStatus(a.operationContext(), target)
+			return statusErr
+		})
+		if err != nil {
+			status.Error = contentlock.APIErrorFrom(err)
+		} else {
+			status.Protected = lockStatus.Protected
+			status.Locked = lockStatus.Locked
+		}
+		result.Statuses = append(result.Statuses, status)
+	}
+	return result
+}
+
+func (a *App) GetContentLockStatus(target contentlock.Target) (contentlock.TargetStatus, error) {
+	var status contentlock.TargetStatus
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var statusErr error
+		status, statusErr = manager.GetTargetStatus(a.operationContext(), target)
+		return statusErr
+	})
+	return status, err
+}
+
+func (a *App) EnableContentLock(input contentlock.EnableInput) contentlock.MutationResult {
+	target := contentlock.Target{Type: input.TargetType, ID: input.TargetID}
+	var lock contentlock.Lock
+	var aiRecordCount int
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var enableErr error
+		lock, aiRecordCount, enableErr = manager.Enable(a.operationContext(), input)
+		return enableErr
+	})
+	if err != nil {
+		return contentlock.MutationResult{AIRecordCount: aiRecordCount, Error: contentlock.APIErrorFrom(err)}
+	}
+	if a.isActiveContentLockTarget(target) {
+		a.refreshContentLockRecovery()
+	} else {
+		lock.Unlocked = false
+	}
+	return contentlock.MutationResult{Lock: &lock, AIRecordCount: aiRecordCount, Unlocked: lock.Unlocked}
+}
+
+func (a *App) UnlockContentLock(input contentlock.UnlockInput) contentlock.MutationResult {
+	target := contentlock.Target{Type: input.TargetType, ID: input.TargetID}
+	if !a.isActiveContentLockTarget(target) {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(contentlock.ErrValidation)}
+	}
+	var lock contentlock.Lock
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var unlockErr error
+		lock, unlockErr = manager.Unlock(a.operationContext(), input)
+		return unlockErr
+	})
+	if err != nil {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+	}
+	if input.TargetType == contentlock.TargetSpace && a.startupLocked {
+		if a.db == nil || a.markdownStore == nil {
+			return contentlock.MutationResult{Error: contentlock.APIErrorFrom(contentlock.ErrNotFound)}
+		}
+		if err := a.initializeServices(a.operationContext(), a.db, a.markdownStore, config.PathsForDataDir(a.dataDir)); err != nil {
+			return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+		}
+	}
+	a.refreshContentLockRecovery()
+	return contentlock.MutationResult{Lock: &lock, Unlocked: true}
+}
+
+func (a *App) LockContentNow(target contentlock.Target) contentlock.MutationResult {
+	if !a.isActiveContentLockTarget(target) {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(contentlock.ErrValidation)}
+	}
+	var lock contentlock.Lock
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var lockErr error
+		lock, lockErr = manager.LockNow(a.operationContext(), target)
+		return lockErr
+	})
+	if err != nil {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+	}
+	if target.Type == contentlock.TargetSpace {
+		a.quiesceLockedSpace()
+	}
+	return contentlock.MutationResult{Lock: &lock}
+}
+
+// LockContentTargetsNow is used by the fixed-time auto-lock scheduler. It
+// makes all due targets unavailable in one manager operation after the
+// frontend has safely flushed pending note edits.
+func (a *App) LockContentTargetsNow(targets []contentlock.Target) contentlock.ListResult {
+	if len(targets) == 0 {
+		return contentlock.ListResult{Locks: []contentlock.Lock{}}
+	}
+	for _, target := range targets {
+		if !a.isActiveContentLockTarget(target) {
+			return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(contentlock.ErrValidation)}
+		}
+	}
+
+	var locks []contentlock.Lock
+	err := a.withContentLockManager(a.operationContext(), targets[0], func(manager *contentlock.Manager) error {
+		var lockErr error
+		locks, lockErr = manager.LockTargetsNow(a.operationContext(), targets)
+		return lockErr
+	})
+	if err != nil {
+		return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(err)}
+	}
+	for _, lock := range locks {
+		if lock.TargetType == contentlock.TargetSpace {
+			a.quiesceLockedSpace()
+			break
+		}
+	}
+	return contentlock.ListResult{Locks: locks}
+}
+
+func (a *App) ChangeContentLockPassphrase(input contentlock.ChangePassphraseInput) contentlock.MutationResult {
+	target := contentlock.Target{Type: input.TargetType, ID: input.TargetID}
+	var lock contentlock.Lock
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		var changeErr error
+		lock, changeErr = manager.ChangePassphrase(a.operationContext(), input)
+		return changeErr
+	})
+	if err != nil {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+	}
+	return contentlock.MutationResult{Lock: &lock, Unlocked: true}
+}
+
+func (a *App) DisableContentLock(input contentlock.DisableInput) contentlock.MutationResult {
+	target := contentlock.Target{Type: input.TargetType, ID: input.TargetID}
+	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
+		return manager.Disable(a.operationContext(), input)
+	})
+	if err != nil {
+		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+	}
+	if target.Type == contentlock.TargetSpace && a.startupLocked {
+		if a.db == nil || a.markdownStore == nil {
+			return contentlock.MutationResult{Error: contentlock.APIErrorFrom(contentlock.ErrNotFound)}
+		}
+		if err := a.initializeServices(a.operationContext(), a.db, a.markdownStore, config.PathsForDataDir(a.dataDir)); err != nil {
+			return contentlock.MutationResult{Error: contentlock.APIErrorFrom(err)}
+		}
+	}
+	if a.isActiveContentLockTarget(target) {
+		a.refreshContentLockRecovery()
+	}
+	return contentlock.MutationResult{Removed: true}
+}
+
+func (a *App) isActiveContentLockTarget(target contentlock.Target) bool {
+	return target.Type != contentlock.TargetSpace ||
+		target.ID == "" ||
+		target.ID == contentlock.SpaceTargetID ||
+		target.ID == a.activeSpace.ID
+}
+
+func (a *App) withContentLockManager(ctx context.Context, target contentlock.Target, operation func(*contentlock.Manager) error) (returnErr error) {
+	if operation == nil {
+		return contentlock.ErrValidation
+	}
+	if a.isActiveContentLockTarget(target) {
+		if a.contentLocks == nil {
+			return contentlock.ErrNotFound
+		}
+		return operation(a.contentLocks)
+	}
+	if target.Type != contentlock.TargetSpace || a.spaceRegistry == nil {
+		return contentlock.ErrNotFound
+	}
+
+	_, dataDir, err := a.spaceRegistry.DataDir(target.ID)
+	if err != nil {
+		return err
+	}
+	paths := config.PathsForDataDir(dataDir)
+	dataLock, err := datalock.Acquire(paths.LockPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dataLock.Release(); returnErr == nil && err != nil {
+			returnErr = err
+		}
+	}()
+
+	db, err := database.Open(ctx, paths.DatabasePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := db.Close(); returnErr == nil && err != nil {
+			returnErr = err
+		}
+	}()
+	store, err := storage.NewMarkdownStore(paths.NotesDir)
+	if err != nil {
+		return err
+	}
+	manager := contentlock.NewManager(db, store)
+	defer manager.Close()
+	if err := manager.Recover(ctx); err != nil {
+		return err
+	}
+	return operation(manager)
+}
+
+func (a *App) refreshContentLockRecovery() {
+	if a.notes == nil {
+		return
+	}
+	report, err := a.notes.Recover(a.operationContext())
+	if err != nil {
+		return
+	}
+	a.statusMu.Lock()
+	a.recoveryReport = report
+	a.statusMu.Unlock()
+}
+
+func (a *App) quiesceLockedSpace() {
+	if a.aiService != nil {
+		a.aiService.Shutdown()
+	}
+	a.notes = nil
+	a.syncService = nil
+	a.aiService = nil
+	a.statusMu.Lock()
+	a.recoveryReport = note.RecoveryReport{}
+	a.startupLocked = true
+	a.statusMu.Unlock()
+}
+
 func (a *App) operationContext() context.Context {
 	if a.ctx != nil {
 		return a.ctx
@@ -791,8 +1165,13 @@ func (a *App) prepareStorageSpace(ctx context.Context, dataDir string) (returnEr
 			returnErr = err
 		}
 	}()
-	_, err = storage.NewMarkdownStore(paths.NotesDir)
-	return err
+	store, err := storage.NewMarkdownStore(paths.NotesDir)
+	if err != nil {
+		return err
+	}
+	manager := contentlock.NewManager(db, store)
+	defer manager.Close()
+	return manager.Recover(ctx)
 }
 
 func (a *App) GetStartupStatus() StartupStatus {
@@ -809,6 +1188,16 @@ func (a *App) GetStartupStatus() StartupStatus {
 		return StartupStatus{
 			Ready:              false,
 			Message:            a.startupErr.Error(),
+			DataDir:            a.dataDir,
+			MissingNotes:       []MissingNoteDiagnostic{},
+			ActiveStorageSpace: activeStorageSpace,
+		}
+	}
+	if a.startupLocked {
+		return StartupStatus{
+			Ready:              false,
+			Locked:             true,
+			Message:            "この保存空間はロックされています。",
 			DataDir:            a.dataDir,
 			MissingNotes:       []MissingNoteDiagnostic{},
 			ActiveStorageSpace: activeStorageSpace,
@@ -889,31 +1278,78 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 
-	noteRepository := note.NewRepository(db)
-	syncRepository := syncservice.NewRepository(db)
-	aiRepository := aiservice.NewRepository(db)
-	noteRepository.SetSyncChangeRecorder(syncRepository)
-	service := note.NewService(noteRepository, store)
-	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
-	syncService := syncservice.NewService(syncRepository, service, credentialManager)
-	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
-	aiService := aiservice.NewServiceWithAdapter(aiRepository, aiCredentialManager, aiservice.NewHTTPProviderAdapter())
-	aiService.SetNoteContextProvider(aiservice.NewNoteContextProvider(service))
-	syncService.SetRecoveryDataDir(paths.DataDir)
-	recoveryReport, err := service.Recover(ctx)
-	if err != nil {
+	a.db = db
+	a.markdownStore = store
+	a.contentLocks = contentlock.NewManager(db, store)
+	if err := a.contentLocks.Recover(ctx); err != nil {
+		a.contentLocks.Close()
+		a.contentLocks = nil
+		a.markdownStore = nil
 		_ = db.Close()
+		a.db = nil
 		_ = a.dataLock.Release()
 		a.dataLock = nil
 		a.startupErr = err
 		return
 	}
+	spaceStatus, err := a.contentLocks.GetTargetStatus(ctx, contentlock.Target{Type: contentlock.TargetSpace})
+	if err != nil {
+		a.contentLocks.Close()
+		a.contentLocks = nil
+		a.markdownStore = nil
+		_ = db.Close()
+		a.db = nil
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.startupErr = err
+		return
+	}
+	if spaceStatus.Locked {
+		a.startupLocked = true
+		return
+	}
+	if err := a.initializeServices(ctx, db, store, paths); err != nil {
+		a.contentLocks.Close()
+		a.contentLocks = nil
+		a.markdownStore = nil
+		_ = db.Close()
+		a.db = nil
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.startupErr = err
+	}
+}
 
-	a.db = db
+func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage.MarkdownStore, paths config.Paths) error {
+	noteRepository := note.NewRepository(db)
+	syncRepository := syncservice.NewRepository(db)
+	aiRepository := aiservice.NewRepository(db)
+	noteRepository.SetSyncChangeRecorder(syncRepository)
+	service := note.NewService(noteRepository, store)
+	if a.contentLocks != nil {
+		service.SetContentLockGuard(a.contentLocks)
+	}
+	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
+	syncService := syncservice.NewService(syncRepository, service, credentialManager)
+	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
+	aiService := aiservice.NewServiceWithAdapter(aiRepository, aiCredentialManager, aiservice.NewHTTPProviderAdapter())
+	if a.contentLocks != nil {
+		aiService.SetContentAccessGuard(a.contentLocks)
+		aiService.SetNoteContextProvider(aiservice.NewNoteContextProviderWithAccessGuard(service, a.contentLocks))
+	} else {
+		aiService.SetNoteContextProvider(aiservice.NewNoteContextProvider(service))
+	}
+	syncService.SetRecoveryDataDir(paths.DataDir)
+	recoveryReport, err := service.Recover(ctx)
+	if err != nil {
+		return err
+	}
 	a.notes = service
 	a.syncService = syncService
 	a.aiService = aiService
 	a.recoveryReport = recoveryReport
+	a.startupLocked = false
+	return nil
 }
 
 func (a *App) ToggleAlwaysOnTop(b bool) {

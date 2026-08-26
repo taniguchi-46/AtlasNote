@@ -9,8 +9,13 @@ import (
 const aiMaxSavedArtifactBytes = 128 * 1024
 
 func (s *Service) SaveHistory(ctx context.Context, input SaveAIHistoryInput) (AIHistory, error) {
+	releaseContent := s.beginAIRecordAccess(ctx)
+	defer releaseContent()
 	normalized, err := normalizeSaveHistoryInput(input)
 	if err != nil {
+		return AIHistory{}, err
+	}
+	if err := s.assertAIAllowedSources(ctx, normalized.Sources); err != nil {
 		return AIHistory{}, err
 	}
 	if normalized.ID == "" {
@@ -45,8 +50,13 @@ func (s *Service) DeleteAllHistories(ctx context.Context) error {
 }
 
 func (s *Service) SaveArtifact(ctx context.Context, input SaveAIArtifactInput) (AIArtifact, error) {
+	releaseContent := s.beginAIRecordAccess(ctx)
+	defer releaseContent()
 	normalized, err := normalizeSaveArtifactInput(input)
 	if err != nil {
+		return AIArtifact{}, err
+	}
+	if err := s.assertAIAllowedSources(ctx, normalized.Sources); err != nil {
 		return AIArtifact{}, err
 	}
 	if normalized.ID == "" {

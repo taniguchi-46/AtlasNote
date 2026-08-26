@@ -20,6 +20,7 @@ import type { AgentEditProposal } from '../api/ai'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 import { parseNoteSortOption, useAppStore } from './useAppStore'
+import { useContentLockStore } from './useContentLockStore'
 
 const DEFAULT_NOTE_TITLE = '新しいノート'
 const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
@@ -74,6 +75,11 @@ function createConflictCopyTitle(title: string) {
 }
 
 function toSummary(updated: note.Note): note.Summary {
+  const lockState = updated as note.Note & {
+    protected?: boolean
+    locked?: boolean
+    lockSource?: string
+  }
   return {
     id: updated.id,
     notebookId: updated.notebookId,
@@ -84,7 +90,10 @@ function toSummary(updated: note.Note): note.Summary {
     revision: updated.revision,
     createdAt: updated.createdAt,
     updatedAt: updated.updatedAt,
-  } as note.Summary
+    protected: lockState.protected,
+    locked: lockState.locked,
+    lockSource: lockState.lockSource,
+  } as unknown as note.Summary
 }
 
 type NoteErrorContext = {
@@ -231,6 +240,7 @@ export const useNoteStore = defineStore('notes', () => {
       currentListPage = result.page
       hasMoreNotes.value = result.hasNext
       summaries.value = (result.items ?? []).filter((note) => !excludedNoteIds.has(note.id))
+      void refreshActiveNoteLockStatus()
     } catch (e) {
       if (!isLatestRequest()) return
 
@@ -255,10 +265,14 @@ export const useNoteStore = defineStore('notes', () => {
     // ノートを連続で高速に切り替えた際、過去のリクエストのレスポンスが遅延して到着し、
     // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
     // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
-    clearAgentEditorHighlight()
     const isLatestRequest = noteSelectionRequests.begin()
+    const targetLabel = summaries.value.find((note) => note.id === id)?.title ?? 'ノート'
+    const accessAllowed = await useContentLockStore().requestAccess({ type: 'note', id }, targetLabel)
+    if (!isLatestRequest() || !accessAllowed) return false
+
+    clearAgentEditorHighlight()
     await flushPendingDraft()
-    if (!isLatestRequest()) return
+    if (!isLatestRequest()) return false
 
     isLoading.value = true
     error.value = null
@@ -267,6 +281,7 @@ export const useNoteStore = defineStore('notes', () => {
       const selectedNote = await getNote(id)
       if (isLatestRequest()) {
         activeNote.value = selectedNote
+        return true
       }
     } catch (e) {
       if (isLatestRequest()) {
@@ -281,6 +296,7 @@ export const useNoteStore = defineStore('notes', () => {
         isLoading.value = false
       }
     }
+    return false
   }
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
@@ -340,6 +356,33 @@ export const useNoteStore = defineStore('notes', () => {
   function clearAgentEditorHighlight(noteId?: string) {
     if (noteId && agentEditorHighlight.value?.noteId !== noteId) return
     agentEditorHighlight.value = null
+  }
+
+  // Lock configuration changes preserve an active editor's local draft, while
+  // this refresh keeps its protected/locked badges in sync with the server.
+  async function refreshActiveNoteLockStatus() {
+    const current = activeNote.value
+    if (!current) return false
+    const status = await useContentLockStore().refreshTarget({ type: 'note', id: current.id })
+    if (!status || activeNote.value?.id !== current.id) return false
+    if (status.locked) {
+      clearActiveNote()
+      return true
+    }
+    activeNote.value = {
+      ...current,
+      protected: status.protected,
+      locked: status.locked,
+      lockSource: status.source,
+    }
+    return false
+  }
+
+  function clearActiveNote() {
+    noteSelectionRequests.begin()
+    autoTitleNoteId.value = null
+    activeNote.value = null
+    clearAgentEditorHighlight()
   }
 
   function getPersistedRevision(noteId: string) {
@@ -907,6 +950,7 @@ export const useNoteStore = defineStore('notes', () => {
     trashedNotes,
     activeNotes,
     fetchNotes,
+    refreshActiveNoteLockStatus,
     clearTagFilter,
     fetchNextPage,
     selectNote,
@@ -915,6 +959,7 @@ export const useNoteStore = defineStore('notes', () => {
     applyAIWritingContent,
     applyAgentEditProposal,
     clearAgentEditorHighlight,
+    clearActiveNote,
     applyPersistedNote,
     getDraft,
     scheduleDraft,

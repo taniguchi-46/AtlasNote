@@ -1,5 +1,12 @@
 <template>
   <div class="app-root" :data-theme="appStore.theme">
+    <StorageSpaceUnlockScreen
+      v-if="startupStatus?.locked"
+      :space-id="startupStatus.activeStorageSpace?.id ?? ''"
+      :space-name="startupStatus.activeStorageSpace?.name ?? '保存空間'"
+      @unlocked="handleStorageSpaceUnlocked"
+    />
+    <template v-else>
     <AppTopBar 
       :is-always-on-top="isAlwaysOnTop"
       @sync="handleSync"
@@ -97,7 +104,9 @@
 
     <!-- Modals -->
     <SettingsModal />
+    <ContentUnlockDialog />
     <NotificationCenter />
+    </template>
   </div>
 </template>
 
@@ -109,6 +118,8 @@ import NoteList from './components/NoteList.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
+import StorageSpaceUnlockScreen from './components/StorageSpaceUnlockScreen.vue'
+import ContentUnlockDialog from './components/ContentUnlockDialog.vue'
 import {
   deleteMissingNote,
   getStartupStatus,
@@ -129,8 +140,10 @@ import { useAIAssistantStore } from './stores/useAIAssistantStore'
 import { useAILibrarianStore } from './stores/useAILibrarianStore'
 import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
+import { useContentLockStore } from './stores/useContentLockStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import { logOperationFailure } from './utils/operationLogger'
+import { createContentLockAutoLock } from './utils/contentLockAutoLock'
 import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
 import {
   EDITOR_WIDTH_MIN,
@@ -154,8 +167,11 @@ const aiAssistantStore = useAIAssistantStore()
 const aiLibrarianStore = useAILibrarianStore()
 const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
+const contentLockStore = useContentLockStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
+
+contentLockStore.setBeforeLock(() => noteStore.flushAllDirtyNotes())
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
@@ -189,6 +205,34 @@ let cancelBeforeCloseListener: (() => void) | null = null
 let isHandlingBeforeClose = false
 let resizeStartX = 0
 let resizeStartWidth = 0
+
+const contentLockAutoLock = createContentLockAutoLock(async (targets) => {
+  const result = await contentLockStore.lockTargetsNow(targets)
+  if (!result.error) return true
+  notificationStore.notify(result.error.message, {
+    kind: 'warning',
+    source: 'content-lock',
+    code: `CONTENT_LOCK_AUTO_LOCK_${result.error.code}`,
+    dedupeKey: `content-lock:auto-lock:${result.error.code}`,
+  })
+  return false
+})
+
+function updateContentLockAutoLock() {
+  contentLockAutoLock.update({
+    minutes: settingsStore.contentLockAutoLockMinutes,
+    locks: contentLockStore.locks,
+    unlockedAt: contentLockStore.unlockedAt,
+  })
+}
+
+function checkContentLockAutoLock() {
+  void contentLockAutoLock.check()
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') checkContentLockAutoLock()
+}
 
 // Apply font family globally
 watchEffect(() => {
@@ -258,6 +302,69 @@ watch(() => noteStore.saveFeedbackVersion, () => {
   syncStore.scheduleAutoSync()
 })
 
+watch(
+  [
+    () => settingsStore.contentLockAutoLockMinutes,
+    () => contentLockStore.locks,
+    () => contentLockStore.unlockedAt,
+    () => contentLockStore.unlockVersion,
+  ],
+  updateContentLockAutoLock,
+  { deep: true, immediate: true },
+)
+
+watch(() => contentLockStore.lastChangedTarget, async (target) => {
+  if (!target) return
+  try {
+    await Promise.all([
+      notebookStore.fetchNotebooks(),
+      noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent'),
+    ])
+    await noteStore.refreshActiveNoteLockStatus()
+    if (searchStore.isActive) await searchStore.refresh()
+  } finally {
+    contentLockStore.clearLastChangedTarget()
+  }
+})
+
+async function handleLockedTargets(targets: { type: 'space' | 'notebook' | 'note'; id: string }[]) {
+  if (targets.length === 0) return
+  try {
+    if (targets.some((target) => target.type === 'space')) {
+      contentLockStore.cancelAccessRequest()
+      noteStore.clearActiveNote()
+      startupStatus.value = await getStartupStatus()
+      if (!startupStatus.value.ready) return
+    } else {
+      await noteStore.refreshActiveNoteLockStatus()
+    }
+    await noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent')
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch {
+    notificationStore.notify('ロック後の表示を更新できませんでした。', {
+      kind: 'warning', source: 'content-lock', code: 'CONTENT_LOCK_AFTER_LOCK_REFRESH_FAILED',
+    })
+  }
+}
+
+watch(() => contentLockStore.lastLockedTarget, async (target) => {
+  if (!target) return
+  try {
+    await handleLockedTargets([target])
+  } finally {
+    contentLockStore.clearLastLockedTarget()
+  }
+})
+
+watch(() => contentLockStore.lastLockedTargets, async (targets) => {
+  if (!targets) return
+  try {
+    await handleLockedTargets(targets)
+  } finally {
+    contentLockStore.clearLastLockedTargets()
+  }
+})
+
 function missingNoteIds(status: StartupStatus | null) {
   return status?.missingNotes.map((note) => note.id) ?? []
 }
@@ -266,6 +373,32 @@ async function applyRecoveryStatus(status: StartupStatus) {
   startupStatus.value = status
   await noteStore.fetchNotes(missingNoteIds(status))
   if (searchStore.isActive) await searchStore.search(searchStore.query, searchFilters.value)
+}
+
+async function initializeReadyWorkspace(status: StartupStatus) {
+  await noteStore.fetchNotes(missingNoteIds(status))
+  await tagStore.fetchTags()
+  await contentLockStore.refresh()
+  if (status.syncRecoveryBackup) {
+    notificationStore.notify('同期先からの復旧が完了し、以前のローカルデータをバックアップしました', {
+      kind: 'success', source: 'sync', code: 'SYNC_RECOVERY_REDOWNLOAD_COMPLETED',
+    })
+  }
+  await syncStore.initialize().catch(() => {})
+  await aiStore.initialize().catch(() => {})
+  await storageSpaceStore.initialize()
+}
+
+async function handleStorageSpaceUnlocked() {
+  try {
+    const status = await getStartupStatus()
+    startupStatus.value = status
+    if (status.ready) await initializeReadyWorkspace(status)
+  } catch {
+    notificationStore.notify('保存空間のロック状態を更新できませんでした', {
+      kind: 'error', source: 'content-lock', code: 'CONTENT_LOCK_STARTUP_REFRESH_FAILED',
+    })
+  }
 }
 
 async function handleReinspectRecovery() {
@@ -438,6 +571,8 @@ function handleResizerKeydown(pane: ResizablePane, event: KeyboardEvent) {
 
 onMounted(async () => {
   window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('focus', checkContentLockAutoLock)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   try {
     cancelBeforeCloseListener = EventsOn('app:before-close', () => {
       void handleBeforeClose()
@@ -455,13 +590,9 @@ onMounted(async () => {
   try {
     startupStatus.value = await getStartupStatus()
     if (startupStatus.value.ready) {
-      await noteStore.fetchNotes(missingNoteIds(startupStatus.value))
-      await tagStore.fetchTags()
-      if (startupStatus.value.syncRecoveryBackup) {
-        notificationStore.notify('同期先からの復旧が完了し、以前のローカルデータをバックアップしました', {
-          kind: 'success', source: 'sync', code: 'SYNC_RECOVERY_REDOWNLOAD_COMPLETED',
-        })
-      }
+      await initializeReadyWorkspace(startupStatus.value)
+    } else if (startupStatus.value.locked) {
+      await storageSpaceStore.initialize()
     }
   } catch (_) {
     // Network or Wails not available (dev browser mode)
@@ -471,9 +602,7 @@ onMounted(async () => {
     ])
   }
 
-  await syncStore.initialize().catch(() => {})
-  await aiStore.initialize().catch(() => {})
-  await storageSpaceStore.initialize()
+  if (startupStatus.value?.ready !== true) await storageSpaceStore.initialize()
 
   // Apply initial always-on-top status
   try {
@@ -485,11 +614,15 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('focus', checkContentLockAutoLock)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
   syncStore.dispose()
   storageSpaceStore.clearSwitchLifecycle()
   aiStore.discardSummary()
+  contentLockAutoLock.dispose()
+  contentLockStore.cancelAccessRequest()
   document.body.classList.remove('is-pane-resizing')
 })
 </script>
