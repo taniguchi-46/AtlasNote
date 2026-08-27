@@ -211,16 +211,16 @@ function deleteUserIcon(iconId: string) {
 }
 
 .notebook-icon-option {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 100%;
   height: 100%;
+  padding: 0;
   aspect-ratio: 1;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 8px;
-  background: var(--bg-input);
-  overflow: hidden;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s;
+  background: transparent;
+  overflow: visible;
+  transition: transform 0.12s, box-shadow 0.12s;
 }
 
 .notebook-icon-delete-btn {
@@ -250,19 +250,18 @@ function deleteUserIcon(iconId: string) {
 }
 
 .notebook-icon-option:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-hover);
+  transform: scale(1.03);
 }
 
 .notebook-icon-option[data-state='checked'] {
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 0 0 3px var(--brand-primary);
 }
 
 .notebook-icon-option img {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
   object-fit: cover;
 }
 

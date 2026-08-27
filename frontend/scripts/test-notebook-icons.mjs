@@ -8,6 +8,7 @@ const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'notebookIcons.ts')
 const pickerPath = path.join(rootDir, 'src', 'components', 'NotebookIconPicker.vue')
 const treeItemPath = path.join(rootDir, 'src', 'components', 'NotebookTreeItem.vue')
+const stylePath = path.join(rootDir, 'src', 'style.css')
 const assetDir = path.join(rootDir, 'src', 'assets', 'notebook-icons')
 const outDir = path.join(rootDir, '.tmp', 'notebook-icons-test')
 const outFile = path.join(outDir, 'notebookIcons.mjs')
@@ -45,10 +46,11 @@ globalThis.localStorage = {
 await mkdir(outDir, { recursive: true })
 
 try {
-  const [source, pickerSource, treeItemSource, assetFiles] = await Promise.all([
+  const [source, pickerSource, treeItemSource, styleSource, assetFiles] = await Promise.all([
     readFile(sourcePath, 'utf8'),
     readFile(pickerPath, 'utf8'),
     readFile(treeItemPath, 'utf8'),
+    readFile(stylePath, 'utf8'),
     readdir(assetDir),
   ])
   const assetImports = [...source.matchAll(/^import\s+(\w+)\s+from\s+'(\.\.\/assets\/notebook-icons\/[^']+\.png)'$/gm)]
@@ -125,6 +127,16 @@ try {
   assert.doesNotMatch(pickerSource, /notebook-icon-current/, 'the collapsed header must not render an icon preview')
   assert.match(pickerSource, /isIconPickerExpanded\.value = true/, 'adding an icon must reveal the shared panel')
   assert.doesNotMatch(pickerSource, /v-for="group in iconGroups"/, 'the picker must not create separate collapsible groups')
+  const iconOptionStyle = pickerSource.match(/\.notebook-icon-option\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const iconImageStyle = pickerSource.match(/\.notebook-icon-option img\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+  const checkedIconStyle = pickerSource.match(/\.notebook-icon-option\[data-state='checked'\]\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+  assert.match(iconOptionStyle, /padding:\s*0;/, 'icon buttons must not add inner whitespace')
+  assert.match(iconOptionStyle, /border:\s*0;/, 'icon buttons must not render an outer border')
+  assert.match(iconOptionStyle, /background:\s*transparent;/, 'icon buttons must not render an outer background')
+  assert.match(iconImageStyle, /width:\s*100%;/, 'icon images must fill the current grid cell width')
+  assert.match(iconImageStyle, /height:\s*100%;/, 'icon images must fill the current grid cell height')
+  assert.match(checkedIconStyle, /box-shadow:\s*0 0 0 3px var\(--brand-primary\);/, 'selected icons must use a strong 3px brand outline')
+  assert.doesNotMatch(styleSource, /\.notebook-icon\s*\{[^}]*opacity:/s, 'notebook list icons must not be dimmed relative to the picker')
   assert.match(treeItemSource, /<ContentLockControls[\s\S]*<NotebookIconPicker v-model="editIcon"/, 'lock controls must appear before the icon picker')
 
   console.log('notebook icon tests passed')
