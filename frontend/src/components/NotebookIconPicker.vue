@@ -1,9 +1,33 @@
 <template>
   <div class="notebook-icon-picker">
+    <button
+      :id="iconPickerHeaderId"
+      class="notebook-icon-collapse-header"
+      type="button"
+      :aria-controls="iconPickerPanelId"
+      :aria-expanded="isIconPickerExpanded"
+      :aria-label="`アイコン（${icons.length}件）を${isIconPickerExpanded ? '折りたたむ' : '展開する'}`"
+      @click="toggleIconPicker"
+    >
+      <ChevronRightIcon
+        class="notebook-icon-collapse-chevron"
+        :class="{ 'is-expanded': isIconPickerExpanded }"
+        :size="15"
+        aria-hidden="true"
+      />
+      <span class="notebook-icon-collapse-title">
+        <span>アイコン</span>
+        <span class="notebook-icon-count">{{ icons.length }}件</span>
+      </span>
+    </button>
+
     <RadioGroupRoot
+      v-if="isIconPickerExpanded"
+      :id="iconPickerPanelId"
       v-model="selectedIcon"
       class="notebook-icon-grid"
       aria-label="ノートブックアイコン"
+      :aria-labelledby="iconPickerHeaderId"
     >
       <div
         v-for="icon in icons"
@@ -16,7 +40,7 @@
           :aria-label="icon.label"
           :title="icon.label"
         >
-          <img :src="icon.src" :alt="icon.label" />
+          <img :src="icon.src" :alt="icon.label" loading="lazy" />
         </RadioGroupItem>
         <button
           v-if="allowUserIconDelete && icon.source === 'user'"
@@ -47,7 +71,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
+import { ChevronRightIcon } from '@lucide/vue'
 import { RadioGroupItem, RadioGroupRoot } from 'reka-ui'
 import {
   DEFAULT_NOTEBOOK_ICON,
@@ -71,6 +96,10 @@ const emit = defineEmits<{
 const version = ref(0)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const error = ref('')
+const isIconPickerExpanded = ref(false)
+const pickerId = useId()
+const iconPickerPanelId = `${pickerId}-notebook-icon-options`
+const iconPickerHeaderId = `${iconPickerPanelId}-label`
 const selectedIcon = computed({
   get: () => props.modelValue,
   set: (value: string) => emit('update:modelValue', value),
@@ -79,6 +108,10 @@ const icons = computed(() => {
   version.value
   return getNotebookIconOptions()
 })
+
+function toggleIconPicker() {
+  isIconPickerExpanded.value = !isIconPickerExpanded.value
+}
 
 async function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -90,6 +123,7 @@ async function handleFileChange(event: Event) {
   try {
     const icon = await addUserNotebookIcon(file)
     version.value += 1
+    isIconPickerExpanded.value = true
     emit('update:modelValue', icon.id)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'アイコン画像の追加に失敗しました'
@@ -114,6 +148,55 @@ function deleteUserIcon(iconId: string) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.notebook-icon-collapse-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.notebook-icon-collapse-header:hover {
+  background: var(--bg-hover);
+}
+
+.notebook-icon-collapse-header:focus-visible,
+.notebook-icon-option:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.notebook-icon-collapse-chevron {
+  flex: 0 0 auto;
+  transition: transform 0.16s ease;
+}
+
+.notebook-icon-collapse-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.notebook-icon-collapse-title {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notebook-icon-count {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .notebook-icon-grid {

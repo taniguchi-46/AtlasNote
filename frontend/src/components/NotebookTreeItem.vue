@@ -59,10 +59,6 @@
               <form class="notebook-edit-form" @submit.prevent="saveNotebook">
                 <label :for="`notebook-name-${node.id}`">名前</label>
                 <input :id="`notebook-name-${node.id}`" ref="inputRef" v-model="editName" type="text" maxlength="100" />
-                <div class="notebook-edit-icon-field">
-                  <span class="notebook-edit-field-label">アイコン</span>
-                  <NotebookIconPicker v-model="editIcon" />
-                </div>
                 <ContentLockControls
                   ref="lockControlsRef"
                   :target="{ type: 'notebook', id: node.id }"
@@ -70,6 +66,10 @@
                   defer-save
                   @changed="refreshAfterLockChange"
                 />
+                <div class="notebook-edit-icon-field">
+                  <span class="notebook-edit-field-label">アイコン</span>
+                  <NotebookIconPicker v-model="editIcon" />
+                </div>
                 <p v-if="editorError" class="notebook-edit-error" role="alert">{{ editorError }}</p>
                 <div class="notebook-edit-actions">
                   <button type="button" :disabled="isSavingEditor" @click="cancelEditor">キャンセル</button>
