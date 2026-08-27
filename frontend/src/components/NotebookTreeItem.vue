@@ -15,27 +15,22 @@
       @dragleave.stop="handleDragLeave"
       @drop.stop.prevent="handleDrop"
     >
-      <PopoverRoot v-model:open="isIconPickerOpen">
-        <PopoverTrigger as-child>
-          <button class="icon-wrapper" type="button" title="アイコンを変更" @click.stop>
-            <img :src="currentIcon.src" :alt="currentIcon.label" class="notebook-icon" />
-          </button>
-        </PopoverTrigger>
-        <PopoverPortal>
-          <PopoverContent
-            class="icon-picker"
-            side="right"
-            align="start"
-            :side-offset="6"
-            @click.stop
-          >
-            <NotebookIconPicker
-              :model-value="node.icon"
-              @update:model-value="selectIcon"
-            />
-          </PopoverContent>
-        </PopoverPortal>
-      </PopoverRoot>
+      <button
+        v-if="node.children.length > 0"
+        class="notebook-children-toggle"
+        type="button"
+        :aria-expanded="isChildrenExpanded"
+        :aria-controls="'notebook-children-' + node.id"
+        :aria-label="isChildrenExpanded ? node.name + ' のサブノートブックを折りたたむ' : node.name + ' のサブノートブックを展開する'"
+        @click.stop="isChildrenExpanded = !isChildrenExpanded"
+      >
+        <ChevronRightIcon :size="14" :class="{ 'is-expanded': isChildrenExpanded }" aria-hidden="true" />
+      </button>
+      <span v-else class="notebook-children-toggle-placeholder" aria-hidden="true"></span>
+
+      <span class="icon-wrapper" aria-hidden="true">
+        <img :src="currentIcon.src" alt="" class="notebook-icon" />
+      </span>
 
       <span class="notebook-name">
         {{ node.name }}
@@ -64,6 +59,10 @@
               <form class="notebook-edit-form" @submit.prevent="saveNotebook">
                 <label :for="`notebook-name-${node.id}`">名前</label>
                 <input :id="`notebook-name-${node.id}`" ref="inputRef" v-model="editName" type="text" maxlength="100" />
+                <div class="notebook-edit-icon-field">
+                  <span class="notebook-edit-field-label">アイコン</span>
+                  <NotebookIconPicker v-model="editIcon" />
+                </div>
                 <ContentLockControls
                   ref="lockControlsRef"
                   :target="{ type: 'notebook', id: node.id }"
@@ -93,7 +92,12 @@
       </div>
     </div>
 
-    <div v-if="node.children && node.children.length > 0" class="notebook-children">
+    <div
+      v-if="node.children && node.children.length > 0"
+      :id="'notebook-children-' + node.id"
+      v-show="isChildrenExpanded"
+      class="notebook-children"
+    >
       <NotebookTreeItem
         v-for="child in node.children"
         :key="child.id"
@@ -120,13 +124,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { Edit2Icon, LockIcon, LockKeyholeIcon, PlusIcon, Trash2Icon } from '@lucide/vue'
+import { ChevronRightIcon, Edit2Icon, LockIcon, LockKeyholeIcon, PlusIcon, Trash2Icon } from '@lucide/vue'
 import {
   PopoverContent,
   PopoverPortal,
   PopoverRoot,
   PopoverTrigger,
 } from 'reka-ui'
+import type { note } from '../../wailsjs/go/models'
 import { useNotebookStore, type NotebookNode } from '../stores/useNotebookStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNoteStore } from '../stores/useNoteStore'
@@ -151,6 +156,7 @@ const isEditPopoverOpen = ref(false)
 // disables notebook hierarchy drag and drop.
 const isEditing = computed(() => isEditPopoverOpen.value)
 const editName = ref('')
+const editIcon = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 type ContentLockEditorHandle = {
   save: () => Promise<boolean>
@@ -163,7 +169,7 @@ const isChildCreateModalOpen = ref(false)
 const isDeleteModalOpen = ref(false)
 const isDeleting = ref(false)
 const deleteError = ref('')
-const isIconPickerOpen = ref(false)
+const isChildrenExpanded = ref(true)
 const isDropTarget = ref(false)
 
 const currentIcon = computed(() => resolveNotebookIcon(props.node.icon))
@@ -214,11 +220,6 @@ function handleDrop() {
   notebookStore.endNotebookDrag()
 }
 
-async function selectIcon(iconName: string) {
-  await notebookStore.updateNotebookIcon(props.node.id, iconName)
-  isIconPickerOpen.value = false
-}
-
 async function selectNotebook() {
   if (!(await notebookStore.selectNotebook(props.node.id))) return
   appStore.setSidebarSection('notes')
@@ -244,6 +245,7 @@ function openEditor() {
   lockControlsRef.value?.reset()
   editorError.value = ''
   editName.value = props.node.name
+  editIcon.value = props.node.icon
   isEditPopoverOpen.value = true
   nextTick(() => {
     inputRef.value?.focus()
@@ -263,9 +265,19 @@ async function saveNotebook() {
     if (!(await lockControlsRef.value.save())) return
 
     const trimmed = editName.value.trim()
-    if (trimmed && trimmed !== props.node.name) {
-      await notebookStore.renameNotebook(props.node.id, trimmed)
+    const input: note.NotebookUpdateInput = {}
+    if (trimmed && trimmed !== props.node.name) input.name = trimmed
+    if (editIcon.value && editIcon.value !== props.node.icon) input.icon = editIcon.value
+
+    if (Object.keys(input).length > 0) {
+      const updated = await notebookStore.updateNotebookDetails(props.node.id, input)
+      if (!updated) {
+        await notebookStore.fetchNotebooks()
+        editorError.value = 'ノートブックの更新に失敗しました。'
+        return
+      }
     }
+    await notebookStore.fetchNotebooks()
     isEditPopoverOpen.value = false
   } finally {
     isSavingEditor.value = false
@@ -276,10 +288,12 @@ function cancelEditor() {
   if (isSavingEditor.value) return
   lockControlsRef.value?.reset()
   editorError.value = ''
+  editIcon.value = props.node.icon
   isEditPopoverOpen.value = false
 }
 
 async function refreshAfterLockChange() {
+  if (isSavingEditor.value) return
   await notebookStore.fetchNotebooks()
 }
 
@@ -300,16 +314,11 @@ async function deleteSelf(mode: NotebookDeleteMode) {
 
 <style scoped>
 .icon-wrapper {
-  position: relative;
   display: grid;
   place-items: center;
   width: 32px;
   height: 32px;
   flex-shrink: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
 }
 
 .notebook-icon {
@@ -317,16 +326,6 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   height: 30px;
   border-radius: 6px;
   object-fit: cover;
-}
-
-.icon-picker {
-  z-index: 1200;
-  width: 260px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-editor);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
 }
 
 .notebook-name {
@@ -347,7 +346,9 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   z-index: 1200;
   display: grid;
   gap: 12px;
-  width: min(340px, calc(100vw - 28px));
+  width: min(380px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
   padding: 12px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -373,6 +374,16 @@ async function deleteSelf(mode: NotebookDeleteMode) {
   border-radius: 5px;
   background: var(--bg-input);
   color: var(--text-primary);
+}
+
+.notebook-edit-icon-field {
+  display: grid;
+  gap: 8px;
+}
+
+.notebook-edit-field-label {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .notebook-edit-actions {

@@ -62,6 +62,13 @@ try {
   assert.match(treeItemSource, /@dragstart="handleDragStart"/)
   assert.match(treeItemSource, /@drop\.stop\.prevent="handleDrop"/)
   assert.match(treeItemSource, /wouldCreateNotebookCycle\(notebookStore\.notebooks, draggedId, props\.node\.id\)/)
+  assert.match(treeItemSource, /const isChildrenExpanded = ref\(true\)/, 'subnotebooks must keep their own expanded state')
+  assert.match(treeItemSource, /class="notebook-children-toggle"/, 'parents must expose a subnotebook disclosure control')
+  assert.match(treeItemSource, /:aria-expanded="isChildrenExpanded"/, 'the subnotebook disclosure control must expose its state')
+  assert.match(treeItemSource, /v-show="isChildrenExpanded"/, 'collapsing a notebook must preserve nested item state')
+  assert.match(treeItemSource, /<NotebookIconPicker v-model="editIcon"/, 'icon selection must live in the notebook edit form')
+  assert.doesNotMatch(treeItemSource, /isIconPickerOpen/, 'clicking the displayed notebook icon must not open a picker')
+  assert.match(treeItemSource, /updateNotebookDetails\(props\.node\.id, input\)/, 'name and icon edits must share one notebook update')
   assert.match(sidebarSource, /@drop="handleRootDrop"/)
   assert.match(sidebarSource, /ルートへ移動/)
   assert.match(sidebarSource, /isNotebooksExpanded/, 'the notebook section must track its expanded state')
@@ -74,6 +81,9 @@ try {
   assert.match(styleSource, /\.sidebar-notebooks-section\s*\{[^}]*flex-shrink:\s*0;/, 'the notebook section must not shrink before the sidebar scrolls')
   assert.match(styleSource, /\.theme-toggle\s*\{[^}]*flex-shrink:\s*0;[^}]*min-height:\s*32px;/, 'the theme button must not shrink')
   assert.match(tagManagerSource, /\.tag-manager\s*\{[^}]*flex:\s*0\s+0\s+auto;/, 'the tag section must not shrink before its own list scrolls')
+  assert.match(tagManagerSource, /const isTagsExpanded = ref\(true\)/, 'the tag section must track its expanded state')
+  assert.match(tagManagerSource, /aria-controls="sidebar-tags-list"/, 'the tag toggle must identify its controlled list')
+  assert.match(tagManagerSource, /v-show="isTagsExpanded"/, 'collapsing tags must preserve the tag list state')
 
   console.log('notebook hierarchy tests passed')
 } finally {

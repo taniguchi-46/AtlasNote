@@ -1171,6 +1171,42 @@ body.is-pane-resizing * {
   position: relative;
 }
 
+.notebook-children-toggle,
+.notebook-children-toggle-placeholder {
+  display: inline-grid;
+  width: 18px;
+  height: 20px;
+  flex: 0 0 18px;
+  place-items: center;
+}
+
+.notebook-children-toggle {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.notebook-children-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.notebook-children-toggle:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 1px;
+}
+
+.notebook-children-toggle svg {
+  transition: transform 0.12s;
+}
+
+.notebook-children-toggle svg.is-expanded {
+  transform: rotate(90deg);
+}
+
 .notebook-row:hover {
   background: var(--bg-hover);
   color: var(--text-primary);

@@ -1,7 +1,17 @@
 <template>
   <section class="tag-manager" aria-label="タグ管理">
     <div class="tag-manager-header">
-      <span>タグ</span>
+      <button
+        class="tag-manager-toggle"
+        type="button"
+        :aria-expanded="isTagsExpanded"
+        aria-controls="sidebar-tags-list"
+        :aria-label="isTagsExpanded ? 'タグを折りたたむ' : 'タグを展開する'"
+        @click="isTagsExpanded = !isTagsExpanded"
+      >
+        <ChevronRightIcon :size="14" :class="{ 'is-expanded': isTagsExpanded }" aria-hidden="true" />
+        <span>タグ</span>
+      </button>
       <button
         class="add-tag-btn"
         type="button"
@@ -14,53 +24,55 @@
       </button>
     </div>
 
-    <p v-if="tagStore.tags.length === 0" class="tag-empty">
-      タグはまだありません。
-    </p>
+    <div id="sidebar-tags-list" v-show="isTagsExpanded" class="tag-manager-content">
+      <p v-if="tagStore.tags.length === 0" class="tag-empty">
+        タグはまだありません。
+      </p>
 
-    <ul v-else class="tag-list">
-      <li v-for="tag in tagStore.tags" :key="tag.id" class="tag-list-item">
-        <template v-if="editingTagID === tag.id">
-          <input
-            v-model="editingName"
-            class="tag-rename-input"
-            type="text"
-            :aria-label="`${tag.name} の新しい名前`"
-            :disabled="tagStore.isMutating"
-            @keydown.enter.prevent="saveRename(tag.id)"
-            @keydown.esc="cancelRename"
-          />
-          <div class="tag-list-actions">
-            <button type="button" :disabled="tagStore.isMutating" title="名前を保存" @click="saveRename(tag.id)">
-              <CheckIcon :size="14" />
+      <ul v-else class="tag-list">
+        <li v-for="tag in tagStore.tags" :key="tag.id" class="tag-list-item">
+          <template v-if="editingTagID === tag.id">
+            <input
+              v-model="editingName"
+              class="tag-rename-input"
+              type="text"
+              :aria-label="`${tag.name} の新しい名前`"
+              :disabled="tagStore.isMutating"
+              @keydown.enter.prevent="saveRename(tag.id)"
+              @keydown.esc="cancelRename"
+            />
+            <div class="tag-list-actions">
+              <button type="button" :disabled="tagStore.isMutating" title="名前を保存" @click="saveRename(tag.id)">
+                <CheckIcon :size="14" />
+              </button>
+              <button type="button" :disabled="tagStore.isMutating" title="名前の変更をやめる" @click="cancelRename">
+                <XIcon :size="14" />
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <button
+              class="tag-list-name"
+              :class="{ 'is-active': noteStore.activeTagId === tag.id }"
+              type="button"
+              :title="`${tag.name}のノートを表示`"
+              @click="selectTag(tag.id)"
+            >
+              <TagIcon :size="13" aria-hidden="true" />
+              <span class="tag-list-name-text">{{ tag.name }}</span>
             </button>
-            <button type="button" :disabled="tagStore.isMutating" title="名前の変更をやめる" @click="cancelRename">
-              <XIcon :size="14" />
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <button
-            class="tag-list-name"
-            :class="{ 'is-active': noteStore.activeTagId === tag.id }"
-            type="button"
-            :title="`${tag.name}のノートを表示`"
-            @click="selectTag(tag.id)"
-          >
-            <TagIcon :size="13" aria-hidden="true" />
-            <span class="tag-list-name-text">{{ tag.name }}</span>
-          </button>
-          <div class="tag-list-actions">
-            <button type="button" :disabled="tagStore.isMutating" title="タグ名を変更" @click="startRename(tag)">
-              <PencilIcon :size="13" />
-            </button>
-            <button class="danger" type="button" :disabled="tagStore.isMutating" title="タグを削除" @click="deleteTag(tag)">
-              <Trash2Icon :size="13" />
-            </button>
-          </div>
-        </template>
-      </li>
-    </ul>
+            <div class="tag-list-actions">
+              <button type="button" :disabled="tagStore.isMutating" title="タグ名を変更" @click="startRename(tag)">
+                <PencilIcon :size="13" />
+              </button>
+              <button class="danger" type="button" :disabled="tagStore.isMutating" title="タグを削除" @click="deleteTag(tag)">
+                <Trash2Icon :size="13" />
+              </button>
+            </div>
+          </template>
+        </li>
+      </ul>
+    </div>
   </section>
 
   <TagCreateModal :open="isCreateModalOpen" @close="isCreateModalOpen = false" />
@@ -68,7 +80,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { CheckIcon, PencilIcon, PlusIcon, TagIcon, Trash2Icon, XIcon } from '@lucide/vue'
+import { CheckIcon, ChevronRightIcon, PencilIcon, PlusIcon, TagIcon, Trash2Icon, XIcon } from '@lucide/vue'
 import type { note } from '../../wailsjs/go/models'
 import TagCreateModal from './TagCreateModal.vue'
 import { useTagStore } from '../stores/useTagStore'
@@ -83,6 +95,7 @@ const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const isCreateModalOpen = ref(false)
+const isTagsExpanded = ref(true)
 const editingTagID = ref<string | null>(null)
 const editingName = ref('')
 
@@ -151,6 +164,43 @@ async function deleteTag(tag: note.Tag) {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
+}
+
+.tag-manager-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tag-manager-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.tag-manager-toggle:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 1px;
+}
+
+.tag-manager-toggle svg {
+  flex: 0 0 auto;
+  transition: transform 0.12s;
+}
+
+.tag-manager-toggle svg.is-expanded {
+  transform: rotate(90deg);
+}
+
+.tag-manager-content {
+  min-width: 0;
 }
 
 .tag-rename-input {

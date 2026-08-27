@@ -89,30 +89,28 @@
             <component :is="aiWorkspaceToggleIcon" :size="17" />
           </button>
 
-          <div class="mode-segment" role="group" aria-label="エディタモード切り替え">
-            <button
-              class="mode-segment-btn"
+          <button
+            class="mode-segment"
+            type="button"
+            :title="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
+            :aria-label="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
+            @click="toggleEditMode"
+          >
+            <span
+              class="mode-segment-option"
               :class="{ 'is-active': editMode === 'wysiwyg' }"
-              type="button"
-              title="リッチテキストモード"
-              aria-label="リッチテキストモード"
-              :aria-pressed="editMode === 'wysiwyg'"
-              @click="setEditMode('wysiwyg')"
+              aria-hidden="true"
             >
               <SquarePenIcon :size="17" />
-            </button>
-            <button
-              class="mode-segment-btn"
+            </span>
+            <span
+              class="mode-segment-option"
               :class="{ 'is-active': editMode === 'markdown' }"
-              type="button"
-              title="Markdownモード"
-              aria-label="Markdownモード"
-              :aria-pressed="editMode === 'markdown'"
-              @click="setEditMode('markdown')"
+              aria-hidden="true"
             >
               <SquareMIcon :size="17" />
-            </button>
-          </div>
+            </span>
+          </button>
 
           <DropdownMenuRoot>
             <DropdownMenuTrigger as-child>
@@ -1055,6 +1053,10 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
   }
 }
 
+function toggleEditMode() {
+  setEditMode(editMode.value === 'markdown' ? 'wysiwyg' : 'markdown')
+}
+
 function setEditorFromMarkdown(markdown: string): boolean {
   isApplyingContent.value = true
   try {
@@ -1976,14 +1978,21 @@ function formatDate(iso: string): string {
 .mode-segment {
   display: flex;
   align-items: center;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
   background-color: var(--bg-input);
   margin-right: 8px;
+  cursor: pointer;
 }
 
-.mode-segment-btn {
+.mode-segment:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.mode-segment-option {
   display: grid;
   place-items: center;
   width: 32px;
@@ -1992,16 +2001,16 @@ function formatDate(iso: string): string {
   transition: background-color 0.12s, color 0.12s;
 }
 
-.mode-segment-btn + .mode-segment-btn {
+.mode-segment-option + .mode-segment-option {
   border-left: 1px solid var(--border);
 }
 
-.mode-segment-btn:hover {
+.mode-segment:hover .mode-segment-option:not(.is-active) {
   background-color: var(--bg-hover);
   color: var(--text-primary);
 }
 
-.mode-segment-btn.is-active {
+.mode-segment-option.is-active {
   background-color: var(--text-secondary);
   color: var(--bg-editor);
 }

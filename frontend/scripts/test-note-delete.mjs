@@ -8,6 +8,7 @@ const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'deleteNotesSequentially.ts')
 const dependencyPath = path.join(rootDir, 'src', 'utils', 'noteBatch.ts')
 const notificationPath = path.join(rootDir, 'src', 'components', 'NotificationCenter.vue')
+const noteListPath = path.join(rootDir, 'src', 'components', 'NoteList.vue')
 const outDir = path.join(rootDir, '.tmp', 'note-delete-test')
 const outFile = path.join(outDir, 'deleteNotesSequentially.mjs')
 
@@ -37,6 +38,7 @@ try {
   await testAllDeletesSucceed()
   await testFailureReportsOnlyCompletedDeletes()
   await testDeleteErrorIsRenderedAsAnAlert()
+  await testDirectDeleteUsesExistingDeletionFlows()
   console.log('note delete tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
@@ -48,6 +50,14 @@ async function testDeleteErrorIsRenderedAsAnAlert() {
   assert.match(notificationSource, /notificationStore\.notifications/)
   assert.match(notificationSource, /:role="notification\.kind === 'error' \? 'alert' : 'status'"/)
   assert.match(notificationSource, /\{\{ notification\.message \}\}/)
+}
+
+async function testDirectDeleteUsesExistingDeletionFlows() {
+  const noteListSource = await readFile(noteListPath, 'utf8')
+
+  assert.match(noteListSource, /if \(item\.isTrashed\)[\s\S]*?window\.confirm/, 'permanent deletion from the list must require confirmation')
+  assert.match(noteListSource, /noteStore\.trashNotes\(\[item\.id\]\)/, 'normal notes must be moved to trash first')
+  assert.match(noteListSource, /noteStore\.permanentlyDeleteNotes\(\[item\.id\]\)/, 'trash deletion must reuse the revision-safe batch path')
 }
 
 async function testAllDeletesSucceed() {

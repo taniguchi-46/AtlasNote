@@ -13,18 +13,20 @@
       <div class="content-lock-editor-toggle">
         <div>
           <strong>ロック</strong>
-          <p>{{ deferredStateDescription }}</p>
+          <p v-if="deferredStateDescription">{{ deferredStateDescription }}</p>
         </div>
         <button
           class="content-lock-toggle"
           type="button"
           role="switch"
+          aria-label="ロック"
           :aria-checked="deferredLockEnabled"
           :disabled="lockStore.isBusy || targetStatusLoading || Boolean(targetStatusError) || !status"
           @click="toggleDeferredLock"
         >
-          <span class="content-lock-toggle-indicator" aria-hidden="true" />
-          {{ deferredLockEnabled ? '設定済み' : '未設定' }}
+          <span class="content-lock-toggle-track" aria-hidden="true">
+            <span class="content-lock-toggle-thumb"></span>
+          </span>
         </button>
       </div>
 
@@ -224,7 +226,7 @@ const deferredLockEnabled = computed(() => (
 const deferredStateDescription = computed(() => {
   if (targetStatusError.value) return 'ロック状態を取得できませんでした。再試行してください。'
   if (!status.value) return 'ロック状態を確認しています。'
-  if (mode.value === 'enable') return 'パスフレーズを入力し、下の保存でロックを有効にします。'
+  if (mode.value === 'enable') return ''
   if (mode.value === 'disable') return '現在のパスフレーズを入力し、下の保存でロックを無効にします。'
   if (status.value.explicitLock) {
     return status.value.locked
@@ -232,7 +234,7 @@ const deferredStateDescription = computed(() => {
       : 'この対象のロックは設定済みです。'
   }
   if (status.value.protected) return '上位ロックにより本文が保護されています。'
-  return 'トグルを有効にすると、パスフレーズ欄が表示されます。'
+  return ''
 })
 const submitLabel = computed(() => ({
   enable: 'ロックを設定',
@@ -476,22 +478,58 @@ button:disabled {
 .content-lock-toggle {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  gap: 6px;
-  min-width: 74px;
+  min-width: 48px;
+  min-height: 32px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+}
+
+.content-lock-toggle:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.content-lock-toggle:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
 }
 
 .content-lock-toggle[aria-checked='true'] {
   border-color: var(--brand-primary);
-  background: var(--brand-primary);
-  color: white;
+  background: color-mix(in srgb, var(--brand-primary) 10%, var(--bg-editor));
+  color: var(--brand-primary);
 }
 
-.content-lock-toggle-indicator {
-  width: 8px;
-  height: 8px;
+.content-lock-toggle-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 32px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.16s ease;
+}
+
+.content-lock-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--bg-editor);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  transition: transform 0.16s ease;
+}
+
+.content-lock-toggle[aria-checked='true'] .content-lock-toggle-track {
+  background: var(--brand-primary);
+}
+
+.content-lock-toggle[aria-checked='true'] .content-lock-toggle-thumb {
+  transform: translateX(14px);
 }
 
 .danger-button {

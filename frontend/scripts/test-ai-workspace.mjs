@@ -446,6 +446,13 @@ assert.ok(
   editorSource.indexOf('class="icon-btn ai-workspace-toggle"') < editorSource.indexOf('class="mode-segment"'),
   'AI workspace toggle must be placed to the left of the editor mode switcher',
 )
+assert.match(editorSource, /class="mode-segment"[\s\S]*?@click="toggleEditMode"/, 'the full mode control must be one native switch button')
+assert.match(
+  editorSource,
+  /function toggleEditMode\(\)[\s\S]*?editMode\.value === 'markdown' \? 'wysiwyg' : 'markdown'/,
+  'the mode control must always switch to the opposite editor mode',
+)
+assert.doesNotMatch(editorSource, /class="mode-segment-btn"/, 'individual mode halves must not be independently clickable')
 assert.doesNotMatch(editorSource, /AIで要約/)
 assert.doesNotMatch(editorSource, /<AILibrarianPanel/)
 assert.doesNotMatch(editorSource, /<AIAssistantPanel/)

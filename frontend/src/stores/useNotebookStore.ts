@@ -148,6 +148,25 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		}
 	}
 
+	async function updateNotebookDetails(id: string, input: note.NotebookUpdateInput): Promise<boolean> {
+		error.value = null
+		try {
+			const updated = await updateNotebook(id, input)
+			const index = notebooks.value.findIndex(n => n.id === id)
+			if (index !== -1) {
+				notebooks.value[index] = updated
+			}
+			return true
+		} catch (e) {
+			setErrorContext({
+				code: 'NOTEBOOK_UPDATE_FAILED',
+				action: { label: '再試行', run: () => updateNotebookDetails(id, input) },
+			})
+			error.value = e instanceof Error ? e.message : 'ノートブックの更新に失敗しました'
+			return false
+		}
+	}
+
 	async function moveNotebook(id: string, parentId: string | null) {
 		error.value = null
 		if (wouldCreateNotebookCycle(notebooks.value, id, parentId)) {
@@ -242,6 +261,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
 		selectNotebook,
 		newNotebook,
 		renameNotebook,
+		updateNotebookDetails,
 		moveNotebook,
 		removeNotebook,
 		updateNotebookIcon,

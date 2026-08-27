@@ -66,13 +66,14 @@
         ゴミ箱を空にする
       </button>
       <button
-        v-if="noteStore.activeTagId"
+        v-if="!isAllNotesList"
         class="note-list-back-button"
         type="button"
+        title="すべてのノート一覧に戻る"
+        aria-label="すべてのノート一覧に戻る"
         @click="returnToNormalList"
       >
         <XIcon :size="14" />
-        <span>通常一覧へ戻る</span>
       </button>
     </div>
 
@@ -136,6 +137,7 @@
                   {{ searchSnippet(note.id) }}
                 </p>
               </button>
+              <div class="note-item-actions" @click.stop>
               <PopoverRoot :open="editingNoteId === note.id" @update:open="setEditingNoteOpen(note, $event)">
                 <PopoverTrigger as-child>
                   <button
@@ -177,6 +179,17 @@
                   </PopoverContent>
                 </PopoverPortal>
               </PopoverRoot>
+                <button
+                  class="note-item-delete-button"
+                  type="button"
+                  :disabled="noteStore.isSaving || isSavingNoteEditor"
+                  :title="note.isTrashed ? '完全に削除' : 'ゴミ箱へ移動'"
+                  :aria-label="note.isTrashed ? '完全に削除' : 'ゴミ箱へ移動'"
+                  @click.stop="deleteNoteFromList(note)"
+                >
+                  <Trash2Icon :size="14" />
+                </button>
+              </div>
             </div>
           </li>
         </ContextMenuTrigger>
@@ -499,6 +512,31 @@ async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'resto
   }
 }
 
+async function deleteNoteFromList(item: note.Summary) {
+  if (noteStore.isSaving || isSavingNoteEditor.value) return
+
+  if (item.isTrashed) {
+    const title = item.title || '無題のノート'
+    const confirmed = window.confirm('「' + title + '」を完全に削除します。この操作は元に戻せません。')
+    if (!confirmed) return
+  }
+
+  if (editingNoteId.value === item.id) cancelNoteEditor(item)
+
+  try {
+    if (item.isTrashed) {
+      await noteStore.permanentlyDeleteNotes([item.id])
+    } else {
+      await noteStore.trashNotes([item.id])
+    }
+    clearSelectedNotes([item.id])
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
 async function handleMoveToNotebook(notebookId: string | null) {
   const targetIds = contextMenu.value.targetIds
   if (targetIds.length === 0) return
@@ -564,9 +602,17 @@ function createNewNote() {
 async function returnToNormalList() {
   searchStore.clear()
   noteStore.clearTagFilter()
+  notebookStore.activeNotebookId = null
   appStore.setSidebarSection('notes')
   await noteStore.fetchNotes([], null, false)
 }
+
+const isAllNotesList = computed(() => (
+  !searchStore.isActive
+  && !noteStore.activeTagId
+  && !notebookStore.activeNotebookId
+  && appStore.sidebarSection === 'notes'
+))
 
 const isTrashSection = computed(() =>
   appStore.sidebarSection === 'trash' && !notebookStore.activeNotebookId
@@ -832,22 +878,23 @@ function formatDate(iso: string): string {
 }
 
 .note-list-back-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
   height: 30px;
-  padding: 0 8px;
+  padding: 0;
   color: var(--text-secondary);
-  font-size: 12px;
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 .note-list-back-button:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+  border-color: var(--border);
 }
 
 .note-list-search-more {
@@ -972,11 +1019,19 @@ function formatDate(iso: string): string {
   flex: 1 1 auto;
 }
 
-.note-item-edit-button {
+.note-item-actions {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 8px 7px 8px 0;
+}
+
+.note-item-edit-button,
+.note-item-delete-button {
   display: grid;
   place-items: center;
   width: 30px;
-  margin: 8px 7px 8px 0;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -985,11 +1040,23 @@ function formatDate(iso: string): string {
 }
 
 .note-item-edit-button:hover,
-.note-item-edit-button:focus-visible {
+.note-item-edit-button:focus-visible,
+.note-item-delete-button:hover,
+.note-item-delete-button:focus-visible {
   border-color: var(--border);
   background: var(--bg-hover);
   color: var(--brand-primary);
   outline: none;
+}
+
+.note-item-delete-button:hover,
+.note-item-delete-button:focus-visible {
+  color: var(--color-danger);
+}
+
+.note-item-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .meta-icon.locked {

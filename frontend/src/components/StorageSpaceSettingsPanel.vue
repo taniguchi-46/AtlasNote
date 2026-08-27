@@ -40,13 +40,15 @@
         </button>
         <button
           class="space-lock-button"
+          :class="{ 'is-locked': spaceLockStatus(space.id)?.locked }"
           type="button"
+          :title="spaceLockLabel(space.id)"
+          :aria-label="spaceLockLabel(space.id)"
           :disabled="storageSpaceStore.isBusy || contentLockStore.isBusy"
           @click="openSpaceLockDialog(space)"
         >
           <LockKeyholeIcon v-if="spaceLockStatus(space.id)?.locked" :size="15" aria-hidden="true" />
           <LockIcon v-else :size="15" aria-hidden="true" />
-          {{ spaceLockLabel(space.id) }}
         </button>
       </li>
     </ul>
@@ -295,14 +297,16 @@ onMounted(() => {
 
 .storage-space-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 36px;
   align-items: stretch;
+  gap: 12px;
+  padding-right: 16px;
 }
 
 .storage-space-row {
   width: 100%;
-  min-height: 54px;
-  padding: 0 14px;
+  min-height: 64px;
+  padding: 0 16px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 24px;
   align-items: center;
@@ -318,10 +322,10 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   align-self: center;
-  gap: 6px;
-  min-height: 30px;
-  margin-right: 10px;
-  padding: 5px 8px;
+  justify-content: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--bg-editor);
@@ -334,6 +338,13 @@ onMounted(() => {
 .space-lock-button:hover:not(:disabled) {
   border-color: var(--brand-primary);
   color: var(--brand-primary);
+  background: color-mix(in srgb, var(--brand-primary) 8%, var(--bg-editor));
+}
+
+.space-lock-button.is-locked {
+  border-color: color-mix(in srgb, var(--brand-primary) 50%, var(--border));
+  color: var(--brand-primary);
+  background: color-mix(in srgb, var(--brand-primary) 10%, var(--bg-editor));
 }
 
 .space-lock-button:disabled {
@@ -449,7 +460,10 @@ onMounted(() => {
 }
 
 .lock-dialog-content {
-  width: min(460px, calc(100vw - 40px));
+  width: min(500px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  padding: 28px;
+  overflow-y: auto;
 }
 
 .nested-dialog-content h3 {

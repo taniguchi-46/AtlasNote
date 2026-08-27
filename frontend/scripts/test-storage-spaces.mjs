@@ -80,6 +80,25 @@ try {
   assert.match(panelSource, /新しい保存空間/, 'the panel must expose internal space creation')
   assert.match(panelSource, /保存して再起動/, 'switching must clearly state the automatic restart flow')
   assert.match(panelSource, /aria-current/, 'the active storage space must be exposed accessibly')
+  assert.match(panelSource, /:class="\{ 'is-locked': spaceLockStatus\(space\.id\)\?\.locked \}"/, 'locked spaces must use a stable visual state')
+  assert.match(panelSource, /:title="spaceLockLabel\(space\.id\)"/, 'the icon-only lock action must retain a hover label')
+  assert.match(panelSource, /:aria-label="spaceLockLabel\(space\.id\)"/, 'the icon-only lock action must retain an accessible name')
+  assert.doesNotMatch(panelSource, /\{\{\s*spaceLockLabel\(space\.id\)\s*\}\}/, 'the lock action must not render a persistent text label')
+  assert.match(
+    panelSource,
+    /\.storage-space-entry\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 36px;[^}]*gap:\s*12px;[^}]*padding-right:\s*16px;/,
+    'the icon-only lock action must use a compact column with right-side spacing',
+  )
+  assert.match(
+    panelSource,
+    /\.space-lock-button\s*\{[^}]*width:\s*100%;[^}]*min-height:\s*36px;[^}]*padding:\s*0;/,
+    'the lock action must keep a square icon-button hit area',
+  )
+  assert.match(
+    panelSource,
+    /\.lock-dialog-content\s*\{[^}]*width:\s*min\(500px,[^}]*padding:\s*28px;/,
+    'the storage-space lock dialog must provide wider spacing than generic dialogs',
+  )
   assert.doesNotMatch(panelSource, /フォルダを選択|ディレクトリを選択|保存空間を削除|名前を変更/, 'external folders, deletion, and rename are out of scope')
   assert.doesNotMatch(topBarSource, /保存空間|StorageSpace/, 'the top bar must not select storage spaces')
   assert.match(appSource, /prepareStorageSpaceSwitch/, 'App must own switch preparation')
