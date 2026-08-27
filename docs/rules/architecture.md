@@ -47,6 +47,7 @@ Go Backend
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
 | Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
+| Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
@@ -66,7 +67,7 @@ Go Backend
 - `ATLAS_NOTE_DATA_DIR`はAtlas Noteの管理ルートとし、ルート直下の既存SQLite・`notes/`・`atlasnote.lock`を移動せず「メイン」として扱う。
 - 新しい保存空間は表示名ではなく128 bitの内部IDから`spaces/<ID>/`を導出し、各空間に既存のSQLite、Markdown、`.sync-recovery/`、`atlasnote.lock`を配置する。
 - 現在の空間はversion付き`storage-spaces.json`で管理し、短時間の`storage-spaces.lock`と一時ファイル・sync・renameで更新する。不正な台帳を自動上書きしない。
-- 実行中のRepository／Serviceは切り替えず、dirty draftのflush、同期の一時停止、AI／同期busy確認、対象空間の事前検証後に選択を保存する。現在プロセスのDB・lock解放後にアプリを自動再起動し、選択先を初期化する。
+- 実行中のRepository／Serviceは切り替えず、dirty draftのflush、同期の一時停止、AI／同期／インポート／エクスポートbusy確認、対象空間の事前検証後に選択を保存する。現在プロセスのDB・lock解放後にアプリを自動再起動し、選択先を初期化する。
 - 設定画面だけで一覧・作成・選択を提供する。削除、改名、外部保存先、暗号化は後続スコープとする。詳細は`docs/development/storage-spaces.md`を正とする。
 
 ### SQLite / Markdown の整合性
@@ -138,6 +139,13 @@ Go Backend
 - `internal/noteimport` はUTF-8入力の変換とタイトル決定を担当し、タイトル方式は自動・ファイル名・先頭見出し・メタデータから選ぶ。ノート作成は既存の `note.Service.Create` に委譲する。直接SQLiteやMarkdownファイルへ書き込まないため、操作journal、派生索引、sync outbox、コンテンツロックを迂回しない。
 - HTMLはDOM解析後に許可構造だけをMarkdownへ再構築し、`hidden`属性を持つ本文要素と子孫を破棄する。raw HTML、属性、スクリプト、CSS、外部リソース、危険URLを保存しない。通常のmd本文はBOMを除いて保持し、既存のraw HTML表示時安全化に従う。
 - 複数ファイルは1ファイル1ノートとし、変換失敗はファイル単位で返す。保存失敗後は成功済みノートを保持して残りを中止する。詳細は `docs/development/note-import.md` を正とする。
+
+### ノートエクスポート
+
+- HTML／PDFエクスポートは、アクティブな単一ノートのdirty draftを保存laneでflushしてから、保存済みMarkdownと`expectedRevision`をsnapshotとして扱う。出力は読み取り専用で、Markdown、SQLite、操作journal、派生索引、sync outboxを変更しない。
+- 保存先はGo側のOSネイティブダイアログで選択し、フロントエンドへパスを返さない。ダイアログ中はコンテンツgateを保持せず、選択後の最終本文・revision・lock再検証から同一ディレクトリの一時ファイルを使った原子的確定までexport gateを保持する。コンテンツロックのwriter取得順はexport→AI→通常アクセスとする。
+- HTMLはTiptapが生成した断片をGo側でallowlistにより再サニタイズし、CSPと固定CSSを含む自己完結UTF-8文書へ変換する。PDFは`pdfmake` 0.3.11と同梱Noto Sans JPを使い、選択可能な日本語を含むA4縦の文書として直接生成する。外部リソースや画像データは出力しない。
+- 保護済み・解除済みノートは暗号化領域外へ平文を作ることを明示警告し、確認済みrequestだけを許可する。本文、形式別payload、保存先フルパスはログへ出さない。詳細は `docs/development/note-export.md` を正とする。
 
 ## 未確定事項
 

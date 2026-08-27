@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
 	"atlasnote/internal/storage"
@@ -2259,5 +2261,301 @@ func TestAppImportNotesRespectsNotebookContentLock(t *testing.T) {
 	}
 	if bytes.Contains(stored, []byte("protected imported body")) {
 		t.Fatal("protected imported body was written as plaintext")
+	}
+}
+
+func TestAppExportNoteUsesNativeSelectionAndPreservesCanonicalNote(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "出力ノート", Content: "# 見出し\n\n本文"})
+	if err != nil {
+		t.Fatalf("create export note: %v", err)
+	}
+	markdownPath := filepath.Join(app.notesDir, created.ID+".md")
+	markdownBefore, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatalf("read Markdown before export: %v", err)
+	}
+	markdownStatBefore, err := os.Stat(markdownPath)
+	if err != nil {
+		t.Fatalf("stat Markdown before export: %v", err)
+	}
+	var journalBefore, outboxBefore, searchBefore, linksBefore int
+	for query, target := range map[string]*int{
+		"SELECT COUNT(*) FROM note_storage_operations": &journalBefore,
+		"SELECT COUNT(*) FROM sync_outbox":             &outboxBefore,
+		"SELECT COUNT(*) FROM note_search":             &searchBefore,
+		"SELECT COUNT(*) FROM note_links":              &linksBefore,
+	} {
+		if err := app.db.QueryRowContext(t.Context(), query).Scan(target); err != nil {
+			t.Fatalf("snapshot export side effects with %q: %v", query, err)
+		}
+	}
+
+	target := filepath.Join(t.TempDir(), "exported.html")
+	app.saveExportFile = func(_ context.Context, options runtime.SaveDialogOptions) (string, error) {
+		if options.Title != "HTMLとしてエクスポート" || options.DefaultFilename != "出力ノート.html" {
+			t.Fatalf("HTML save dialog options = %#v", options)
+		}
+		if len(options.Filters) != 1 || options.Filters[0].Pattern != "*.html" || !options.CanCreateDirectories {
+			t.Fatalf("HTML save dialog filter = %#v", options)
+		}
+		return target, nil
+	}
+
+	result, err := app.ExportNote(noteexport.Input{
+		NoteID:           created.ID,
+		ExpectedRevision: created.Revision,
+		Title:            created.Title,
+		Markdown:         created.Content,
+		Format:           noteexport.FormatHTML,
+		HTMLFragment: `<h1>見出し</h1><p onclick="alert(1)">本文<script>alert(1)</script>` +
+			`<a href="javascript:alert(1)">危険</a><img src="https://example.com/image.png" alt="代替"></p>`,
+	})
+	if err != nil {
+		t.Fatalf("export HTML: %v", err)
+	}
+	if result.Cancelled || result.Error != nil || result.ExportedName != "exported.html" {
+		t.Fatalf("HTML export result = %#v", result)
+	}
+
+	exported, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read exported HTML: %v", err)
+	}
+	html := string(exported)
+	for _, unsafeValue := range []string{"<script", "onclick", "javascript:", "example.com/image.png"} {
+		if strings.Contains(strings.ToLower(html), strings.ToLower(unsafeValue)) {
+			t.Fatalf("exported HTML contains unsafe value %q: %s", unsafeValue, html)
+		}
+	}
+	for _, expected := range []string{"Content-Security-Policy", "<title>出力ノート</title>", "<h1>見出し</h1>", "本文", "危険", "代替"} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("exported HTML does not contain %q: %s", expected, html)
+		}
+	}
+
+	after, err := app.GetNote(created.ID)
+	if err != nil {
+		t.Fatalf("get note after export: %v", err)
+	}
+	if after.Content != created.Content || after.Revision != created.Revision || after.Title != created.Title {
+		t.Fatalf("export changed canonical note: before=%#v after=%#v", created, after)
+	}
+	markdownAfter, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatalf("read Markdown after export: %v", err)
+	}
+	markdownStatAfter, err := os.Stat(markdownPath)
+	if err != nil {
+		t.Fatalf("stat Markdown after export: %v", err)
+	}
+	if !bytes.Equal(markdownAfter, markdownBefore) || !markdownStatAfter.ModTime().Equal(markdownStatBefore.ModTime()) {
+		t.Fatalf("export rewrote canonical Markdown: before=%q after=%q", markdownBefore, markdownAfter)
+	}
+	var journalAfter, outboxAfter, searchAfter, linksAfter int
+	for query, target := range map[string]*int{
+		"SELECT COUNT(*) FROM note_storage_operations": &journalAfter,
+		"SELECT COUNT(*) FROM sync_outbox":             &outboxAfter,
+		"SELECT COUNT(*) FROM note_search":             &searchAfter,
+		"SELECT COUNT(*) FROM note_links":              &linksAfter,
+	} {
+		if err := app.db.QueryRowContext(t.Context(), query).Scan(target); err != nil {
+			t.Fatalf("read export side effects with %q: %v", query, err)
+		}
+	}
+	if journalAfter != journalBefore || outboxAfter != outboxBefore || searchAfter != searchBefore || linksAfter != linksBefore {
+		t.Fatalf(
+			"export changed derived state: journal %d->%d outbox %d->%d search %d->%d links %d->%d",
+			journalBefore, journalAfter,
+			outboxBefore, outboxAfter,
+			searchBefore, searchAfter,
+			linksBefore, linksAfter,
+		)
+	}
+}
+
+func TestAppExportNoteCancellationAndStaleSnapshotDoNotWrite(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "競合", Content: "before"})
+	if err != nil {
+		t.Fatalf("create export note: %v", err)
+	}
+	input := noteexport.Input{
+		NoteID:           created.ID,
+		ExpectedRevision: created.Revision,
+		Title:            created.Title,
+		Markdown:         created.Content,
+		Format:           noteexport.FormatHTML,
+		HTMLFragment:     "<p>before</p>",
+	}
+
+	app.saveExportFile = func(context.Context, runtime.SaveDialogOptions) (string, error) { return "", nil }
+	cancelled, err := app.ExportNote(input)
+	if err != nil || !cancelled.Cancelled || cancelled.Error != nil || cancelled.ExportedName != "" {
+		t.Fatalf("cancelled export = %#v, %v", cancelled, err)
+	}
+
+	target := filepath.Join(t.TempDir(), "stale.html")
+	app.saveExportFile = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		changed := "after"
+		if _, updateErr := app.notes.Update(t.Context(), created.ID, note.UpdateInput{
+			Content:          &changed,
+			ExpectedRevision: &created.Revision,
+		}); updateErr != nil {
+			t.Fatalf("update note during save dialog: %v", updateErr)
+		}
+		return target, nil
+	}
+	stale, err := app.ExportNote(input)
+	if err != nil {
+		t.Fatalf("stale export call: %v", err)
+	}
+	if stale.Error == nil || stale.Error.Code != noteexport.ErrorCodeStale || stale.ExportedName != "" {
+		t.Fatalf("stale export result = %#v", stale)
+	}
+	if _, statErr := os.Stat(target); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stale export created a file: %v", statErr)
+	}
+}
+
+func TestAppExportProtectedNoteRequiresConfirmationAndUnlockedKey(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "保護", Content: "secret"})
+	if err != nil {
+		t.Fatalf("create protected export note: %v", err)
+	}
+	enabled := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNote,
+		TargetID:   created.ID,
+		Passphrase: "correct horse battery staple",
+	})
+	if enabled.Error != nil || !enabled.Unlocked {
+		t.Fatalf("enable note lock = %#v", enabled)
+	}
+
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "protected.html")
+	app.saveExportFile = func(context.Context, runtime.SaveDialogOptions) (string, error) { return target, nil }
+	input := noteexport.Input{
+		NoteID:           created.ID,
+		ExpectedRevision: created.Revision,
+		Title:            created.Title,
+		Markdown:         created.Content,
+		Format:           noteexport.FormatHTML,
+		HTMLFragment:     "<p>secret</p>",
+	}
+
+	unconfirmed, err := app.ExportNote(input)
+	if err != nil {
+		t.Fatalf("unconfirmed protected export: %v", err)
+	}
+	if unconfirmed.Error == nil || unconfirmed.Error.Code != noteexport.ErrorCodeProtectedConfirmationRequired {
+		t.Fatalf("unconfirmed protected export = %#v", unconfirmed)
+	}
+	if _, statErr := os.Stat(target); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unconfirmed protected export created a file: %v", statErr)
+	}
+
+	input.AllowPlaintextProtected = true
+	confirmed, err := app.ExportNote(input)
+	if err != nil || confirmed.Error != nil || confirmed.ExportedName != "protected.html" {
+		t.Fatalf("confirmed protected export = %#v, %v", confirmed, err)
+	}
+
+	locked := app.LockContentTargetsNow([]contentlock.Target{{Type: contentlock.TargetNote, ID: created.ID}})
+	if locked.Error != nil {
+		t.Fatalf("lock exported note: %#v", locked)
+	}
+	lockedTarget := filepath.Join(targetDir, "locked.html")
+	app.saveExportFile = func(context.Context, runtime.SaveDialogOptions) (string, error) { return lockedTarget, nil }
+	lockedResult, err := app.ExportNote(input)
+	if err != nil {
+		t.Fatalf("locked export call: %v", err)
+	}
+	if lockedResult.Error == nil || lockedResult.Error.Code != noteexport.ErrorCodeLocked {
+		t.Fatalf("locked export result = %#v", lockedResult)
+	}
+	if _, statErr := os.Stat(lockedTarget); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("locked export created a file: %v", statErr)
+	}
+}
+
+func TestAppExportNoteWritesDirectPDFAndRejectsConcurrentExport(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "PDFノート", Content: "PDF本文"})
+	if err != nil {
+		t.Fatalf("create PDF export note: %v", err)
+	}
+	pdf := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"))
+	input := noteexport.Input{
+		NoteID:           created.ID,
+		ExpectedRevision: created.Revision,
+		Title:            created.Title,
+		Markdown:         created.Content,
+		Format:           noteexport.FormatPDF,
+		PDFBase64:        pdf,
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	selectedOptions := make(chan runtime.SaveDialogOptions, 1)
+	target := filepath.Join(t.TempDir(), "direct-pdf")
+	app.saveExportFile = func(_ context.Context, options runtime.SaveDialogOptions) (string, error) {
+		selectedOptions <- options
+		close(started)
+		<-release
+		return target, nil
+	}
+
+	firstResult := make(chan noteexport.Result, 1)
+	firstError := make(chan error, 1)
+	go func() {
+		result, exportErr := app.ExportNote(input)
+		firstResult <- result
+		firstError <- exportErr
+	}()
+	<-started
+	options := <-selectedOptions
+	if options.Title != "PDFとしてエクスポート" || options.DefaultFilename != "PDFノート.pdf" || len(options.Filters) != 1 || options.Filters[0].Pattern != "*.pdf" {
+		t.Fatalf("PDF save dialog options = %#v", options)
+	}
+	busy, err := app.ExportNote(input)
+	if err != nil || busy.Error == nil || busy.Error.Code != noteexport.ErrorCodeBusy {
+		t.Fatalf("concurrent export result = %#v, %v", busy, err)
+	}
+	close(release)
+	if err := <-firstError; err != nil {
+		t.Fatalf("first PDF export: %v", err)
+	}
+	completed := <-firstResult
+	if completed.Error != nil || completed.ExportedName != "direct-pdf.pdf" {
+		t.Fatalf("first PDF export result = %#v", completed)
+	}
+	written, err := os.ReadFile(target + ".pdf")
+	if err != nil {
+		t.Fatalf("read direct PDF: %v", err)
+	}
+	if !bytes.Equal(written, []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")) {
+		t.Fatalf("direct PDF bytes = %q", written)
 	}
 }

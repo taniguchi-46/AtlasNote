@@ -17,6 +17,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/note"
+	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
 	"atlasnote/internal/storage"
@@ -33,6 +34,7 @@ type App struct {
 	markdownStore      *storage.MarkdownStore
 	contentLocks       *contentlock.Manager
 	notes              *note.Service
+	noteExporter       *noteexport.Service
 	noteImporter       *noteimport.Service
 	syncService        *syncservice.Service
 	aiService          *aiservice.Service
@@ -50,6 +52,8 @@ type App struct {
 	allowClose         bool
 	importMu           sync.Mutex
 	openImportFiles    func(context.Context, runtime.OpenDialogOptions) ([]string, error)
+	exportMu           sync.Mutex
+	saveExportFile     func(context.Context, runtime.SaveDialogOptions) (string, error)
 	restartExecutable  string
 	startProcess       func(string) error
 	quitApplication    func(context.Context)
@@ -108,6 +112,7 @@ func (a *App) shutdown(ctx context.Context) {
 		a.aiService.Shutdown()
 	}
 	a.noteImporter = nil
+	a.noteExporter = nil
 	if a.db != nil {
 		_ = a.db.Close()
 		a.db = nil
@@ -256,6 +261,57 @@ func (a *App) ImportNotes(input noteimport.Input) (noteimport.Result, error) {
 		return result, nil
 	}
 	return a.noteImporter.Import(a.operationContext(), paths, input), nil
+}
+
+// ExportNote uses a backend-native save dialog so the frontend never receives
+// or supplies a filesystem destination. The export gate starts only after the
+// dialog closes, then keeps the final note snapshot and atomic file write on
+// the same side of any content-lock conversion.
+func (a *App) ExportNote(input noteexport.Input) (noteexport.Result, error) {
+	if a.noteExporter == nil {
+		return noteexport.NewErrorResult(noteexport.ErrorCodeUnavailable, "エクスポートを開始できませんでした。", "", true), nil
+	}
+	if validationError := noteexport.ValidateInput(input); validationError != nil {
+		return noteexport.Result{Error: validationError}, nil
+	}
+	if !a.exportMu.TryLock() {
+		return noteexport.NewErrorResult(noteexport.ErrorCodeBusy, "別のエクスポート処理が実行中です。", "", true), nil
+	}
+	defer a.exportMu.Unlock()
+
+	path, err := a.selectExportFile(a.operationContext(), input)
+	if err != nil {
+		return noteexport.NewErrorResult(noteexport.ErrorCodeUnavailable, "保存先を選択できませんでした。", "", true), nil
+	}
+	if path == "" {
+		return noteexport.Result{Cancelled: true}, nil
+	}
+
+	releaseExportAccess := func() {}
+	if a.contentLocks != nil {
+		releaseExportAccess = a.contentLocks.BeginExportContentAccess(a.operationContext())
+	}
+	defer releaseExportAccess()
+	return a.noteExporter.Export(a.operationContext(), path, input)
+}
+
+func (a *App) selectExportFile(ctx context.Context, input noteexport.Input) (string, error) {
+	options := runtime.SaveDialogOptions{
+		DefaultFilename:      noteexport.SuggestedFilename(input.Title, input.Format),
+		CanCreateDirectories: true,
+	}
+	switch input.Format {
+	case noteexport.FormatHTML:
+		options.Title = "HTMLとしてエクスポート"
+		options.Filters = []runtime.FileFilter{{DisplayName: "HTMLファイル (*.html)", Pattern: "*.html"}}
+	case noteexport.FormatPDF:
+		options.Title = "PDFとしてエクスポート"
+		options.Filters = []runtime.FileFilter{{DisplayName: "PDFファイル (*.pdf)", Pattern: "*.pdf"}}
+	}
+	if a.saveExportFile != nil {
+		return a.saveExportFile(ctx, options)
+	}
+	return runtime.SaveFileDialog(ctx, options)
 }
 
 func (a *App) selectImportFiles(ctx context.Context) ([]string, error) {
@@ -1173,6 +1229,7 @@ func (a *App) quiesceLockedSpace() {
 	}
 	a.notes = nil
 	a.noteImporter = nil
+	a.noteExporter = nil
 	a.syncService = nil
 	a.aiService = nil
 	a.statusMu.Lock()
@@ -1390,6 +1447,7 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	}
 	a.notes = service
 	a.noteImporter = noteimport.NewService(service)
+	a.noteExporter = noteexport.NewService(service, a.contentLocks)
 	a.syncService = syncService
 	a.aiService = aiService
 	a.recoveryReport = recoveryReport

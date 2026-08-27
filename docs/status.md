@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-26
+最終更新: 2026-08-27
 
 ## 現在のフェーズ
 
@@ -26,6 +26,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「ノート保存空間の分割」。既存ルートを移動せず「メイン」として登録し、追加空間を内部ID配下へ作成する。空間ごとにSQLite、Markdown、WebDAV設定・outbox・競合、AIローカル設定・履歴・成果物、同期復旧、単一writer lockを分離する。設定画面の一覧から選択し、同期／AI busy確認とdirty draftのflush、対象空間の事前検証後に選択を保存して自動再起動する。保存空間の削除・改名・外部フォルダ選択は対象外。設計は`docs/development/storage-spaces.md`を正とする（2026-08-25）
 - Pre-Phase 5「ロック機能」。保存空間・ノートブック・ノート単位でMarkdown本文を認証付き暗号化し、名前・タイトルは平文として保持する。保存空間は設定画面から、ノートブック・ノートは3ペインの編集ポップアップから設定でき、設定画面のロック一覧で解除・パスフレーズ変更を行う。ロック済みノート／ノートブックの選択時には、継承元を含む未解除ロックを共通ダイアログで順に要求し、キャンセル時は選択を変更しない。解除時点から固定時間で再ロックする設定（既定はアプリ終了時のみ、1/5/15/30/60分）を備え、操作では期限を延長しない。期限到来時は下書きを保存し、失敗時は鍵を保持して再試行する。保護対象はAIで利用不可とし、既存AI記録は明示確認後だけ削除する。旧平文同期先は設定前に切断し、暗号化同期形式を別途実装するまで保護済み保存空間の同期は拒否する。設計は`docs/development/content-locks.md`を正とする（2026-08-26）
 - Pre-Phase 5「md・txt・HTMLからインポート」。OSネイティブの複数ファイル選択から、最上位・既存ノートブック・新規トップレベルノートブックへ1ファイル1ノートとして保存する。タイトルは自動・ファイル名・先頭見出し・メタデータから選択でき、候補がない場合はファイル名へフォールバックする。HTMLは許可した文書構造だけをMarkdownへ変換し、`hidden`属性を持つ本文と子孫、raw HTML、属性、スクリプト、CSS、外部リソースを保存しない。既存のNote Serviceを通じてMarkdown、SQLite、操作journal、検索・リンク索引、同期outbox、コンテンツロックを維持し、変換失敗はファイル単位、保存失敗は成功済みノートを保持する部分成功として扱う。インポート中は保存空間の切替を拒否する。設計は`docs/development/note-import.md`を正とする（2026-08-26）
+- Pre-Phase 5「単一ノートのHTML・PDFエクスポート」。dirty draftを既存保存laneでflushし、保存済みMarkdownとrevisionをsnapshotとしてGo側で再検証した後、OSネイティブ保存ダイアログの選択先へ原子的に出力する。HTMLはallowlist再サニタイズ、CSP、固定CSSを持つ自己完結文書とし、PDFは同梱Noto Sans JPを使うA4縦の直接生成とする。外部リソース・画像データは含めず、保護ノートは平文出力警告と明示確認を必須とする。エクスポート中の保存空間切替と重複実行を拒否し、保存先フルパス・本文・payloadをログや結果へ返さない。設計は`docs/development/note-export.md`を正とする（2026-08-27）
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -152,6 +153,7 @@ npm --prefix frontend run test:storage-spaces
 npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
+npm --prefix frontend run test:note-export
 npm --prefix frontend run test:notifications
 npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
@@ -184,6 +186,7 @@ wails build
 | `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
 | `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
 | `docs/development/storage-spaces.md` | 保存空間のディレクトリ、台帳、分離境界、再起動切替 |
+| `docs/development/note-export.md` | 単一ノートのHTML・PDF出力、snapshot再検証、ロック、原子的保存 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
 | `docs/todo/todo-phese4.md` | Phase 4 v1の実装前課題・受け入れTODO |
 | `docs/todo/todo-phese4-v2.md` | Phase 4 v2の実装・検証TODO |

@@ -7,6 +7,7 @@ export type StorageSpaceSwitchDependencies = {
   isSyncBusy: () => boolean
   isAIBusy: () => boolean
   isImportBusy: () => boolean
+  isExportBusy: () => boolean
   suspendSync: () => boolean
   resumeSync: () => void
   flushAllDirtyNotes: () => Promise<boolean>
@@ -26,6 +27,10 @@ export async function prepareStorageSpaceSwitch(
   }
   if (dependencies.isImportBusy()) {
     dependencies.notify('インポートの完了後に保存空間を切り替えてください', 'STORAGE_SPACE_IMPORT_BUSY')
+    return { ready: false }
+  }
+  if (dependencies.isExportBusy()) {
+    dependencies.notify('エクスポートの完了後に保存空間を切り替えてください', 'STORAGE_SPACE_EXPORT_BUSY')
     return { ready: false }
   }
   if (!dependencies.suspendSync()) {
@@ -59,6 +64,11 @@ export async function prepareStorageSpaceSwitch(
     if (dependencies.isImportBusy()) {
       rollback()
       dependencies.notify('インポートが開始されたため、保存空間を切り替えませんでした', 'STORAGE_SPACE_IMPORT_BUSY')
+      return { ready: false }
+    }
+    if (dependencies.isExportBusy()) {
+      rollback()
+      dependencies.notify('エクスポートが開始されたため、保存空間を切り替えませんでした', 'STORAGE_SPACE_EXPORT_BUSY')
       return { ready: false }
     }
     return { ready: true, rollback }

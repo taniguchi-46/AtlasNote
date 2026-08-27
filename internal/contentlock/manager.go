@@ -53,16 +53,16 @@ type Manager struct {
 	db    *sql.DB
 	store *storage.MarkdownStore
 
-	// aiOperationMu is separate from operationMu so an AI request can hold its
-	// access gate while it asks the note service for context. Lock conversions
-	// take aiOperationMu first, then operationMu; this order prevents a writer
-	// from waiting on an AI request that is itself blocked behind the writer.
-	aiOperationMu sync.RWMutex
-	operationMu   sync.RWMutex
-	mu            sync.RWMutex
-	sessionKeys   map[string][]byte
-	pending       map[string]pendingWrite
-	failures      map[string]unlockFailure
+	// Export and AI gates are separate from operationMu so each outer request
+	// can hold its access gate while it asks the note service for content. Lock
+	// conversions take exportOperationMu, aiOperationMu, then operationMu.
+	exportOperationMu sync.RWMutex
+	aiOperationMu     sync.RWMutex
+	operationMu       sync.RWMutex
+	mu                sync.RWMutex
+	sessionKeys       map[string][]byte
+	pending           map[string]pendingWrite
+	failures          map[string]unlockFailure
 }
 
 func NewManager(db *sql.DB, store *storage.MarkdownStore) *Manager {
@@ -100,6 +100,13 @@ func (m *Manager) BeginContentAccess(context.Context) func() {
 	return m.operationMu.RUnlock
 }
 
+// BeginExportContentAccess keeps a complete export on one side of a lock
+// conversion while it collects note content through the normal access gate.
+func (m *Manager) BeginExportContentAccess(context.Context) func() {
+	m.exportOperationMu.RLock()
+	return m.exportOperationMu.RUnlock
+}
+
 // BeginAIContentAccess keeps a complete AI request (including the provider
 // call) on one side of a lock conversion. It intentionally uses a different
 // gate from normal note reads because those reads occur inside an AI request.
@@ -109,14 +116,16 @@ func (m *Manager) BeginAIContentAccess(context.Context) func() {
 }
 
 // beginLockOperation establishes the only writer ordering for a content-lock
-// conversion. AI access is stopped before normal note access so neither side
-// can deadlock while collecting a note snapshot.
+// conversion. Outer access gates are stopped before normal note access so no
+// request can deadlock while collecting a note snapshot.
 func (m *Manager) beginLockOperation() func() {
+	m.exportOperationMu.Lock()
 	m.aiOperationMu.Lock()
 	m.operationMu.Lock()
 	return func() {
 		m.operationMu.Unlock()
 		m.aiOperationMu.Unlock()
+		m.exportOperationMu.Unlock()
 	}
 }
 

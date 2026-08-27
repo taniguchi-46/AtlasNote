@@ -196,6 +196,52 @@ func TestAIContentAccessBlocksLockConversion(t *testing.T) {
 	}
 }
 
+func TestExportContentAccessBlocksLockNow(t *testing.T) {
+	ctx := context.Background()
+	manager, notes, _ := newLockFixture(t)
+	created, err := notes.Create(ctx, note.CreateInput{Title: "エクスポート中", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if _, _, err := manager.Enable(ctx, contentlock.EnableInput{
+		TargetType: contentlock.TargetNote,
+		TargetID:   created.ID,
+		Passphrase: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("enable note lock: %v", err)
+	}
+
+	release := manager.BeginExportContentAccess(ctx)
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
+	completed := make(chan error, 1)
+	go func() {
+		_, lockErr := manager.LockNow(ctx, contentlock.Target{Type: contentlock.TargetNote, ID: created.ID})
+		completed <- lockErr
+	}()
+
+	select {
+	case lockErr := <-completed:
+		t.Fatalf("lock now completed while export access was active: %v", lockErr)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	released = true
+	select {
+	case lockErr := <-completed:
+		if lockErr != nil {
+			t.Fatalf("lock now after export access release: %v", lockErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("lock now did not resume after export access release")
+	}
+}
+
 func TestNotebookLockCoversChildNotebookAndDoesNotPermitAI(t *testing.T) {
 	ctx := context.Background()
 	manager, notes, _ := newLockFixture(t)

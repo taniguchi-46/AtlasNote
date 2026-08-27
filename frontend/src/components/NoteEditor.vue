@@ -114,6 +114,44 @@
             </button>
           </div>
 
+          <DropdownMenuRoot>
+            <DropdownMenuTrigger as-child>
+              <button
+                class="icon-btn"
+                type="button"
+                :disabled="noteExportStore.isBusy"
+                :title="noteExportStore.isBusy ? 'エクスポート中...' : 'ノートをエクスポート'"
+                aria-label="ノートをエクスポート"
+                :aria-busy="noteExportStore.isBusy"
+              >
+                <DownloadIcon :size="18" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuPortal>
+              <DropdownMenuContent
+                class="note-export-menu"
+                side="bottom"
+                align="end"
+                :side-offset="6"
+              >
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy"
+                  @select="handleExportNote('html')"
+                >
+                  HTMLとしてエクスポート
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy"
+                  @select="handleExportNote('pdf')"
+                >
+                  PDFとしてエクスポート
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenuPortal>
+          </DropdownMenuRoot>
+
           <button
             class="icon-btn"
             type="button"
@@ -413,6 +451,7 @@ import {
   ClipboardCopyIcon,
   CodeIcon,
   Columns3Icon,
+  DownloadIcon,
   FileTextIcon,
   Heading1Icon,
   Heading2Icon,
@@ -439,6 +478,13 @@ import {
   Trash2Icon,
   XIcon,
 } from '@lucide/vue'
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+} from 'reka-ui'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import {
   DOMParser as ProseMirrorDOMParser,
@@ -461,6 +507,8 @@ import { TaskItem } from '@tiptap/extension-task-item'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { common, createLowlight } from 'lowlight'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useNoteExportStore } from '../stores/useNoteExportStore'
+import { useContentLockStore } from '../stores/useContentLockStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
 import AIWorkspace from './AIWorkspace.vue'
@@ -469,6 +517,8 @@ import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
 import NoteBacklinks from './NoteBacklinks.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
+import { createPdfBase64FromHtml } from '../utils/noteExportDocument'
+import type { NoteExportFormat, NoteExportInput } from '../api/noteExport'
 import { logOperationFailure } from '../utils/operationLogger'
 import {
   createTableClipboardPayload,
@@ -505,6 +555,8 @@ type AgentEditorHighlightPluginMeta = {
 }
 
 const noteStore = useNoteStore()
+const noteExportStore = useNoteExportStore()
+const contentLockStore = useContentLockStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 
@@ -809,6 +861,125 @@ function toggleAIWorkspace() {
 
 function focusAIWorkspaceToggle() {
   void nextTick(() => aiWorkspaceToggle.value?.focus())
+}
+
+async function handleExportNote(format: NoteExportFormat) {
+  const selectedNote = noteStore.activeNote
+  if (!selectedNote || noteExportStore.isBusy) return
+
+  const selectedNoteId = selectedNote.id
+  const result = await noteExportStore.runPrepared(async () => {
+    if (noteStore.activeNote?.id !== selectedNoteId) return null
+
+    if (editMode.value === 'wysiwyg') {
+      applyRichEditorToMarkdown()
+    }
+    if (
+      localMarkdown.value !== noteStore.activeNote.content
+      || getSavableTitle() !== noteStore.activeNote.title
+    ) {
+      scheduleAutoSave(localMarkdown.value)
+    }
+
+    const accessAllowed = await contentLockStore.requestAccess(
+      { type: 'note', id: selectedNoteId },
+      noteStore.activeNote.title,
+    )
+    if (!accessAllowed || noteStore.activeNote?.id !== selectedNoteId) return null
+
+    const saved = await noteStore.flushPendingDraft()
+    if (!saved) {
+      notificationStore.notify('未保存の変更を保存できないため、エクスポートしませんでした。', {
+        kind: 'warning',
+        source: 'note-export',
+        code: 'NOTE_EXPORT_DRAFT_SAVE_FAILED',
+      })
+      return null
+    }
+
+    const current = noteStore.activeNote
+    if (!current || current.id !== selectedNoteId || noteStore.getDraft(selectedNoteId)) {
+      notificationStore.notify('ノートの保存状態が変わったため、エクスポートしませんでした。', {
+        kind: 'warning',
+        source: 'note-export',
+        code: 'NOTE_EXPORT_NOTE_CHANGED',
+      })
+      return null
+    }
+
+    let allowPlaintextProtected = false
+    if (current.protected) {
+      const outputLabel = format === 'html' ? 'HTML' : 'PDF'
+      allowPlaintextProtected = window.confirm(
+        `このノートは保護されています。暗号化領域の外へ、復号済みの本文を平文の${outputLabel}ファイルとして保存します。続行しますか？`,
+      )
+      if (!allowPlaintextProtected) return null
+    }
+
+    let htmlFragment: string
+    try {
+      htmlFragment = parseMarkdownToRichHtml(current.content)
+    } catch {
+      logOperationFailure({
+        noteId: selectedNoteId,
+        stage: 'note-export.markdown-to-html',
+        errorCategory: 'parse-failed',
+      })
+      notificationStore.notify('ノート本文をエクスポート用に変換できませんでした。', {
+        kind: 'error',
+        source: 'note-export',
+        code: 'NOTE_EXPORT_RENDER_FAILED',
+      })
+      return null
+    }
+
+    const input: NoteExportInput = {
+      noteId: current.id,
+      expectedRevision: current.revision,
+      title: current.title,
+      markdown: current.content,
+      format,
+      allowPlaintextProtected,
+    }
+    if (format === 'html') {
+      input.htmlFragment = htmlFragment
+      return input
+    }
+
+    try {
+      input.pdfBase64 = await createPdfBase64FromHtml(htmlFragment, current.title)
+      return input
+    } catch {
+      logOperationFailure({
+        noteId: selectedNoteId,
+        stage: 'note-export.pdf-render',
+        errorCategory: 'render-failed',
+      })
+      notificationStore.notify('PDFを生成できませんでした。', {
+        kind: 'error',
+        source: 'note-export',
+        code: 'NOTE_EXPORT_RENDER_FAILED',
+      })
+      return null
+    }
+  })
+
+  if (!result || result.cancelled) return
+  if (result.error) {
+    notificationStore.notify(result.error.message, {
+      kind: result.error.retryable ? 'warning' : 'error',
+      source: 'note-export',
+      code: result.error.code,
+      retryable: result.error.retryable,
+    })
+    return
+  }
+
+  notificationStore.notify(`${result.exportedName ?? 'ノート'}をエクスポートしました。`, {
+    kind: 'success',
+    source: 'note-export',
+    code: 'NOTE_EXPORT_COMPLETED',
+  })
 }
 
 async function handleRetrySave() {
@@ -1838,6 +2009,39 @@ function formatDate(iso: string): string {
 .ai-workspace-toggle.is-active {
   background: var(--bg-active);
   color: var(--brand-primary);
+}
+
+:global(.note-export-menu) {
+  z-index: 1100;
+  min-width: 210px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-editor, #fff);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .18);
+  color: var(--text-primary);
+}
+
+:global(.note-export-menu-item) {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.25;
+  outline: none;
+}
+
+:global(.note-export-menu-item[data-highlighted]) {
+  background: var(--bg-hover);
+  color: var(--brand-primary);
+}
+
+:global(.note-export-menu-item[data-disabled]) {
+  cursor: not-allowed;
+  opacity: .45;
 }
 
 .editor-body {

@@ -92,6 +92,9 @@ jobs:
       - name: Run note import tests
         run: npm --prefix frontend run test:note-import
 
+      - name: Run note export tests
+        run: npm --prefix frontend run test:note-export
+
       - name: Run AI store tests
         run: npm --prefix frontend run test:ai-store
 

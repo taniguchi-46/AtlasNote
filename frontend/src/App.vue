@@ -149,6 +149,7 @@ import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
+import { useNoteExportStore } from './stores/useNoteExportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
 import { logOperationFailure } from './utils/operationLogger'
@@ -178,6 +179,7 @@ const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
+const noteExportStore = useNoteExportStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 
@@ -194,6 +196,7 @@ storageSpaceStore.setSwitchLifecycle(
       || aiWritingStore.isBusy
     ),
     isImportBusy: () => noteImportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
