@@ -136,7 +136,7 @@ async function deleteTag(tag: note.Tag) {
 <style scoped>
 .tag-manager {
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
   min-height: 0;
   padding: 12px 10px 0;

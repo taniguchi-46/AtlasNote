@@ -76,6 +76,7 @@ try {
   assert.match(modalSource, /選択した情報がない場合は、ファイル名を使用します。/, 'title fallback must be explained')
   assert.match(modalSource, /ファイルの選択をキャンセルしました/, 'picker cancellation must not be shown as an error')
   assert.match(modalSource, /成功したノートは保持されています/, 'partial persistence results must explain retained notes')
+  assert.match(modalSource, /\.primary-btn,\s*\.secondary-btn\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*height:\s*34px;[^}]*margin-top:\s*0;/, 'import footer buttons must share a centered 34px layout without global primary-button margins')
   assert.match(appSource, /handleNoteImportCompleted/, 'App must refresh the workspace after an import')
   assert.match(appSource, /syncStore\.scheduleAutoSync\(\)/, 'imported notes must schedule automatic sync')
   assert.match(appSource, /noteStore\.fetchNotes\(\[\], noteStore\.activeTagId/, 'note list refresh must preserve the active tag filter')

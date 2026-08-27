@@ -129,6 +129,7 @@ try {
   ])
   assert.match(settingsSource, /value="locks"/, 'Settings must expose a lock tab')
   assert.match(settingsSource, /ContentLockSettingsPanel/, 'Settings must render lock management')
+  assert.match(settingsSource, /\.settings-panel\s*>\s*:deep\(section\s*>\s*h3\)/, 'Settings page headings must cross component scoped-style boundaries')
   assert.match(storageSpacesSource, /openSpaceLockDialog/, 'storage spaces must offer per-space lock management')
   assert.match(notebookSource, /編集・ロック設定/, 'notebook editing must include lock settings')
   assert.match(noteListSource, /編集・ロック設定/, 'note editing must include lock settings')

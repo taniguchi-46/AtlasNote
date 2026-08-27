@@ -339,7 +339,7 @@ function handleOpenChange(open: boolean) {
   background-color: var(--bg-editor);
 }
 
-.settings-panel h3 {
+.settings-panel > :deep(section > h3) {
   margin-top: 0;
   margin-bottom: 24px;
   font-size: 1.1rem;

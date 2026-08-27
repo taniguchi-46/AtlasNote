@@ -374,8 +374,12 @@ function close() {
 
 .primary-btn,
 .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 104px;
   height: 34px;
+  margin-top: 0;
   padding: 0 14px;
   border: 1px solid transparent;
   border-radius: 6px;

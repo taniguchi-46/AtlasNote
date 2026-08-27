@@ -212,6 +212,7 @@ body.is-pane-resizing * {
   padding: 16px 10px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
+  min-height: 0;
   overflow-y: auto;
   height: 100%;
 }
@@ -248,10 +249,12 @@ body.is-pane-resizing * {
 
 .new-note-btn {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   width: 100%;
   height: 36px;
+  min-height: 36px;
   padding: 0 10px;
   border-radius: 8px;
   background: var(--brand-primary);
@@ -273,6 +276,7 @@ body.is-pane-resizing * {
 
 .sidebar-nav {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 2px;
 }
@@ -328,9 +332,11 @@ body.is-pane-resizing * {
 
 .theme-toggle {
   display: grid;
+  flex-shrink: 0;
   place-items: center;
   width: 32px;
   height: 32px;
+  min-height: 32px;
   border-radius: 8px;
   color: var(--text-secondary);
   transition: background 0.12s, color 0.12s;
@@ -1073,6 +1079,7 @@ body.is-pane-resizing * {
 ───────────────────────────────────────── */
 .sidebar-notebooks-section {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 6px;
   margin-top: 16px;
@@ -1089,6 +1096,35 @@ body.is-pane-resizing * {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.notebooks-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+.notebooks-toggle:hover {
+  color: var(--text-primary);
+}
+
+.notebooks-toggle:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.notebooks-toggle-icon {
+  flex: 0 0 auto;
+  transition: transform 0.12s;
+}
+
+.notebooks-toggle-icon.is-expanded {
+  transform: rotate(90deg);
 }
 
 .add-notebook-btn {

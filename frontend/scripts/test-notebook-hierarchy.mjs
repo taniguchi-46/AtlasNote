@@ -9,6 +9,8 @@ const sourcePath = path.join(rootDir, 'src', 'utils', 'notebookHierarchy.ts')
 const storePath = path.join(rootDir, 'src', 'stores', 'useNotebookStore.ts')
 const treeItemPath = path.join(rootDir, 'src', 'components', 'NotebookTreeItem.vue')
 const sidebarPath = path.join(rootDir, 'src', 'components', 'AppSidebar.vue')
+const tagManagerPath = path.join(rootDir, 'src', 'components', 'TagManager.vue')
+const stylePath = path.join(rootDir, 'src', 'style.css')
 const outDir = path.join(rootDir, '.tmp', 'notebook-hierarchy-test')
 const outFile = path.join(outDir, 'notebookHierarchy.mjs')
 
@@ -40,9 +42,13 @@ try {
   assert.equal(wouldCreateNotebookCycle(notebooks, 'parent', 'other-root'), false)
   assert.equal(wouldCreateNotebookCycle(notebooks, 'parent', null), false)
 
-  const storeSource = await readFile(storePath, 'utf8')
-  const treeItemSource = await readFile(treeItemPath, 'utf8')
-  const sidebarSource = await readFile(sidebarPath, 'utf8')
+  const [storeSource, treeItemSource, sidebarSource, tagManagerSource, styleSource] = await Promise.all([
+    readFile(storePath, 'utf8'),
+    readFile(treeItemPath, 'utf8'),
+    readFile(sidebarPath, 'utf8'),
+    readFile(tagManagerPath, 'utf8'),
+    readFile(stylePath, 'utf8'),
+  ])
   const validationIndex = storeSource.indexOf('wouldCreateNotebookCycle(notebooks.value, id, parentId)')
   const updateIndex = storeSource.indexOf('const updated = await updateNotebook(', validationIndex)
   assert.notEqual(validationIndex, -1)
@@ -58,6 +64,16 @@ try {
   assert.match(treeItemSource, /wouldCreateNotebookCycle\(notebookStore\.notebooks, draggedId, props\.node\.id\)/)
   assert.match(sidebarSource, /@drop="handleRootDrop"/)
   assert.match(sidebarSource, /ルートへ移動/)
+  assert.match(sidebarSource, /isNotebooksExpanded/, 'the notebook section must track its expanded state')
+  assert.match(sidebarSource, /aria-expanded/, 'the notebook section toggle must expose its expanded state')
+  assert.match(sidebarSource, /aria-controls="sidebar-notebooks-tree"/, 'the notebook section toggle must identify its controlled tree')
+  assert.match(sidebarSource, /v-show="isNotebooksExpanded"/, 'collapsing the notebook section must preserve the tree component state')
+  assert.match(styleSource, /\.sidebar\s*\{[^}]*min-height:\s*0;/, 'the sidebar must establish a shrink-safe scroll boundary')
+  assert.match(styleSource, /\.new-note-btn\s*\{[^}]*flex-shrink:\s*0;[^}]*min-height:\s*36px;/, 'the notebook creation button must not shrink')
+  assert.match(styleSource, /\.sidebar-nav\s*\{[^}]*flex-shrink:\s*0;/, 'navigation must not shrink before the sidebar scrolls')
+  assert.match(styleSource, /\.sidebar-notebooks-section\s*\{[^}]*flex-shrink:\s*0;/, 'the notebook section must not shrink before the sidebar scrolls')
+  assert.match(styleSource, /\.theme-toggle\s*\{[^}]*flex-shrink:\s*0;[^}]*min-height:\s*32px;/, 'the theme button must not shrink')
+  assert.match(tagManagerSource, /\.tag-manager\s*\{[^}]*flex:\s*0\s+0\s+auto;/, 'the tag section must not shrink before its own list scrolls')
 
   console.log('notebook hierarchy tests passed')
 } finally {

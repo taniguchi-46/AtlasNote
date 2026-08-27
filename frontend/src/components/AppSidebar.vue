@@ -46,12 +46,29 @@
 
     <div class="sidebar-notebooks-section">
       <div class="notebooks-header">
-        <span>ノートブック</span>
+        <button
+          class="notebooks-toggle"
+          type="button"
+          :aria-expanded="isNotebooksExpanded"
+          aria-controls="sidebar-notebooks-tree"
+          :aria-label="isNotebooksExpanded ? 'ノートブックを折り畳む' : 'ノートブックを展開する'"
+          @click="isNotebooksExpanded = !isNotebooksExpanded"
+        >
+          <ChevronRightIcon
+            :size="14"
+            class="notebooks-toggle-icon"
+            :class="{ 'is-expanded': isNotebooksExpanded }"
+            aria-hidden="true"
+          />
+          <span>ノートブック</span>
+        </button>
         <button class="add-notebook-btn" type="button" title="ノートブックを追加" @click="openRootCreateModal">
           <PlusIcon :size="14" />
         </button>
       </div>
       <div
+        id="sidebar-notebooks-tree"
+        v-show="isNotebooksExpanded"
         class="notebooks-tree"
         :class="{ 'is-dragging': notebookStore.draggedNotebookId }"
         @dragover="handleRootDragOver"
@@ -97,7 +114,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { PlusIcon, FileTextIcon, FolderOpenIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon, Clock3Icon } from '@lucide/vue'
+import { ChevronRightIcon, PlusIcon, FileTextIcon, FolderOpenIcon, StarIcon, PinIcon, Trash2Icon, SunIcon, MoonIcon, Clock3Icon } from '@lucide/vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
@@ -112,6 +129,7 @@ const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const isRootCreateModalOpen = ref(false)
+const isNotebooksExpanded = ref(true)
 const trashContextMenu = ref({
   visible: false,
   x: 0,
