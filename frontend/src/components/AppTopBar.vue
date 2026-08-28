@@ -10,6 +10,7 @@
       <div class="search-container">
         <SearchIcon :size="16" class="search-icon" />
         <input 
+          ref="searchInput"
           type="text" 
           class="search-input" 
           placeholder="メモを検索..." 
@@ -49,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { 
   RefreshCwIcon, 
   SearchIcon, 
@@ -70,6 +72,14 @@ defineEmits<{
   (e: 'toggle-always-on-top'): void
   (e: 'open-settings'): void
 }>()
+
+const searchInput = ref<HTMLInputElement | null>(null)
+
+function focusSearch() {
+  searchInput.value?.focus()
+}
+
+defineExpose({ focusSearch })
 </script>
 
 <style scoped>

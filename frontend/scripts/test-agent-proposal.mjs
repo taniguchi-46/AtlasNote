@@ -138,7 +138,8 @@ const compiledStore = ts.transpileModule(
     .replace("from '../utils/agentEditProposal'", "from './agentEditProposal.mjs'")
     .replace("from './useSettingsStore'", "from './mock-stores.mjs'")
     .replace("from './useNotificationStore'", "from './mock-stores.mjs'")
-    .replace("from './useAppStore'", "from './mock-stores.mjs'"),
+    .replace("from './useAppStore'", "from './mock-stores.mjs'")
+    .replace("from './useContentLockStore'", "from './mock-stores.mjs'"),
   {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
@@ -225,10 +226,15 @@ await writeFile(path.join(outDir, 'mock-stores.mjs'), `
 const notifications = { dismissBySource() {}, notify() {} }
 const settings = { editorFirstLineStyle: 'paragraph' }
 const app = { sortOption: '', sidebarSection: 'all' }
+const contentLocks = {
+  async requestAccess() { return true },
+  async refreshTarget() { return null },
+}
 
 export function useNotificationStore() { return notifications }
 export function useSettingsStore() { return settings }
 export function useAppStore() { return app }
+export function useContentLockStore() { return contentLocks }
 export function parseNoteSortOption() { return null }
 `, 'utf8')
 

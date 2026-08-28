@@ -162,6 +162,10 @@
             </section>
           </TabsContent>
 
+          <TabsContent value="shortcuts" as-child>
+            <ShortcutSettingsPanel />
+          </TabsContent>
+
           <TabsContent value="sync" as-child>
             <SyncSettingsPanel />
           </TabsContent>
@@ -213,6 +217,7 @@ import SyncSettingsPanel from './SyncSettingsPanel.vue'
 import AISettingsPanel from './AISettingsPanel.vue'
 import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
 import ContentLockSettingsPanel from './ContentLockSettingsPanel.vue'
+import ShortcutSettingsPanel from './ShortcutSettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
 const appStore = useAppStore()
@@ -220,10 +225,11 @@ const syncStore = useSyncStore()
 const aiStore = useAIStore()
 const storageSpaceStore = useStorageSpaceStore()
 
-const tabs = [
+const tabs: { id: SettingsTab; name: string }[] = [
   { id: 'theme', name: 'テーマ' },
   { id: 'general', name: '一般' },
   { id: 'editor', name: 'エディター' },
+  { id: 'shortcuts', name: 'ショートカット' },
 ]
 tabs.push({ id: 'sync', name: '同期' })
 tabs.push({ id: 'ai', name: 'AI' })

@@ -411,7 +411,9 @@
               class="markdown-textarea"
               placeholder="ここにMarkdownで内容を入力してください..."
               title="Ctrl / Cmd + クリックでノートリンクを開く"
+              @beforeinput="handleMarkdownBeforeInput"
               @input="handleMarkdownInput"
+              @keydown="handleMarkdownKeydown"
               @scroll="syncMarkdownHighlightLayer"
               @click="handleMarkdownClick"
               @keyup="updateMarkdownSelection"
@@ -490,6 +492,11 @@ import {
   type Node as ProseMirrorNode,
 } from '@tiptap/pm/model'
 import { Plugin, PluginKey, type Selection } from '@tiptap/pm/state'
+import {
+  history as createRichHistoryPlugin,
+  redo as redoRichHistory,
+  undo as undoRichHistory,
+} from '@tiptap/pm/history'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
@@ -535,6 +542,14 @@ import {
   findNoteLinkTargetAt,
   parseNoteLinkHref,
 } from '../utils/noteLink'
+import {
+  findMatchingShortcutAction,
+  isNativeHistoryShortcut,
+} from '../utils/keyboardShortcuts'
+import {
+  createMarkdownEditHistory,
+  type MarkdownEditSnapshot,
+} from '../utils/markdownEditHistory'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -595,6 +610,16 @@ let activeNoteId: string | null = null
 let savedRichSelection: { from: number; to: number } | null = null
 let markdownHighlightResizeObserver: ResizeObserver | null = null
 let lastScrolledAgentHighlightKey = ''
+let pendingMarkdownInput: {
+  before: MarkdownEditSnapshot
+  forceNewGroup: boolean
+  group: string
+} | null = null
+const markdownEditHistory = createMarkdownEditHistory({
+  content: '',
+  selectionStart: 0,
+  selectionEnd: 0,
+})
 
 const activeAgentEditorHighlight = computed(() => {
   const highlight = noteStore.agentEditorHighlight
@@ -638,6 +663,7 @@ const editor = new Editor({
     StarterKit.configure({
       codeBlock: false,
       link: false,
+      undoRedo: false,
     }),
     Markdown.configure(RICH_MARKDOWN_OPTIONS),
     Placeholder.configure({
@@ -687,6 +713,26 @@ const editor = new Editor({
       void noteStore.selectNote(noteId)
       return true
     },
+    handleKeyDown(view, event) {
+      const actionId = findMatchingShortcutAction(
+        event,
+        settingsStore.shortcutBindings,
+        'editor',
+      )
+      if (actionId === 'editor.undo' || actionId === 'editor.redo') {
+        event.preventDefault()
+        if (!event.repeat) {
+          const command = actionId === 'editor.undo' ? undoRichHistory : redoRichHistory
+          command(view.state, view.dispatch)
+        }
+        return true
+      }
+      if (isNativeHistoryShortcut(event)) {
+        event.preventDefault()
+        return true
+      }
+      return false
+    },
   },
   onSelectionUpdate() {
     editorStateVersion.value += 1
@@ -709,6 +755,7 @@ const editor = new Editor({
   },
 })
 
+editor.registerPlugin(createRichHistoryPlugin({ depth: 100, newGroupDelay: 500 }))
 editor.registerPlugin(agentEditorHighlightPlugin)
 
 watch(
@@ -718,6 +765,11 @@ watch(
       noteStore.clearAgentEditorHighlight()
       activeNoteId = null
       savedRichSelection = null
+      localTitle.value = ''
+      localMarkdown.value = ''
+      isRichDirty.value = false
+      resetMarkdownEditHistory('')
+      resetRichEditorToEmpty()
       return
     }
 
@@ -742,11 +794,14 @@ watch(
       savedRichSelection = null
       resetSaveFeedback()
       localMarkdown.value = editableContent
+      resetMarkdownEditHistory(editableContent)
       isRichDirty.value = false
       if (editMode.value === 'wysiwyg') {
         if (!setEditorFromMarkdown(editableContent)) {
           editMode.value = 'markdown'
         }
+      } else {
+        resetRichEditorToEmpty()
       }
       return
     }
@@ -755,9 +810,12 @@ watch(
 
     savedRichSelection = null
     localMarkdown.value = note.content
+    resetMarkdownEditHistory(note.content)
     isRichDirty.value = false
-    if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(note.content)) {
-      editMode.value = 'markdown'
+    if (editMode.value === 'wysiwyg') {
+      if (!setEditorFromMarkdown(note.content)) editMode.value = 'markdown'
+    } else {
+      resetRichEditorToEmpty()
     }
   },
   { immediate: true },
@@ -804,6 +862,10 @@ onBeforeUnmount(() => {
   noteStore.clearAgentEditorHighlight(activeNoteId ?? undefined)
   void noteStore.flushPendingDraft()
   markdownHighlightResizeObserver?.disconnect()
+  pendingMarkdownInput = null
+  markdownEditHistory.reset({ content: '', selectionStart: 0, selectionEnd: 0 })
+  localMarkdown.value = ''
+  localTitle.value = ''
   if (savedMessageTimer) {
     clearTimeout(savedMessageTimer)
   }
@@ -997,9 +1059,12 @@ async function handleReloadConflict() {
 
   localTitle.value = latestNote.title
   localMarkdown.value = latestNote.content
+  resetMarkdownEditHistory(latestNote.content)
   isRichDirty.value = false
-  if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(latestNote.content)) {
-    editMode.value = 'markdown'
+  if (editMode.value === 'wysiwyg') {
+    if (!setEditorFromMarkdown(latestNote.content)) editMode.value = 'markdown'
+  } else {
+    resetRichEditorToEmpty()
   }
   resetSaveFeedback()
 }
@@ -1019,9 +1084,12 @@ function handleDiscardDraft() {
   noteStore.discardDraft(note.id)
   localTitle.value = note.title
   localMarkdown.value = note.content
+  resetMarkdownEditHistory(note.content)
   isRichDirty.value = false
-  if (editMode.value === 'wysiwyg' && !setEditorFromMarkdown(note.content)) {
-    editMode.value = 'markdown'
+  if (editMode.value === 'wysiwyg') {
+    if (!setEditorFromMarkdown(note.content)) editMode.value = 'markdown'
+  } else {
+    resetRichEditorToEmpty()
   }
   resetSaveFeedback()
 }
@@ -1039,6 +1107,8 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
   if (mode === 'markdown') {
     applyRichEditorToMarkdown()
     editMode.value = 'markdown'
+    resetMarkdownEditHistory(localMarkdown.value)
+    resetRichEditorToEmpty()
     return
   }
 
@@ -1049,6 +1119,7 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
     scheduleAutoSave(localMarkdown.value)
   }
   if (setEditorFromMarkdown(localMarkdown.value)) {
+    resetMarkdownEditHistory(localMarkdown.value)
     editMode.value = mode
   }
 }
@@ -1057,17 +1128,42 @@ function toggleEditMode() {
   setEditMode(editMode.value === 'markdown' ? 'wysiwyg' : 'markdown')
 }
 
+defineExpose({ toggleAIWorkspace, toggleEditMode })
+
+function replaceRichEditorContent(content: JSONContent) {
+  editor.unregisterPlugin('history')
+  try {
+    ;(editor.commands as any).setContent(content, {
+      emitUpdate: false,
+    })
+  } finally {
+    if (!editor.isDestroyed) {
+      editor.registerPlugin(createRichHistoryPlugin({ depth: 100, newGroupDelay: 500 }))
+    }
+  }
+}
+
+function resetRichEditorToEmpty() {
+  const wasApplyingContent = isApplyingContent.value
+  isApplyingContent.value = true
+  try {
+    replaceRichEditorContent({ type: 'doc', content: [{ type: 'paragraph' }] })
+    isRichDirty.value = false
+  } finally {
+    isApplyingContent.value = wasApplyingContent
+  }
+}
+
 function setEditorFromMarkdown(markdown: string): boolean {
   isApplyingContent.value = true
   try {
     const html = parseMarkdownToRichHtml(markdown)
     const content = parseRichHtmlToJson(html)
-    ;(editor.commands as any).setContent(content, {
-      emitUpdate: false,
-    })
+    replaceRichEditorContent(content)
     isRichDirty.value = false
     return true
   } catch {
+    resetRichEditorToEmpty()
     logOperationFailure({
       noteId: noteStore.activeNote?.id,
       stage: 'note-editor.markdown-to-rich',
@@ -1550,7 +1646,110 @@ function getClipboardErrorCategory(error: unknown) {
   }
 }
 
-function handleMarkdownInput() {
+function createMarkdownSnapshot(
+  content = localMarkdown.value,
+  textarea = markdownTextarea.value,
+): MarkdownEditSnapshot {
+  return {
+    content,
+    selectionStart: textarea?.selectionStart ?? 0,
+    selectionEnd: textarea?.selectionEnd ?? 0,
+  }
+}
+
+function resetMarkdownEditHistory(content: string) {
+  pendingMarkdownInput = null
+  lastMarkdownSelection = { start: 0, end: 0 }
+  markdownEditHistory.reset({ content, selectionStart: 0, selectionEnd: 0 })
+}
+
+function getMarkdownInputRecordOptions(inputType: string) {
+  if (inputType === 'insertText' || inputType === 'insertCompositionText') {
+    return { group: 'insert-text', forceNewGroup: false }
+  }
+  if (inputType === 'deleteContentBackward' || inputType === 'deleteContentForward') {
+    return { group: inputType, forceNewGroup: false }
+  }
+  return { group: inputType || 'input', forceNewGroup: true }
+}
+
+function handleMarkdownBeforeInput(event: InputEvent) {
+  if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+    if (event.cancelable) {
+      event.preventDefault()
+      pendingMarkdownInput = null
+      applyMarkdownHistory(event.inputType === 'historyUndo' ? 'undo' : 'redo')
+    }
+    return
+  }
+
+  const textarea = event.currentTarget as HTMLTextAreaElement
+  pendingMarkdownInput = {
+    before: createMarkdownSnapshot(textarea.value, textarea),
+    ...getMarkdownInputRecordOptions(event.inputType),
+  }
+}
+
+function handleMarkdownKeydown(event: KeyboardEvent) {
+  const actionId = findMatchingShortcutAction(
+    event,
+    settingsStore.shortcutBindings,
+    'editor',
+  )
+  if (actionId === 'editor.undo' || actionId === 'editor.redo') {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!event.repeat) applyMarkdownHistory(actionId === 'editor.undo' ? 'undo' : 'redo')
+    return
+  }
+
+  if (isNativeHistoryShortcut(event)) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+}
+
+function applyMarkdownHistory(action: 'undo' | 'redo') {
+  const snapshot = action === 'undo'
+    ? markdownEditHistory.undo()
+    : markdownEditHistory.redo()
+  if (!snapshot) return
+
+  pendingMarkdownInput = null
+  dismissAgentEditorHighlight()
+  localMarkdown.value = snapshot.content
+  lastMarkdownSelection = {
+    start: snapshot.selectionStart,
+    end: snapshot.selectionEnd,
+  }
+  updateAutoTitleFromMarkdown(snapshot.content)
+  scheduleAutoSave(snapshot.content)
+  markdownSelectionVersion.value += 1
+
+  const noteId = activeNoteId
+  void nextTick(() => {
+    if (activeNoteId !== noteId) return
+    const textarea = markdownTextarea.value
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd)
+    markdownSelectionVersion.value += 1
+  })
+}
+
+function handleMarkdownInput(event: Event) {
+  const textarea = event.currentTarget as HTMLTextAreaElement
+  const after = createMarkdownSnapshot(textarea.value, textarea)
+  const pending = pendingMarkdownInput
+  pendingMarkdownInput = null
+  markdownEditHistory.record(
+    pending?.before ?? markdownEditHistory.current(),
+    after,
+    pending
+      ? { group: pending.group, forceNewGroup: pending.forceNewGroup }
+      : { group: 'input', forceNewGroup: true },
+  )
+  localMarkdown.value = textarea.value
   dismissAgentEditorHighlight()
   updateMarkdownSelection()
   updateAutoTitleFromMarkdown(localMarkdown.value)
@@ -1783,8 +1982,21 @@ function replaceMarkdownRange(
   selectionStart = start + text.length,
   selectionEnd = selectionStart,
 ) {
+  const before = createMarkdownSnapshot()
   dismissAgentEditorHighlight()
-  localMarkdown.value = `${localMarkdown.value.slice(0, start)}${text}${localMarkdown.value.slice(end)}`
+  const nextContent = `${localMarkdown.value.slice(0, start)}${text}${localMarkdown.value.slice(end)}`
+  localMarkdown.value = nextContent
+  markdownEditHistory.record(
+    before,
+    {
+      content: nextContent,
+      selectionStart,
+      selectionEnd,
+    },
+    { group: 'command', forceNewGroup: true },
+  )
+  lastMarkdownSelection = { start: selectionStart, end: selectionEnd }
+  updateAutoTitleFromMarkdown(nextContent)
   scheduleAutoSave(localMarkdown.value)
   markdownSelectionVersion.value += 1
 

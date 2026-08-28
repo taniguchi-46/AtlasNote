@@ -7,7 +7,8 @@
       @unlocked="handleStorageSpaceUnlocked"
     />
     <template v-else>
-    <AppTopBar 
+    <AppTopBar
+      ref="appTopBarRef"
       :is-always-on-top="isAlwaysOnTop"
       @sync="handleSync"
       @search="handleSearch"
@@ -65,7 +66,7 @@
     >
       <AppSidebar />
       <NoteList />
-      <NoteEditor />
+      <NoteEditor ref="noteEditorRef" />
 
       <button
         class="pane-resizer"
@@ -156,6 +157,10 @@ import { logOperationFailure } from './utils/operationLogger'
 import { createContentLockAutoLock } from './utils/contentLockAutoLock'
 import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
 import {
+  findMatchingShortcutAction,
+  type ShortcutActionId,
+} from './utils/keyboardShortcuts'
+import {
   EDITOR_WIDTH_MIN,
   NOTE_LIST_WIDTH_MAX,
   NOTE_LIST_WIDTH_MIN,
@@ -165,6 +170,11 @@ import {
 } from './stores/useSettingsStore'
 
 type ResizablePane = 'sidebar' | 'noteList'
+type AppTopBarExpose = { focusSearch: () => void }
+type NoteEditorExpose = {
+  toggleAIWorkspace: () => void
+  toggleEditMode: () => void
+}
 
 const noteStore = useNoteStore()
 const appStore = useAppStore()
@@ -214,6 +224,8 @@ const isRecoveryBusy = ref(false)
 const recoveryError = ref('')
 const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true')
 const appShellRef = ref<HTMLElement | null>(null)
+const appTopBarRef = ref<AppTopBarExpose | null>(null)
+const noteEditorRef = ref<NoteEditorExpose | null>(null)
 const activeResize = ref<ResizablePane | null>(null)
 let resizeObserver: ResizeObserver | null = null
 let cancelBeforeCloseListener: (() => void) | null = null
@@ -303,6 +315,63 @@ async function handleToggleAlwaysOnTop() {
 
 function handleOpenSettings() {
   settingsStore.openSettings()
+}
+
+function executeGlobalShortcut(actionId: ShortcutActionId) {
+  switch (actionId) {
+    case 'note.new':
+      void handleNewNote()
+      return true
+    case 'search.focus':
+      if (!appTopBarRef.value) return false
+      appTopBarRef.value.focusSearch()
+      return true
+    case 'settings.open':
+      handleOpenSettings()
+      return true
+    case 'sync.run':
+      void handleSync()
+      return true
+    case 'note.import':
+      handleOpenNoteImport()
+      return true
+    case 'window.toggleAlwaysOnTop':
+      void handleToggleAlwaysOnTop()
+      return true
+    case 'theme.toggle':
+      appStore.toggleTheme()
+      return true
+    case 'editor.toggleMode':
+      if (!noteStore.activeNote || !noteEditorRef.value) return false
+      noteEditorRef.value.toggleEditMode()
+      return true
+    case 'ai.toggleWorkspace':
+      if (!noteStore.activeNote || !noteEditorRef.value) return false
+      noteEditorRef.value.toggleAIWorkspace()
+      return true
+    case 'editor.undo':
+    case 'editor.redo':
+      return false
+  }
+}
+
+function handleGlobalShortcut(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.repeat || event.isComposing) return
+  if (event.getModifierState('AltGraph')) return
+  if (startupStatus.value?.locked || (startupStatus.value && !startupStatus.value.ready)) return
+  if (settingsStore.isSettingsOpen || isNoteImportOpen.value || contentLockStore.accessRequest) return
+
+  const target = event.target
+  if (
+    target instanceof Element
+    && target.closest('[data-shortcut-capture], [role="dialog"], [role="menu"], [role="listbox"]')
+  ) return
+
+  const actionId = findMatchingShortcutAction(event, settingsStore.shortcutBindings, 'app')
+  if (!actionId || !executeGlobalShortcut(actionId)) return
+
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 watch(
@@ -622,6 +691,7 @@ function handleResizerKeydown(pane: ResizablePane, event: KeyboardEvent) {
 onMounted(async () => {
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('focus', checkContentLockAutoLock)
+  window.addEventListener('keydown', handleGlobalShortcut, true)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   try {
     cancelBeforeCloseListener = EventsOn('app:before-close', () => {
@@ -665,6 +735,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('focus', checkContentLockAutoLock)
+  window.removeEventListener('keydown', handleGlobalShortcut, true)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()

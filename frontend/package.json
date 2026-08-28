@@ -35,6 +35,7 @@
     "test:serializer": "node scripts/test-serializer.mjs",
     "test:table-copy": "node scripts/test-table-copy.mjs",
     "test:markdown-safety": "node scripts/test-markdown-safety.mjs",
+    "test:shortcuts": "node scripts/test-keyboard-shortcuts.mjs && node scripts/test-markdown-edit-history.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

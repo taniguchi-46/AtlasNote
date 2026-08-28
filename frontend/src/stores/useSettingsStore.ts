@@ -1,12 +1,30 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
+import {
+  SHORTCUT_STORAGE_KEY,
+  createDefaultShortcutBindings,
+  getShortcutActionDefinition,
+  parseStoredShortcutBindings,
+  serializeShortcutBindings,
+  validateShortcutBinding,
+  type ShortcutActionId,
+  type ShortcutBinding,
+} from '../utils/keyboardShortcuts'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 export type AIWorkspacePlacement = 'right' | 'bottom'
 export type AIAgentEditPermission = 'review-required' | 'auto-update'
 export type ContentLockAutoLockMinutes = 0 | 1 | 5 | 15 | 30 | 60
-export type SettingsTab = 'theme' | 'general' | 'editor' | 'sync' | 'ai' | 'storage-spaces' | 'locks'
+export type SettingsTab =
+  | 'theme'
+  | 'general'
+  | 'editor'
+  | 'shortcuts'
+  | 'sync'
+  | 'ai'
+  | 'storage-spaces'
+  | 'locks'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360
@@ -105,6 +123,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultNotebookIcon = ref(
     isKnownNotebookIcon(savedDefaultNotebookIcon) ? savedDefaultNotebookIcon : DEFAULT_NOTEBOOK_ICON,
   )
+  const shortcutBindings = ref(
+    parseStoredShortcutBindings(localStorage.getItem(SHORTCUT_STORAGE_KEY)),
+  )
 
   watch(sidebarWidth, (newSidebarWidth) => {
     localStorage.setItem('atlas-sidebar-width', String(newSidebarWidth))
@@ -174,6 +195,10 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     localStorage.setItem('atlas-default-notebook-icon', icon)
   }, { immediate: true })
+
+  watch(shortcutBindings, (newShortcutBindings) => {
+    localStorage.setItem(SHORTCUT_STORAGE_KEY, serializeShortcutBindings(newShortcutBindings))
+  }, { deep: true, immediate: true })
   
   function openSettings(tab?: SettingsTab) {
     if (tab) requestedTab.value = tab
@@ -206,6 +231,26 @@ export const useSettingsStore = defineStore('settings', () => {
     )
   }
 
+  function setShortcutBinding(actionId: ShortcutActionId, binding: ShortcutBinding | null) {
+    const validation = validateShortcutBinding(actionId, binding, shortcutBindings.value)
+    if (!validation.ok) return validation
+
+    shortcutBindings.value = {
+      ...shortcutBindings.value,
+      [actionId]: validation.binding ? { ...validation.binding } : null,
+    }
+    return validation
+  }
+
+  function resetShortcutBinding(actionId: ShortcutActionId) {
+    const defaultBinding = getShortcutActionDefinition(actionId)?.defaultBinding ?? null
+    return setShortcutBinding(actionId, defaultBinding)
+  }
+
+  function resetAllShortcutBindings() {
+    shortcutBindings.value = createDefaultShortcutBindings()
+  }
+
   return {
     isSettingsOpen,
     requestedTab,
@@ -223,11 +268,15 @@ export const useSettingsStore = defineStore('settings', () => {
     editorLineHeight,
     editorParagraphSpacing,
     defaultNotebookIcon,
+    shortcutBindings,
     openSettings,
     closeSettings,
     setSidebarWidth,
     setNoteListWidth,
     setAIWorkspaceRightWidth,
     setAIWorkspaceBottomHeight,
+    setShortcutBinding,
+    resetShortcutBinding,
+    resetAllShortcutBindings,
   }
 })

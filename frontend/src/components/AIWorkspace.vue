@@ -1146,7 +1146,7 @@ async function applyAgentProposal(entryID: string) {
   ) return
 
   if (!window.confirm(
-    `次のAgent変更提案を本文へ適用します。\n\n対象: ${proposal.targetTitle || '無題のノート'}\nrevision: ${proposal.baseRevision}\n変更箇所: 本文\n\n通常のノート保存およびWebDAV同期の対象になります。適用後は元に戻す操作で取り消してください。`,
+    `次のAgent変更提案を本文へ適用します。\n\n対象: ${proposal.targetTitle || '無題のノート'}\nrevision: ${proposal.baseRevision}\n変更箇所: 本文\n\n通常のノート保存およびWebDAV同期の対象になります。通常のノート編集の「元に戻す」対象にはなりません。変更前後はAIタイムラインで確認できます。`,
   )) return
 
   await persistAgentProposal(entryID)
