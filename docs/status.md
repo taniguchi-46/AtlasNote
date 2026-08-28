@@ -36,6 +36,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - schema version 6の`tags` / `note_tags` migration、Unicode正規化・case-foldによる同名防止、外部キーCASCADE
 - schema version 7の`note_links` / `note_link_state` migration、target/source逆引きINDEX、外部キーCASCADE
 - schema version 8〜10の同期状態・outbox・conflict・HTTP許可・同期間隔・フェイルセーフ・TLS・proxy設定migration
+- schema version 16で、旧版のノートブック削除時に残った存在しない`notebook_id`参照を起動時に安全に切り離し、ゴミ箱操作・コンテンツロック状態取得・削除時の同期payloadを整合
 - Atlas Note固有のformat/head/manifest/object、strong ETag、tombstone、durable outboxによるWebDAV同期
 - 単一WebDAV URL、同期間隔、読み取り専用設定確認、Apply/OK/戻るdraft方式の同期設定UI
 - HTTPS既定・明示的HTTP許可、custom root CA、明示的TLS error ignore、HTTP/HTTPS proxy、redirect拒否

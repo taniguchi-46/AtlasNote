@@ -436,7 +436,8 @@ WITH RECURSIVE notebook_tree(id) AS (
 	INNER JOIN notebook_tree ON notebooks.parent_id = notebook_tree.id
 )
 UPDATE notes
-SET is_trashed = 1,
+SET notebook_id = NULL,
+	is_trashed = 1,
 	revision = revision + 1,
 	updated_at = ?
 WHERE notebook_id IN (SELECT id FROM notebook_tree)

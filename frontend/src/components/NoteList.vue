@@ -1020,6 +1020,8 @@ function formatDate(iso: string): string {
 }
 
 .note-item-actions {
+  position: static;
+  transform: none;
   display: flex;
   align-items: stretch;
   flex: 0 0 auto;

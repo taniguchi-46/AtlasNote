@@ -232,6 +232,10 @@ func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookD
 				// the plaintext sync outbox.
 				continue
 			}
+			// The notebook is deleted in the same transaction below. Keep the
+			// sync payload consistent with the detached metadata, including on
+			// databases whose legacy foreign key did not clear the reference.
+			record.NotebookID = nil
 			content, readErr := s.store.Read(ctx, record.ID)
 			if readErr != nil {
 				return fmt.Errorf("read notebook note %s for sync: %w", record.ID, readErr)

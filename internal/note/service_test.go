@@ -2,6 +2,7 @@ package note_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
+	syncservice "atlasnote/internal/sync"
 )
 
 func ptr[T any](v T) *T {
@@ -657,6 +659,89 @@ func TestServiceDeleteNotebookWithNotesTrashedDeletesChildNotebooks(t *testing.T
 		if summary.NotebookID != nil {
 			t.Fatalf("expected trashed note %s notebook id to be cleared, got %v", id, *summary.NotebookID)
 		}
+	}
+}
+
+func TestServiceDeleteNotebookWithNotesTrashedClearsLegacyReferencesAndSyncPayload(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(tempDir, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := storage.NewMarkdownStore(filepath.Join(tempDir, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+	repository := note.NewRepository(db)
+	repository.SetSyncChangeRecorder(syncservice.NewRepository(db))
+	service := note.NewService(repository, store)
+
+	notebook, err := service.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Legacy"})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+	created, err := service.Create(ctx, note.CreateInput{
+		NotebookID: ptr(notebook.ID),
+		Title:      "Legacy note",
+		Content:    "Legacy content",
+	})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+
+	// Legacy databases did not enforce the notes -> notebooks foreign key.
+	// Keep that behavior for this regression test so SQLite cannot mask the
+	// repository's explicit detachment.
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatalf("disable foreign key enforcement for legacy fixture: %v", err)
+	}
+	var foreignKeys int
+	if err := db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		t.Fatalf("read foreign key setting: %v", err)
+	}
+	if foreignKeys != 0 {
+		t.Fatalf("foreign key enforcement = %d, want 0", foreignKeys)
+	}
+
+	if err := service.DeleteNotebook(ctx, notebook.ID, note.NotebookDeleteInput{
+		Mode: note.NotebookDeleteModeTrashNotes,
+	}); err != nil {
+		t.Fatalf("delete notebook with legacy foreign key behavior: %v", err)
+	}
+
+	trashed, err := service.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get trashed note: %v", err)
+	}
+	if !trashed.IsTrashed || trashed.Revision != created.Revision+1 || trashed.NotebookID != nil {
+		t.Fatalf("trashed legacy note = %#v", trashed)
+	}
+
+	var objectJSON string
+	if err := db.QueryRowContext(ctx, `
+SELECT object_json
+FROM sync_outbox
+WHERE entity_key = ?
+`, note.SyncEntityKey(note.SyncEntityNote, created.ID)).Scan(&objectJSON); err != nil {
+		t.Fatalf("read trashed note sync payload: %v", err)
+	}
+	var object struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(objectJSON), &object); err != nil {
+		t.Fatalf("decode trashed note sync object: %v", err)
+	}
+	var payload note.SyncNotePayload
+	if err := json.Unmarshal(object.Payload, &payload); err != nil {
+		t.Fatalf("decode trashed note sync payload: %v", err)
+	}
+	if payload.NotebookID != nil {
+		t.Fatalf("trashed note sync notebook id = %q, want null", *payload.NotebookID)
 	}
 }
 

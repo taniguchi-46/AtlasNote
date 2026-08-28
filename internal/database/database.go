@@ -468,6 +468,19 @@ CREATE TABLE IF NOT EXISTS content_lock_operation_notes (
 CREATE INDEX IF NOT EXISTS idx_content_lock_operation_notes_note
 	ON content_lock_operation_notes(note_id);
 	`,
+	`
+-- Notebook deletion in older databases could leave notes pointing at
+-- a notebook that no longer exists. Clear only those invalid references so
+-- note metadata and content remain unchanged.
+UPDATE notes
+SET notebook_id = NULL
+WHERE notebook_id IS NOT NULL
+	AND NOT EXISTS (
+		SELECT 1
+		FROM notebooks
+		WHERE notebooks.id = notes.notebook_id
+	);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {

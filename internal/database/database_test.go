@@ -113,6 +113,86 @@ func TestOpenCreatesStorageOperationMigration(t *testing.T) {
 	}
 }
 
+func TestOpenRepairsOrphanedNoteNotebookReferences(t *testing.T) {
+	t.Parallel()
+
+	databasePath := filepath.Join(t.TempDir(), "atlasnote.db")
+	legacyDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	for index, migration := range migrations[:len(migrations)-1] {
+		if _, err := legacyDB.Exec(migration); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("apply legacy migration %d: %v", index+1, err)
+		}
+	}
+	if _, err := legacyDB.Exec("PRAGMA user_version = 15"); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("set legacy schema version: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+INSERT INTO notebooks (id, name, icon, created_at, updated_at)
+VALUES
+	('valid-notebook', 'Valid', 'default:note', '2026-08-28T00:00:00Z', '2026-08-28T00:00:00Z');
+INSERT INTO notes (
+	id, notebook_id, title, content_path, is_favorite, is_pinned, is_trashed,
+	revision, created_at, updated_at
+)
+VALUES
+	('orphan-note', 'deleted-notebook', 'Orphan', 'orphan-note.md', 0, 0, 1,
+	7, '2026-08-28T00:01:00Z', '2026-08-28T00:02:00Z'),
+	('valid-note', 'valid-notebook', 'Valid note', 'valid-note.md', 1, 0, 0,
+	3, '2026-08-28T00:03:00Z', '2026-08-28T00:04:00Z');
+`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy orphan fixture: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(t.Context(), databasePath)
+	if err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	var orphanNotebookID sql.NullString
+	var orphanTitle string
+	var orphanRevision int64
+	var orphanUpdatedAt string
+	if err := db.QueryRowContext(t.Context(), `
+SELECT notebook_id, title, revision, updated_at
+FROM notes
+WHERE id = 'orphan-note'
+`).Scan(&orphanNotebookID, &orphanTitle, &orphanRevision, &orphanUpdatedAt); err != nil {
+		t.Fatalf("read repaired orphan note: %v", err)
+	}
+	if orphanNotebookID.Valid {
+		t.Fatalf("orphan notebook id = %q, want NULL", orphanNotebookID.String)
+	}
+	if orphanTitle != "Orphan" || orphanRevision != 7 || orphanUpdatedAt != "2026-08-28T00:02:00Z" {
+		t.Fatalf("repaired orphan metadata = title:%q revision:%d updated_at:%q", orphanTitle, orphanRevision, orphanUpdatedAt)
+	}
+
+	var validNotebookID string
+	if err := db.QueryRowContext(t.Context(), "SELECT notebook_id FROM notes WHERE id = 'valid-note'").Scan(&validNotebookID); err != nil {
+		t.Fatalf("read valid note reference: %v", err)
+	}
+	if validNotebookID != "valid-notebook" {
+		t.Fatalf("valid notebook id = %q, want %q", validNotebookID, "valid-notebook")
+	}
+
+	var userVersion int
+	if err := db.QueryRowContext(t.Context(), "PRAGMA user_version").Scan(&userVersion); err != nil {
+		t.Fatalf("read migrated user version: %v", err)
+	}
+	if userVersion != len(migrations) {
+		t.Fatalf("migrated user version = %d, want %d", userVersion, len(migrations))
+	}
+}
+
 func TestAIV3SourceReferencesSurvivePermanentNoteDeletion(t *testing.T) {
 	t.Parallel()
 

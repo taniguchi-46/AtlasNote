@@ -29,5 +29,6 @@ assert.match(noteListSource, /async function deleteNoteFromList/, 'each note row
 assert.match(noteListSource, /class="note-item-delete-button"/)
 assert.match(noteListSource, /noteStore\.trashNotes\(\[item\.id\]\)/, 'normal notes must move to trash from the direct action')
 assert.match(noteListSource, /noteStore\.permanentlyDeleteNotes\(\[item\.id\]\)/, 'trash items must use the existing permanent-delete path')
+assert.match(noteListSource, /\.note-item-actions \{[\s\S]*?position: static;[\s\S]*?transform: none;/, 'note actions must stay in the row flow so long titles reserve their width')
 
 console.log('note list view tests passed')

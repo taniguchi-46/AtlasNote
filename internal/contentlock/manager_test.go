@@ -153,6 +153,91 @@ func TestNoteLockStatusPersistsAcrossManagerSessions(t *testing.T) {
 	}
 }
 
+func TestMigratedOrphanedTrashedNoteSupportsLockStatusAndDeletion(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "atlasnote.db")
+	store, err := storage.NewMarkdownStore(filepath.Join(root, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+
+	legacyDB, err := database.Open(ctx, databasePath)
+	if err != nil {
+		t.Fatalf("open database for legacy fixture: %v", err)
+	}
+	legacyNotes := note.NewService(note.NewRepository(legacyDB), store)
+	notebook, err := legacyNotes.CreateNotebook(ctx, note.NotebookCreateInput{Name: "削除済み"})
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create notebook: %v", err)
+	}
+	created, err := legacyNotes.Create(ctx, note.CreateInput{
+		NotebookID: &notebook.ID,
+		Title:      "ゴミ箱ノート",
+		Content:    "本文",
+	})
+	if err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create note: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close database before legacy mutation: %v", err)
+	}
+
+	// Reproduce the legacy deletion result: the notebook row disappears while
+	// the note retains its old reference.
+	legacyFileDB, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatalf("open legacy file database: %v", err)
+	}
+	if _, err := legacyFileDB.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		_ = legacyFileDB.Close()
+		t.Fatalf("disable legacy foreign keys: %v", err)
+	}
+	if _, err := legacyFileDB.ExecContext(ctx, "DELETE FROM notebooks WHERE id = ?", notebook.ID); err != nil {
+		_ = legacyFileDB.Close()
+		t.Fatalf("delete legacy notebook: %v", err)
+	}
+	var legacyNotebookID string
+	if err := legacyFileDB.QueryRowContext(ctx, "SELECT notebook_id FROM notes WHERE id = ?", created.ID).Scan(&legacyNotebookID); err != nil {
+		_ = legacyFileDB.Close()
+		t.Fatalf("read legacy orphan reference: %v", err)
+	}
+	if legacyNotebookID != notebook.ID {
+		_ = legacyFileDB.Close()
+		t.Fatalf("legacy notebook id = %q, want %q", legacyNotebookID, notebook.ID)
+	}
+	if _, err := legacyFileDB.ExecContext(ctx, "PRAGMA user_version = 15"); err != nil {
+		_ = legacyFileDB.Close()
+		t.Fatalf("set legacy schema version: %v", err)
+	}
+	if err := legacyFileDB.Close(); err != nil {
+		t.Fatalf("close legacy file database: %v", err)
+	}
+
+	migratedDB, err := database.Open(ctx, databasePath)
+	if err != nil {
+		t.Fatalf("migrate orphaned note database: %v", err)
+	}
+	t.Cleanup(func() { _ = migratedDB.Close() })
+	manager := contentlock.NewManager(migratedDB, store)
+	t.Cleanup(manager.Close)
+	service := note.NewService(note.NewRepository(migratedDB), store)
+	service.SetContentLockGuard(manager)
+
+	status, err := manager.GetTargetStatus(ctx, contentlock.Target{Type: contentlock.TargetNote, ID: created.ID})
+	if err != nil {
+		t.Fatalf("get migrated orphan note lock status: %v", err)
+	}
+	if status.Protected || status.Locked || status.ExplicitLock || status.Source != "" {
+		t.Fatalf("migrated orphan note lock status = %#v", status)
+	}
+	if err := service.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: created.Revision}); err != nil {
+		t.Fatalf("delete migrated orphan note: %v", err)
+	}
+}
+
 func TestAIContentAccessBlocksLockConversion(t *testing.T) {
 	ctx := context.Background()
 	manager, notes, _ := newLockFixture(t)

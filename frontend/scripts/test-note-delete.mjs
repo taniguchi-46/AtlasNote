@@ -62,12 +62,13 @@ async function testDirectDeleteUsesExistingDeletionFlows() {
 
 async function testAllDeletesSucceed() {
   const calls = []
-  const deletedIds = await deleteNotesSequentially(['a', 'b'], async (id) => {
+  const ids = Array.from({ length: 68 }, (_, index) => `note-${index}`)
+  const deletedIds = await deleteNotesSequentially(ids, async (id) => {
     calls.push(id)
   })
 
-  assert.deepEqual(calls, ['a', 'b'])
-  assert.deepEqual(deletedIds, ['a', 'b'])
+  assert.deepEqual(calls, ids)
+  assert.deepEqual(deletedIds, ids)
 }
 
 async function testFailureReportsOnlyCompletedDeletes() {
