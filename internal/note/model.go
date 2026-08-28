@@ -334,3 +334,20 @@ type NotebookUpdateInput struct {
 type NotebookDeleteInput struct {
 	Mode string `json:"mode"`
 }
+
+type NotebookDeleteError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
+}
+
+const (
+	NotebookDeleteErrorLocked        = "NOTEBOOK_DELETE_LOCKED"
+	NotebookDeleteErrorLockedScope   = "NOTEBOOK_DELETE_LOCKED_SCOPE"
+	NotebookDeleteErrorKeepNotesLock = "NOTEBOOK_DELETE_KEEP_NOTES_LOCKED"
+)
+
+type NotebookDeleteResult struct {
+	Deleted bool                 `json:"deleted"`
+	Error   *NotebookDeleteError `json:"error,omitempty"`
+}

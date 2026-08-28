@@ -628,6 +628,27 @@ func TestProtectedNotebookTrashDoesNotCreatePlaintextNoteSyncChange(t *testing.T
 	}
 }
 
+func TestExplicitNotebookDeletionReportsLockedScope(t *testing.T) {
+	ctx := context.Background()
+	manager, notes, _ := newLockFixture(t)
+	notebook, err := notes.CreateNotebook(ctx, note.NotebookCreateInput{Name: "削除禁止"})
+	if err != nil {
+		t.Fatalf("create notebook: %v", err)
+	}
+	if _, _, err := manager.Enable(ctx, contentlock.EnableInput{
+		TargetType: contentlock.TargetNotebook,
+		TargetID:   notebook.ID,
+		Passphrase: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("enable notebook lock: %v", err)
+	}
+
+	err = notes.DeleteNotebook(ctx, notebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeTrashNotes})
+	if !errors.Is(err, contentlock.ErrNotebookDeletionLockedScope) || !errors.Is(err, contentlock.ErrValidation) {
+		t.Fatalf("explicitly locked notebook deletion error = %v, want locked-scope and validation errors", err)
+	}
+}
+
 func TestKeepNotesNotebookDeletionIsRejectedWhenAnyLockExists(t *testing.T) {
 	ctx := context.Background()
 	manager, notes, _ := newLockFixture(t)
@@ -644,8 +665,9 @@ func TestKeepNotesNotebookDeletionIsRejectedWhenAnyLockExists(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enable space lock: %v", err)
 	}
-	if err := notes.DeleteNotebook(ctx, notebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeKeepNotes}); !errors.Is(err, note.ErrValidation) {
-		t.Fatalf("keep notes deletion error = %v, want note.ErrValidation", err)
+	err = notes.DeleteNotebook(ctx, notebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeKeepNotes})
+	if !errors.Is(err, note.ErrNotebookKeepNotesLocked) || !errors.Is(err, note.ErrValidation) {
+		t.Fatalf("keep notes deletion error = %v, want keep-notes lock and validation errors", err)
 	}
 }
 

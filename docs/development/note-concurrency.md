@@ -105,7 +105,8 @@ WHERE id = ? AND revision = ?;
 - 競合応答へ本文、タイトル、ファイルパス、内部スタックを含めない。
 - Wails v2のPromise rejectionはGo errorの文字列を返すため、エラーメッセージの部分一致を恒久契約にしない。
 - revision conflictはGo errorへ変換せず、更新APIでは `UpdateNoteResult`、削除APIでは `DeleteNoteResult` の構造化結果として返す。
-- 構造化結果は成功データまたは `RevisionConflict` のどちらか一方だけを持つ。DB障害、ファイルI/O失敗、入力不正、not foundは従来どおりGo errorとしてPromiseをrejectする。
+- ノートブック削除のコンテンツロックによる拒否も `NotebookDeleteResult` の構造化エラーとして返し、フロントエンドは理由コードに応じた案内を表示する。
+- 構造化結果は各APIの成功データまたは定義済みエラー情報のどちらか一方だけを持つ。DB障害、ファイルI/O失敗、入力不正、not foundは従来どおりGo errorとしてPromiseをrejectする。
 - フロントエンドAPI clientは構造化結果を共通のdomain errorへ変換し、StoreやComponentがWails固有形式へ依存しないようにする。
 
 診断ログは本文・タイトル・検索語・元のErrorオブジェクトを記録せず、operation ID（取得できる場合）、note ID、処理段階、エラー分類だけを記録する。

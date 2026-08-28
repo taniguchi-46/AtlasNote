@@ -335,7 +335,7 @@ func (m *Manager) AssertNotebookDeletion(ctx context.Context, notebookID string)
 		return err
 	}
 	if locked {
-		return ErrValidation
+		return fmt.Errorf("%w: %w", ErrNotebookDeletionLockedScope, ErrValidation)
 	}
 	return nil
 }

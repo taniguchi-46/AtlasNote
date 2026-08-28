@@ -20,6 +20,27 @@ export function updateNotebook(id: string, input: note.NotebookUpdateInput): Pro
 	return UpdateNotebook(id, input)
 }
 
-export function deleteNotebook(id: string, mode: NotebookDeleteMode): Promise<void> {
-	return DeleteNotebook(id, { mode })
+type DeleteNotebookMethod = (
+	id: string,
+	input: note.NotebookDeleteInput,
+) => Promise<note.NotebookDeleteResult>
+
+const deleteNotebookRPC = DeleteNotebook as unknown as DeleteNotebookMethod
+
+export class NotebookDeleteApiError extends Error {
+	readonly code: string
+	readonly retryable: boolean
+
+	constructor(error: note.NotebookDeleteError) {
+		super(error.message)
+		this.name = 'NotebookDeleteApiError'
+		this.code = error.code
+		this.retryable = error.retryable
+	}
+}
+
+export async function deleteNotebook(id: string, mode: NotebookDeleteMode): Promise<void> {
+	const result = await deleteNotebookRPC(id, { mode })
+	if (result.error) throw new NotebookDeleteApiError(result.error)
+	if (!result.deleted) throw new Error('ノートブック削除APIから結果が返されませんでした')
 }

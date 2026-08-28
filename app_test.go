@@ -1783,6 +1783,64 @@ func TestAppListsRequiredContentLocksAndBatchLocks(t *testing.T) {
 	}
 }
 
+func TestAppDeleteNotebookReturnsContentLockReason(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+
+	lockedNotebook, err := app.CreateNotebook(note.NotebookCreateInput{Name: "削除禁止"})
+	if err != nil {
+		t.Fatalf("create locked notebook: %v", err)
+	}
+	if result := app.EnableContentLock(contentlock.EnableInput{
+		TargetType: contentlock.TargetNotebook,
+		TargetID:   lockedNotebook.ID,
+		Passphrase: "correct horse battery staple",
+	}); result.Error != nil || !result.Unlocked {
+		t.Fatalf("enable notebook lock = %#v", result)
+	}
+
+	result, err := app.DeleteNotebook(lockedNotebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeTrashNotes})
+	if err != nil {
+		t.Fatalf("delete explicitly locked notebook returned system error: %v", err)
+	}
+	if result.Deleted || result.Error == nil || result.Error.Code != note.NotebookDeleteErrorLockedScope || result.Error.Retryable {
+		t.Fatalf("explicitly locked notebook delete result = %#v", result)
+	}
+
+	if locked := app.LockContentNow(contentlock.Target{Type: contentlock.TargetNotebook, ID: lockedNotebook.ID}); locked.Error != nil {
+		t.Fatalf("lock notebook: %#v", locked)
+	}
+	result, err = app.DeleteNotebook(lockedNotebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeTrashNotes})
+	if err != nil {
+		t.Fatalf("delete locked notebook returned system error: %v", err)
+	}
+	if result.Deleted || result.Error == nil || result.Error.Code != note.NotebookDeleteErrorLocked || result.Error.Retryable {
+		t.Fatalf("locked notebook delete result = %#v", result)
+	}
+
+	otherNotebook, err := app.CreateNotebook(note.NotebookCreateInput{Name: "別のノートブック"})
+	if err != nil {
+		t.Fatalf("create unrelated notebook: %v", err)
+	}
+	result, err = app.DeleteNotebook(otherNotebook.ID, note.NotebookDeleteInput{Mode: note.NotebookDeleteModeKeepNotes})
+	if err != nil {
+		t.Fatalf("keep-notes deletion returned system error: %v", err)
+	}
+	if result.Deleted || result.Error == nil || result.Error.Code != note.NotebookDeleteErrorKeepNotesLock || result.Error.Retryable {
+		t.Fatalf("keep-notes deletion result = %#v", result)
+	}
+	notebooks, err := app.ListNotebooks()
+	if err != nil {
+		t.Fatalf("list notebooks after rejected deletes: %v", err)
+	}
+	if len(notebooks) != 2 {
+		t.Fatalf("rejected notebook deletes changed notebook count to %d", len(notebooks))
+	}
+}
+
 func TestAppDisablesSyncWhenContentLocksExist(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)

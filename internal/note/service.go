@@ -25,6 +25,8 @@ var (
 	ErrRevisionConflict = errors.New("note revision conflict")
 )
 
+var ErrNotebookKeepNotesLocked = errors.New("keeping notes is blocked while content locks are configured")
+
 type Service struct {
 	repository          *Repository
 	store               markdownStore

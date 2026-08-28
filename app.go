@@ -438,11 +438,44 @@ func (a *App) UpdateNotebook(id string, input note.NotebookUpdateInput) (note.No
 	return a.notes.UpdateNotebook(a.ctx, id, input)
 }
 
-func (a *App) DeleteNotebook(id string, input note.NotebookDeleteInput) error {
+func (a *App) DeleteNotebook(id string, input note.NotebookDeleteInput) (note.NotebookDeleteResult, error) {
 	if a.notes == nil {
-		return errors.New("note service is not initialized")
+		return note.NotebookDeleteResult{}, errors.New("note service is not initialized")
 	}
-	return a.notes.DeleteNotebook(a.ctx, id, input)
+	if err := a.notes.DeleteNotebook(a.ctx, id, input); err != nil {
+		if result := notebookDeleteResultForError(err); result != nil {
+			return *result, nil
+		}
+		return note.NotebookDeleteResult{}, err
+	}
+	return note.NotebookDeleteResult{Deleted: true}, nil
+}
+
+func notebookDeleteResultForError(err error) *note.NotebookDeleteResult {
+	var deleteError *note.NotebookDeleteError
+	switch {
+	case errors.Is(err, contentlock.ErrLocked):
+		deleteError = &note.NotebookDeleteError{
+			Code:      note.NotebookDeleteErrorLocked,
+			Message:   "ロック中のノートブックは削除できません。ロックを解除してから再試行してください。",
+			Retryable: false,
+		}
+	case errors.Is(err, contentlock.ErrNotebookDeletionLockedScope):
+		deleteError = &note.NotebookDeleteError{
+			Code:      note.NotebookDeleteErrorLockedScope,
+			Message:   "明示的なロックが設定されたノートブックまたは配下は削除できません。先にロックを無効化してください。",
+			Retryable: false,
+		}
+	case errors.Is(err, note.ErrNotebookKeepNotesLocked):
+		deleteError = &note.NotebookDeleteError{
+			Code:      note.NotebookDeleteErrorKeepNotesLock,
+			Message:   "ロックが設定されている間は、ノートを残してノートブックを削除できません。ノートをゴミ箱に移動するか、すべてのロックを無効化してください。",
+			Retryable: false,
+		}
+	default:
+		return nil
+	}
+	return &note.NotebookDeleteResult{Error: deleteError}
 }
 
 func (a *App) ListTags() ([]note.Tag, error) {

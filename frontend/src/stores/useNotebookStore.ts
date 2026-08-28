@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { note } from '../../wailsjs/go/models'
-import { listNotebooks, createNotebook, updateNotebook, deleteNotebook, type NotebookDeleteMode } from '../api/notebooks'
+import {
+	listNotebooks,
+	createNotebook,
+	updateNotebook,
+	deleteNotebook,
+	NotebookDeleteApiError,
+	type NotebookDeleteMode,
+} from '../api/notebooks'
 import { DEFAULT_NOTEBOOK_ICON } from '../utils/notebookIcons'
 import { wouldCreateNotebookCycle } from '../utils/notebookHierarchy'
 import { useNoteStore } from './useNoteStore'
@@ -207,11 +214,14 @@ export const useNotebookStore = defineStore('notebooks', () => {
 			}
 			await useNoteStore().fetchNotes()
 		} catch (e) {
+			const deleteError = e instanceof NotebookDeleteApiError ? e : null
 			setErrorContext({
-				code: 'NOTEBOOK_DELETE_FAILED',
-				action: { label: '再試行', run: () => removeNotebook(id, mode) },
+				code: deleteError?.code ?? 'NOTEBOOK_DELETE_FAILED',
+				action: deleteError?.retryable === false
+					? undefined
+					: { label: '再試行', run: () => removeNotebook(id, mode) },
 			})
-			error.value = e instanceof Error ? e.message : 'ノートブックの削除に失敗しました'
+			error.value = deleteError?.message ?? (e instanceof Error ? e.message : 'ノートブックの削除に失敗しました')
 			throw e
 		}
 	}

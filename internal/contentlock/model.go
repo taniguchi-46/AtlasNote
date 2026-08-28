@@ -40,6 +40,12 @@ var (
 	ErrIntegrity                = errors.New("protected content integrity check failed")
 )
 
+// ErrNotebookDeletionLockedScope distinguishes an explicit lock in the
+// notebook subtree from generic validation failures. It still wraps
+// ErrValidation at the call site so existing service callers retain their
+// validation semantics.
+var ErrNotebookDeletionLockedScope = errors.New("notebook deletion is blocked by an explicit content lock")
+
 type Target struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`

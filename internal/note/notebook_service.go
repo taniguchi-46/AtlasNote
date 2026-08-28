@@ -198,7 +198,7 @@ func (s *Service) DeleteNotebook(ctx context.Context, id string, input NotebookD
 			// same dedicated multi-file re-encryption operation as hierarchy drag
 			// and drop before it can be supported safely.
 			if hasLocks {
-				return fmt.Errorf("%w: notebook hierarchy cannot be moved while content locks are configured", ErrValidation)
+				return fmt.Errorf("%w: %w: notebook hierarchy cannot be moved while content locks are configured", ErrNotebookKeepNotesLocked, ErrValidation)
 			}
 		}
 	}

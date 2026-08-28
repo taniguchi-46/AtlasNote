@@ -7,6 +7,7 @@ import ts from 'typescript'
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'notebookHierarchy.ts')
 const storePath = path.join(rootDir, 'src', 'stores', 'useNotebookStore.ts')
+const notebooksApiPath = path.join(rootDir, 'src', 'api', 'notebooks.ts')
 const treeItemPath = path.join(rootDir, 'src', 'components', 'NotebookTreeItem.vue')
 const sidebarPath = path.join(rootDir, 'src', 'components', 'AppSidebar.vue')
 const tagManagerPath = path.join(rootDir, 'src', 'components', 'TagManager.vue')
@@ -42,8 +43,9 @@ try {
   assert.equal(wouldCreateNotebookCycle(notebooks, 'parent', 'other-root'), false)
   assert.equal(wouldCreateNotebookCycle(notebooks, 'parent', null), false)
 
-  const [storeSource, treeItemSource, sidebarSource, tagManagerSource, styleSource] = await Promise.all([
+  const [storeSource, notebooksApiSource, treeItemSource, sidebarSource, tagManagerSource, styleSource] = await Promise.all([
     readFile(storePath, 'utf8'),
+    readFile(notebooksApiPath, 'utf8'),
     readFile(treeItemPath, 'utf8'),
     readFile(sidebarPath, 'utf8'),
     readFile(tagManagerPath, 'utf8'),
@@ -56,6 +58,10 @@ try {
   assert.match(storeSource, /useNotificationStore/)
   assert.match(storeSource, /NOTEBOOK_LIST_FAILED/)
   assert.match(storeSource, /NOTEBOOK_MOVE_INVALID/)
+  assert.match(storeSource, /NotebookDeleteApiError/)
+  assert.match(storeSource, /deleteError\?\.retryable === false/)
+  assert.match(notebooksApiSource, /class NotebookDeleteApiError extends Error/)
+  assert.match(notebooksApiSource, /ノートブック削除APIから結果が返されませんでした/)
   assert.match(storeSource, /run: \(\) => fetchNotebooks/)
   assert.match(storeSource, /draggedNotebookId/)
   assert.match(treeItemSource, /:draggable="!isEditing"/)
