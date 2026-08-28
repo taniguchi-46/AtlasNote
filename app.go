@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	aiservice "atlasnote/internal/ai"
+	backupservice "atlasnote/internal/backup"
 	"atlasnote/internal/config"
 	"atlasnote/internal/contentlock"
 	"atlasnote/internal/credential"
@@ -27,36 +28,38 @@ import (
 )
 
 type App struct {
-	ctx                context.Context
-	buildType          string
-	db                 *sql.DB
-	dataLock           *datalock.Lock
-	markdownStore      *storage.MarkdownStore
-	contentLocks       *contentlock.Manager
-	notes              *note.Service
-	noteExporter       *noteexport.Service
-	noteImporter       *noteimport.Service
-	syncService        *syncservice.Service
-	aiService          *aiservice.Service
-	spaceRegistry      *notespace.Registry
-	activeSpace        notespace.Space
-	dataDir            string
-	notesDir           string
-	startupErr         error
-	startupLocked      bool
-	recoveryReport     note.RecoveryReport
-	syncRecoveryBackup string
-	statusMu           sync.RWMutex
-	closeMu            sync.Mutex
-	closeRequested     bool
-	allowClose         bool
-	importMu           sync.Mutex
-	openImportFiles    func(context.Context, runtime.OpenDialogOptions) ([]string, error)
-	exportMu           sync.Mutex
-	saveExportFile     func(context.Context, runtime.SaveDialogOptions) (string, error)
-	restartExecutable  string
-	startProcess       func(string) error
-	quitApplication    func(context.Context)
+	ctx                         context.Context
+	buildType                   string
+	db                          *sql.DB
+	dataLock                    *datalock.Lock
+	markdownStore               *storage.MarkdownStore
+	contentLocks                *contentlock.Manager
+	notes                       *note.Service
+	noteExporter                *noteexport.Service
+	noteImporter                *noteimport.Service
+	syncService                 *syncservice.Service
+	aiService                   *aiservice.Service
+	backupService               *backupservice.Service
+	spaceRegistry               *notespace.Registry
+	activeSpace                 notespace.Space
+	dataDir                     string
+	notesDir                    string
+	startupErr                  error
+	startupLocked               bool
+	recoveryReport              note.RecoveryReport
+	syncRecoveryBackup          string
+	backupRestoreSafetyBackupID string
+	statusMu                    sync.RWMutex
+	closeMu                     sync.Mutex
+	closeRequested              bool
+	allowClose                  bool
+	importMu                    sync.Mutex
+	openImportFiles             func(context.Context, runtime.OpenDialogOptions) ([]string, error)
+	exportMu                    sync.Mutex
+	saveExportFile              func(context.Context, runtime.SaveDialogOptions) (string, error)
+	restartExecutable           string
+	startProcess                func(string) error
+	quitApplication             func(context.Context)
 }
 
 var (
@@ -65,15 +68,23 @@ var (
 	errProtectedContentSync   = errors.New("本文ロックが設定されている保存空間では同期できません。保護済み本文を同期する暗号化形式は未対応です")
 )
 
+func backupStartupError(err error) error {
+	if apiError := backupservice.APIErrorFrom(err); apiError != nil {
+		return errors.New(apiError.Message)
+	}
+	return errors.New("バックアップ復元の準備に失敗しました。")
+}
+
 type StartupStatus struct {
-	Ready              bool                    `json:"ready"`
-	Locked             bool                    `json:"locked"`
-	Degraded           bool                    `json:"degraded"`
-	Message            string                  `json:"message,omitempty"`
-	DataDir            string                  `json:"dataDir,omitempty"`
-	MissingNotes       []MissingNoteDiagnostic `json:"missingNotes"`
-	SyncRecoveryBackup string                  `json:"syncRecoveryBackup,omitempty"`
-	ActiveStorageSpace *notespace.Space        `json:"activeStorageSpace,omitempty"`
+	Ready                       bool                    `json:"ready"`
+	Locked                      bool                    `json:"locked"`
+	Degraded                    bool                    `json:"degraded"`
+	Message                     string                  `json:"message,omitempty"`
+	DataDir                     string                  `json:"dataDir,omitempty"`
+	MissingNotes                []MissingNoteDiagnostic `json:"missingNotes"`
+	SyncRecoveryBackup          string                  `json:"syncRecoveryBackup,omitempty"`
+	BackupRestoreSafetyBackupID string                  `json:"backupRestoreSafetyBackupId,omitempty"`
+	ActiveStorageSpace          *notespace.Space        `json:"activeStorageSpace,omitempty"`
 }
 
 type MissingNoteDiagnostic struct {
@@ -110,6 +121,10 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	if a.aiService != nil {
 		a.aiService.Shutdown()
+	}
+	if a.backupService != nil {
+		a.backupService.Shutdown()
+		a.backupService = nil
 	}
 	a.noteImporter = nil
 	a.noteExporter = nil
@@ -293,6 +308,81 @@ func (a *App) ExportNote(input noteexport.Input) (noteexport.Result, error) {
 	}
 	defer releaseExportAccess()
 	return a.noteExporter.Export(a.operationContext(), path, input)
+}
+
+// GetBackupStatus returns metadata needed by the frontend scheduler. Backup
+// settings themselves remain local UI preferences; the backend owns the
+// schedule's source of truth and never exposes filesystem paths.
+func (a *App) GetBackupStatus() backupservice.StatusResult {
+	if a.backupService == nil {
+		return backupservice.StatusResult{Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	result, err := a.backupService.Status(a.operationContext())
+	if err != nil {
+		return backupservice.StatusResult{Error: backupservice.APIErrorFrom(err)}
+	}
+	return result
+}
+
+func (a *App) ListBackups() backupservice.ListResult {
+	if a.backupService == nil {
+		return backupservice.ListResult{Backups: []backupservice.BackupSummary{}, Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	result, err := a.backupService.List(a.operationContext())
+	if err != nil {
+		return backupservice.ListResult{Backups: []backupservice.BackupSummary{}, Error: backupservice.APIErrorFrom(err)}
+	}
+	return result
+}
+
+func (a *App) CreateAutomaticBackup() backupservice.AutomaticResult {
+	if a.backupService == nil {
+		return backupservice.AutomaticResult{Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	a.statusMu.RLock()
+	degraded := len(a.recoveryReport.MissingNotes) > 0
+	a.statusMu.RUnlock()
+	if degraded {
+		return backupservice.AutomaticResult{Error: backupservice.APIErrorFrom(backupservice.ErrAutomaticDegraded)}
+	}
+	result, err := a.backupService.CreateAutomaticBackup(a.operationContext())
+	if err != nil {
+		return backupservice.AutomaticResult{Error: backupservice.APIErrorFrom(err)}
+	}
+	return result
+}
+
+func (a *App) PreviewBackupRestore(backupID string) backupservice.RestorePreviewResult {
+	if a.backupService == nil {
+		return backupservice.RestorePreviewResult{Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	preview, err := a.backupService.PreviewRestore(a.operationContext(), backupID)
+	if err != nil {
+		return backupservice.RestorePreviewResult{Error: backupservice.APIErrorFrom(err)}
+	}
+	return backupservice.RestorePreviewResult{Preview: &preview}
+}
+
+func (a *App) ExecuteBackupRestore(input backupservice.RestoreExecutionInput) backupservice.RestoreResult {
+	if a.backupService == nil {
+		return backupservice.RestoreResult{Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	result, err := a.backupService.ExecuteRestore(a.operationContext(), input)
+	if err != nil {
+		return backupservice.RestoreResult{Error: backupservice.APIErrorFrom(err)}
+	}
+	return result
+}
+
+func (a *App) CancelBackupRestore() backupservice.RestoreResult {
+	if a.backupService == nil {
+		return backupservice.RestoreResult{Error: backupservice.APIErrorFrom(backupservice.ErrUnavailable)}
+	}
+	result, err := a.backupService.CancelRestore(a.operationContext())
+	if err != nil {
+		return backupservice.RestoreResult{Error: backupservice.APIErrorFrom(err)}
+	}
+	return result
 }
 
 func (a *App) selectExportFile(ctx context.Context, input noteexport.Input) (string, error) {
@@ -565,6 +655,11 @@ func (a *App) SyncNow(input syncservice.SyncNowInput) (syncservice.SyncResult, e
 }
 
 func (a *App) ensureSyncAllowed() error {
+	if pending, err := a.pendingBackupRestore(); err != nil {
+		return err
+	} else if pending {
+		return backupservice.ErrRestorePending
+	}
 	if a.contentLocks == nil {
 		return nil
 	}
@@ -576,6 +671,17 @@ func (a *App) ensureSyncAllowed() error {
 		return errProtectedContentSync
 	}
 	return nil
+}
+
+func (a *App) pendingBackupRestore() (bool, error) {
+	if a.spaceRegistry == nil || a.activeSpace.ID == "" {
+		return false, nil
+	}
+	backupRoot, err := backupservice.RootFor(a.spaceRegistry.Root(), a.activeSpace.ID)
+	if err != nil {
+		return false, err
+	}
+	return backupservice.PendingRestoreExists(backupRoot)
 }
 
 func (a *App) ResolveSyncConflict(input syncservice.ConflictResolutionInput) error {
@@ -1260,11 +1366,15 @@ func (a *App) quiesceLockedSpace() {
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
+	if a.backupService != nil {
+		a.backupService.Shutdown()
+	}
 	a.notes = nil
 	a.noteImporter = nil
 	a.noteExporter = nil
 	a.syncService = nil
 	a.aiService = nil
+	a.backupService = nil
 	a.statusMu.Lock()
 	a.recoveryReport = note.RecoveryReport{}
 	a.startupLocked = true
@@ -1320,21 +1430,23 @@ func (a *App) GetStartupStatus() StartupStatus {
 
 	if a.startupErr != nil {
 		return StartupStatus{
-			Ready:              false,
-			Message:            a.startupErr.Error(),
-			DataDir:            a.dataDir,
-			MissingNotes:       []MissingNoteDiagnostic{},
-			ActiveStorageSpace: activeStorageSpace,
+			Ready:                       false,
+			Message:                     a.startupErr.Error(),
+			DataDir:                     a.dataDir,
+			MissingNotes:                []MissingNoteDiagnostic{},
+			BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
+			ActiveStorageSpace:          activeStorageSpace,
 		}
 	}
 	if a.startupLocked {
 		return StartupStatus{
-			Ready:              false,
-			Locked:             true,
-			Message:            "この保存空間はロックされています。",
-			DataDir:            a.dataDir,
-			MissingNotes:       []MissingNoteDiagnostic{},
-			ActiveStorageSpace: activeStorageSpace,
+			Ready:                       false,
+			Locked:                      true,
+			Message:                     "この保存空間はロックされています。",
+			DataDir:                     a.dataDir,
+			MissingNotes:                []MissingNoteDiagnostic{},
+			BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
+			ActiveStorageSpace:          activeStorageSpace,
 		}
 	}
 
@@ -1347,12 +1459,13 @@ func (a *App) GetStartupStatus() StartupStatus {
 		})
 	}
 	return StartupStatus{
-		Ready:              true,
-		Degraded:           len(missingNotes) > 0,
-		DataDir:            a.dataDir,
-		MissingNotes:       missingNotes,
-		SyncRecoveryBackup: a.syncRecoveryBackup,
-		ActiveStorageSpace: activeStorageSpace,
+		Ready:                       true,
+		Degraded:                    len(missingNotes) > 0,
+		DataDir:                     a.dataDir,
+		MissingNotes:                missingNotes,
+		SyncRecoveryBackup:          a.syncRecoveryBackup,
+		BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
+		ActiveStorageSpace:          activeStorageSpace,
 	}
 }
 
@@ -1384,6 +1497,24 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 	a.dataLock = dataLock
+	backupRoot, err := backupservice.RootFor(spaceRegistry.Root(), activeSpace.ID)
+	if err != nil {
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.startupErr = backupStartupError(err)
+		return
+	}
+	backupApplyResult, err := backupservice.ApplyPendingRestore(ctx, backupservice.RestorePaths{
+		ManagementRoot: spaceRegistry.Root(), BackupRoot: backupRoot, SpaceID: activeSpace.ID,
+		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
+	})
+	if err != nil {
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.startupErr = backupStartupError(err)
+		return
+	}
+	a.backupRestoreSafetyBackupID = backupApplyResult.RestoreSafetyBackupID
 	backupPath, err := syncservice.ApplyPendingRecovery(syncservice.RecoveryPaths{
 		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
 	})
@@ -1483,6 +1614,20 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	a.noteExporter = noteexport.NewService(service, a.contentLocks)
 	a.syncService = syncService
 	a.aiService = aiService
+	if a.spaceRegistry == nil {
+		return backupservice.ErrUnavailable
+	}
+	if _, err := backupservice.RootFor(a.spaceRegistry.Root(), a.activeSpace.ID); err != nil {
+		return err
+	}
+	backupService := backupservice.NewService(db, service, a.contentLocks, backupservice.Paths{
+		ManagementRoot: a.spaceRegistry.Root(), SpaceID: a.activeSpace.ID,
+		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
+	})
+	if backupService == nil {
+		return backupservice.ErrUnavailable
+	}
+	a.backupService = backupService
 	a.recoveryReport = recoveryReport
 	a.startupLocked = false
 	return nil

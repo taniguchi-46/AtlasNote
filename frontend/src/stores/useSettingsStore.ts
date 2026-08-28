@@ -24,6 +24,7 @@ export type SettingsTab =
   | 'sync'
   | 'ai'
   | 'storage-spaces'
+  | 'backups'
   | 'locks'
 
 export const SIDEBAR_WIDTH_MIN = 180

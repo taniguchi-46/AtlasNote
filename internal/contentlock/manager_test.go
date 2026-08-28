@@ -327,6 +327,39 @@ func TestExportContentAccessBlocksLockNow(t *testing.T) {
 	}
 }
 
+func TestStorageSnapshotBlocksContentAccess(t *testing.T) {
+	ctx := context.Background()
+	manager, _, _ := newLockFixture(t)
+	releaseSnapshot := manager.BeginStorageSnapshot(ctx)
+	released := false
+	defer func() {
+		if !released {
+			releaseSnapshot()
+		}
+	}()
+
+	completed := make(chan struct{}, 1)
+	go func() {
+		releaseContent := manager.BeginContentAccess(ctx)
+		releaseContent()
+		completed <- struct{}{}
+	}()
+
+	select {
+	case <-completed:
+		t.Fatal("content access completed while storage snapshot was active")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseSnapshot()
+	released = true
+	select {
+	case <-completed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("content access did not resume after storage snapshot release")
+	}
+}
+
 func TestNotebookLockCoversChildNotebookAndDoesNotPermitAI(t *testing.T) {
 	ctx := context.Background()
 	manager, notes, _ := newLockFixture(t)

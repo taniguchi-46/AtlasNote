@@ -48,6 +48,7 @@ Go Backend
 | Markdown Storage | ノート本文の永続化 |
 | Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
 | Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
+| Backup / Restore | アクティブな保存空間のSQLite・Markdownを内部管理領域へ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/backup-restore.md`を正とする |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
@@ -89,6 +90,13 @@ Go Backend
 - ローカル保存キューと同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 - 空の同期先を検出した場合は既定ONのフェイルセーフでlocal正本へのremote適用を止める。再アップロードはheadの`If-Match`成功後だけlocal同期状態を更新する。
 - remote正本からの全再取得は実行中のDB・notesへ直接適用せず、`.sync-recovery/staging/`の別vaultでhash・payload・SQLite integrityを検証する。次回起動時にデータロック取得後かつSQLite open前に現行vaultを`.sync-recovery/backups/`へ退避してswapし、失敗時はrollbackする。
+
+### バックアップと復元
+
+- バックアップの正本はアクティブ保存空間のSQLiteとMarkdownであり、検索索引などの派生データを別管理しない。自動バックアップは同期排他ゲートと保存空間スナップショットゲートを保持してコピーする。
+- バックアップ世代は管理ルートの`.atlasnote-backups/<spaceID>/generations/`へ保存する。manifestのファイル一覧・サイズ・SHA-256を使って追加ファイル、欠落、symlink、パス traversalを検証し、外部保存先は提供しない。
+- 復元はプレビュー確認トークンを必要とし、検証済みコピーをstagingへ作ってから`pending.json`で次回起動へ引き渡す。データロック取得後かつSQLite open前に現行データを安全用世代とrollback領域へ退避し、フェーズマーカーによって中断後も再開できるようにする。
+- 復元と同期復旧のpending状態は同時に処理せず、復元失敗時は現行データを優先してrollbackする。詳細な保存上限、API、テストは`docs/development/backup-restore.md`を正とする。
 
 ### Markdown全文検索
 

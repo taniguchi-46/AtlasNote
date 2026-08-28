@@ -178,6 +178,7 @@ try {
   const { prepareStorageSpaceSwitch } = await import(pathToFileURL(guardOutFile).href)
   const events = []
   let syncBusy = false
+  let backupBusy = false
   let aiBusy = false
   let importBusy = false
   let exportBusy = false
@@ -185,6 +186,7 @@ try {
   let startExportDuringFlush = false
   let flushResult = true
   const dependencies = {
+    isBackupBusy: () => backupBusy,
     isSyncBusy: () => syncBusy,
     isAIBusy: () => aiBusy,
     isImportBusy: () => importBusy,
@@ -204,6 +206,11 @@ try {
   assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)
   assert.deepEqual(events, ['STORAGE_SPACE_SYNC_BUSY'])
   syncBusy = false
+  events.length = 0
+  backupBusy = true
+  assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)
+  assert.deepEqual(events, ['STORAGE_SPACE_BACKUP_BUSY'])
+  backupBusy = false
   events.length = 0
   aiBusy = true
   assert.equal((await prepareStorageSpaceSwitch(dependencies)).ready, false)

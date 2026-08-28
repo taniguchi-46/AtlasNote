@@ -148,6 +148,7 @@ import { useAIAssistantStore } from './stores/useAIAssistantStore'
 import { useAILibrarianStore } from './stores/useAILibrarianStore'
 import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
+import { useBackupStore } from './stores/useBackupStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
 import { useNoteExportStore } from './stores/useNoteExportStore'
@@ -155,6 +156,7 @@ import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
 import { logOperationFailure } from './utils/operationLogger'
 import { createContentLockAutoLock } from './utils/contentLockAutoLock'
+import { prepareBackupOperation } from './services/backupLifecycle'
 import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
 import {
   findMatchingShortcutAction,
@@ -187,6 +189,7 @@ const aiAssistantStore = useAIAssistantStore()
 const aiLibrarianStore = useAILibrarianStore()
 const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
+const backupStore = useBackupStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
 const noteExportStore = useNoteExportStore()
@@ -197,6 +200,7 @@ contentLockStore.setBeforeLock(() => noteStore.flushAllDirtyNotes())
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
+    isBackupBusy: () => backupStore.isBusy,
     isSyncBusy: () => syncStore.isBusy,
     isAIBusy: () => (
       aiStore.isSettingsBusy
@@ -212,6 +216,31 @@ storageSpaceStore.setSwitchLifecycle(
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
     notify: (message, code) => notificationStore.notify(message, {
       kind: 'warning', source: 'storage-space', code,
+    }),
+  }),
+  async () => {
+    await RestartApp()
+  },
+)
+backupStore.setLifecycle(
+  () => prepareBackupOperation({
+    isStorageSpaceBusy: () => storageSpaceStore.isBusy,
+    isSyncBusy: () => syncStore.isBusy,
+    isAIBusy: () => (
+      aiStore.isSettingsBusy
+      || aiStore.isGenerating
+      || aiAssistantStore.isBusy
+      || aiLibrarianStore.isGenerating
+      || aiWritingStore.isBusy
+    ),
+    isImportBusy: () => noteImportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy,
+    isContentLockBusy: () => contentLockStore.isBusy,
+    suspendSync: () => syncStore.suspend(),
+    resumeSync: () => syncStore.resume(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    notify: (message, code) => notificationStore.notify(message, {
+      kind: 'warning', source: 'backup', code,
     }),
   }),
   async () => {
@@ -506,6 +535,14 @@ async function initializeReadyWorkspace(status: StartupStatus) {
   await syncStore.initialize().catch(() => {})
   await aiStore.initialize().catch(() => {})
   await storageSpaceStore.initialize()
+  if (status.backupRestoreSafetyBackupId) {
+    notificationStore.notify('復元前の現在データを安全用バックアップとして保存しました', {
+      kind: 'success', source: 'backup', code: 'BACKUP_RESTORE_SAFETY_CREATED',
+    })
+  }
+  await backupStore.refreshStatus()
+  backupStore.startScheduler()
+  void backupStore.runAutomaticIfDue()
 }
 
 async function handleStorageSpaceUnlocked() {
@@ -740,6 +777,7 @@ onBeforeUnmount(() => {
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
   syncStore.dispose()
+  backupStore.dispose()
   storageSpaceStore.clearSwitchLifecycle()
   aiStore.discardSummary()
   contentLockAutoLock.dispose()

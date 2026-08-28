@@ -44,11 +44,23 @@ func Open(ctx context.Context, databasePath string) (*sql.DB, error) {
 }
 
 func sqliteDSN(databasePath string) string {
+	return sqliteDSNWithMode(databasePath, "")
+}
+
+func sqliteDSNWithMode(databasePath string, mode string) string {
 	dsn := &url.URL{
 		Scheme: "file",
 		Opaque: filepath.ToSlash(databasePath),
 	}
 	query := dsn.Query()
+	if mode != "" {
+		query.Add("mode", mode)
+		if mode == "ro" {
+			// Validation must not create WAL/SHM sidecars beside an immutable
+			// snapshot or observe a partially changing file.
+			query.Add("immutable", "1")
+		}
+	}
 	query.Add("_pragma", "foreign_keys(ON)")
 	query.Add("_pragma", "busy_timeout(5000)")
 	dsn.RawQuery = query.Encode()

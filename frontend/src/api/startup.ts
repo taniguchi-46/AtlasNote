@@ -19,6 +19,7 @@ export type StartupStatus = {
   dataDir?: string
   missingNotes: MissingNoteDiagnostic[]
   syncRecoveryBackup?: string
+  backupRestoreSafetyBackupId?: string
   activeStorageSpace?: StorageSpace
 }
 

@@ -4,6 +4,7 @@ export type StorageSpaceSwitchPreparation = {
 }
 
 export type StorageSpaceSwitchDependencies = {
+  isBackupBusy: () => boolean
   isSyncBusy: () => boolean
   isAIBusy: () => boolean
   isImportBusy: () => boolean
@@ -17,6 +18,10 @@ export type StorageSpaceSwitchDependencies = {
 export async function prepareStorageSpaceSwitch(
   dependencies: StorageSpaceSwitchDependencies,
 ): Promise<StorageSpaceSwitchPreparation> {
+  if (dependencies.isBackupBusy()) {
+    dependencies.notify('バックアップ処理の完了後に保存空間を切り替えてください', 'STORAGE_SPACE_BACKUP_BUSY')
+    return { ready: false }
+  }
   if (dependencies.isSyncBusy()) {
     dependencies.notify('同期の完了後に保存空間を切り替えてください', 'STORAGE_SPACE_SYNC_BUSY')
     return { ready: false }
@@ -54,6 +59,11 @@ export async function prepareStorageSpaceSwitch(
     if (dependencies.isSyncBusy()) {
       rollback()
       dependencies.notify('同期の完了後に保存空間を切り替えてください', 'STORAGE_SPACE_SYNC_BUSY')
+      return { ready: false }
+    }
+    if (dependencies.isBackupBusy()) {
+      rollback()
+      dependencies.notify('バックアップ処理が開始されたため、保存空間を切り替えませんでした', 'STORAGE_SPACE_BACKUP_BUSY')
       return { ready: false }
     }
     if (dependencies.isAIBusy()) {

@@ -178,6 +178,10 @@
             <StorageSpaceSettingsPanel />
           </TabsContent>
 
+          <TabsContent value="backups" as-child>
+            <BackupSettingsPanel />
+          </TabsContent>
+
           <TabsContent value="locks" as-child>
             <ContentLockSettingsPanel />
           </TabsContent>
@@ -212,10 +216,12 @@ import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
 import { useAIStore } from '../stores/useAIStore'
 import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
+import { useBackupStore } from '../stores/useBackupStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
 import AISettingsPanel from './AISettingsPanel.vue'
 import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
+import BackupSettingsPanel from './BackupSettingsPanel.vue'
 import ContentLockSettingsPanel from './ContentLockSettingsPanel.vue'
 import ShortcutSettingsPanel from './ShortcutSettingsPanel.vue'
 
@@ -224,6 +230,7 @@ const appStore = useAppStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
 const storageSpaceStore = useStorageSpaceStore()
+const backupStore = useBackupStore()
 
 const tabs: { id: SettingsTab; name: string }[] = [
   { id: 'theme', name: 'テーマ' },
@@ -234,6 +241,7 @@ const tabs: { id: SettingsTab; name: string }[] = [
 tabs.push({ id: 'sync', name: '同期' })
 tabs.push({ id: 'ai', name: 'AI' })
 tabs.push({ id: 'storage-spaces', name: '保存空間' })
+tabs.push({ id: 'backups', name: 'バックアップ' })
 tabs.push({ id: 'locks', name: 'ロック' })
 const activeTab = ref<SettingsTab>('theme')
 const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
@@ -246,6 +254,7 @@ watch(
       syncStore.resetDraft()
       aiStore.resetDraft()
       void storageSpaceStore.initialize()
+      void backupStore.initialize()
     }
   },
 )

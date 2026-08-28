@@ -100,6 +100,16 @@ func (m *Manager) BeginContentAccess(context.Context) func() {
 	return m.operationMu.RUnlock
 }
 
+// BeginStorageSnapshot excludes normal content access and lock conversions
+// while a backup copies the canonical Markdown tree. It deliberately does
+// not acquire the export or AI gates: the caller owns the note/sync boundary
+// and those outer operations can safely finish their current note read before
+// waiting on this writer gate.
+func (m *Manager) BeginStorageSnapshot(context.Context) func() {
+	m.operationMu.Lock()
+	return m.operationMu.Unlock
+}
+
 // BeginExportContentAccess keeps a complete export on one side of a lock
 // conversion while it collects note content through the normal access gate.
 func (m *Manager) BeginExportContentAccess(context.Context) func() {
