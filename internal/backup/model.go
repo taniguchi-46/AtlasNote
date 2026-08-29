@@ -30,10 +30,17 @@ var (
 
 type Paths struct {
 	ManagementRoot string
-	SpaceID        string
-	DataDir        string
-	DatabasePath   string
-	NotesDir       string
+	// ArchiveRoot is the user-selected backup archive root. When empty,
+	// backups remain under ManagementRoot for backward compatibility.
+	ArchiveRoot string
+	// RestoreWorkspaceRoot keeps restore staging and rollback data on the
+	// local management volume so an external archive can be disconnected after
+	// staging completes.
+	RestoreWorkspaceRoot string
+	SpaceID              string
+	DataDir              string
+	DatabasePath         string
+	NotesDir             string
 }
 
 type FileEntry struct {

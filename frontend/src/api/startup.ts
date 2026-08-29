@@ -4,6 +4,7 @@ import {
   ReinspectRecovery,
 } from '../../wailsjs/go/main/App'
 import type { StorageSpace } from './storageSpaces'
+import type { StorageLocationStatus } from './storageLocations'
 
 export type MissingNoteDiagnostic = {
   id: string
@@ -12,6 +13,8 @@ export type MissingNoteDiagnostic = {
 }
 
 export type StartupStatus = {
+  phase?: 'initializing' | 'setup-required' | 'ready' | 'locked' | 'error' | string
+  setupRequired?: boolean
   ready: boolean
   locked?: boolean
   degraded: boolean
@@ -21,6 +24,7 @@ export type StartupStatus = {
   syncRecoveryBackup?: string
   backupRestoreSafetyBackupId?: string
   activeStorageSpace?: StorageSpace
+  storageLocations?: StorageLocationStatus
 }
 
 export function getStartupStatus(): Promise<StartupStatus> {

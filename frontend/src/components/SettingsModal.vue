@@ -174,8 +174,13 @@
             <AISettingsPanel />
           </TabsContent>
 
-          <TabsContent value="storage-spaces" as-child>
-            <StorageSpaceSettingsPanel />
+          <TabsContent value="storage-locations" as-child>
+            <section class="storage-location-settings-tab">
+              <StorageLocationSettingsPanel />
+              <div class="storage-space-settings-section">
+                <StorageSpaceSettingsPanel />
+              </div>
+            </section>
           </TabsContent>
 
           <TabsContent value="backups" as-child>
@@ -216,11 +221,13 @@ import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
 import { useAIStore } from '../stores/useAIStore'
 import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
+import { useStorageLocationStore } from '../stores/useStorageLocationStore'
 import { useBackupStore } from '../stores/useBackupStore'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
 import AISettingsPanel from './AISettingsPanel.vue'
 import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
+import StorageLocationSettingsPanel from './StorageLocationSettingsPanel.vue'
 import BackupSettingsPanel from './BackupSettingsPanel.vue'
 import ContentLockSettingsPanel from './ContentLockSettingsPanel.vue'
 import ShortcutSettingsPanel from './ShortcutSettingsPanel.vue'
@@ -230,6 +237,7 @@ const appStore = useAppStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
 const storageSpaceStore = useStorageSpaceStore()
+const storageLocationStore = useStorageLocationStore()
 const backupStore = useBackupStore()
 
 const tabs: { id: SettingsTab; name: string }[] = [
@@ -240,7 +248,7 @@ const tabs: { id: SettingsTab; name: string }[] = [
 ]
 tabs.push({ id: 'sync', name: '同期' })
 tabs.push({ id: 'ai', name: 'AI' })
-tabs.push({ id: 'storage-spaces', name: '保存空間' })
+tabs.push({ id: 'storage-locations', name: '保存場所' })
 tabs.push({ id: 'backups', name: 'バックアップ' })
 tabs.push({ id: 'locks', name: 'ロック' })
 const activeTab = ref<SettingsTab>('theme')
@@ -254,6 +262,7 @@ watch(
       syncStore.resetDraft()
       aiStore.resetDraft()
       void storageSpaceStore.initialize()
+      void storageLocationStore.initialize()
       void backupStore.initialize()
     }
   },
@@ -354,13 +363,23 @@ function handleOpenChange(open: boolean) {
   background-color: var(--bg-editor);
 }
 
-.settings-panel > :deep(section > h3) {
+.settings-panel > :deep(section > h3),
+.storage-location-settings-tab :deep(section > h3) {
   margin-top: 0;
   margin-bottom: 24px;
   font-size: 1.1rem;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
+}
+
+.storage-location-settings-tab {
+  display: grid;
+  gap: 32px;
+}
+
+.storage-space-settings-section {
+  padding-top: 4px;
 }
 
 .settings-section {

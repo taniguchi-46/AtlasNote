@@ -33,6 +33,8 @@ const (
 	maximumManifestFiles = 100_000
 )
 
+const restoreWorkspaceDirectory = ".atlasnote-restore"
+
 var backupIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 // SyncExclusiveGate and ContentSnapshotGate keep backup coordination narrow
@@ -198,7 +200,7 @@ func (s *Service) Status(ctx context.Context) (StatusResult, error) {
 	if err != nil {
 		return StatusResult{}, err
 	}
-	pending, err := PendingRestoreExists(s.backupRootLocked())
+	pending, err := s.pendingRestoreExistsLocked()
 	if err != nil {
 		return StatusResult{}, err
 	}
@@ -265,7 +267,15 @@ func (s *Service) readyLocked() error {
 }
 
 func (s *Service) backupRootLocked() string {
-	return filepath.Join(filepath.Clean(s.paths.ManagementRoot), backupDirectoryName, s.paths.SpaceID)
+	root := s.paths.ArchiveRoot
+	if strings.TrimSpace(root) == "" {
+		root = s.paths.ManagementRoot
+	}
+	backupRoot, err := RootFor(root, s.paths.SpaceID)
+	if err != nil {
+		return filepath.Join(filepath.Clean(root), backupDirectoryName, s.paths.SpaceID)
+	}
+	return backupRoot
 }
 
 func (s *Service) generationsRootLocked() string {
@@ -276,8 +286,54 @@ func (s *Service) stagingRootLocked() string {
 	return filepath.Join(s.backupRootLocked(), stagingName)
 }
 
+func (s *Service) restoreStagingRootLocked() string {
+	if !s.usesLocalRestoreWorkspace() || strings.TrimSpace(s.paths.RestoreWorkspaceRoot) == "" {
+		return s.stagingRootLocked()
+	}
+	return filepath.Join(filepath.Clean(s.paths.RestoreWorkspaceRoot), restoreWorkspaceDirectory, s.paths.SpaceID, stagingName)
+}
+
+func (s *Service) restoreRollbackRootLocked() string {
+	if !s.usesLocalRestoreWorkspace() || strings.TrimSpace(s.paths.RestoreWorkspaceRoot) == "" {
+		return filepath.Join(s.backupRootLocked(), rollbackName)
+	}
+	return filepath.Join(filepath.Clean(s.paths.RestoreWorkspaceRoot), restoreWorkspaceDirectory, s.paths.SpaceID, rollbackName)
+}
+
+func (s *Service) usesLocalRestoreWorkspace() bool {
+	if strings.TrimSpace(s.paths.RestoreWorkspaceRoot) == "" {
+		return false
+	}
+	archiveRoot := s.paths.ArchiveRoot
+	if strings.TrimSpace(archiveRoot) == "" {
+		archiveRoot = s.paths.ManagementRoot
+	}
+	return filepath.Clean(archiveRoot) != filepath.Clean(s.paths.ManagementRoot)
+}
+
+func (s *Service) pendingMarkerPathLocked() string {
+	if s.usesLocalRestoreWorkspace() {
+		workspaceRoot := s.paths.RestoreWorkspaceRoot
+		if strings.TrimSpace(workspaceRoot) == "" {
+			workspaceRoot = s.paths.ManagementRoot
+		}
+		return filepath.Join(filepath.Clean(workspaceRoot), restoreWorkspaceDirectory, s.paths.SpaceID, pendingName)
+	}
+	return filepath.Join(s.backupRootLocked(), pendingName)
+}
+
+func (s *Service) pendingRestoreExistsLocked() (bool, error) {
+	pending, err := pendingRestoreExistsAt(s.pendingMarkerPathLocked())
+	if err != nil || pending || !s.usesLocalRestoreWorkspace() {
+		return pending, err
+	}
+	// Accept a legacy marker left in the archive root so an upgrade can finish
+	// a restore that was staged by an earlier build.
+	return PendingRestoreExists(s.backupRootLocked())
+}
+
 func (s *Service) ensureNoRecoveryConflictLocked() error {
-	backupPending, err := PendingRestoreExists(s.backupRootLocked())
+	backupPending, err := s.pendingRestoreExistsLocked()
 	if err != nil {
 		return err
 	}
@@ -497,8 +553,21 @@ func validatePaths(paths Paths) error {
 	if err != nil || !safePathWithinOrEqual(managementRoot, dataDir) {
 		return ErrValidation
 	}
-	backupRoot := filepath.Join(managementRoot, backupDirectoryName, paths.SpaceID)
-	if !safePathWithin(managementRoot, backupRoot) {
+	archiveRoot := managementRoot
+	if strings.TrimSpace(paths.ArchiveRoot) != "" {
+		archiveRoot, err = filepath.Abs(filepath.Clean(paths.ArchiveRoot))
+		if err != nil {
+			return ErrValidation
+		}
+	}
+	if strings.TrimSpace(paths.RestoreWorkspaceRoot) != "" {
+		workspaceRoot, workspaceErr := filepath.Abs(filepath.Clean(paths.RestoreWorkspaceRoot))
+		if workspaceErr != nil || !safePathWithinOrEqual(managementRoot, workspaceRoot) {
+			return ErrValidation
+		}
+	}
+	backupRoot := filepath.Join(archiveRoot, backupDirectoryName, paths.SpaceID)
+	if !safePathWithin(archiveRoot, backupRoot) {
 		return ErrValidation
 	}
 	databasePath, err := filepath.Abs(filepath.Clean(paths.DatabasePath))

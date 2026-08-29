@@ -13,7 +13,7 @@
           <small>保存済みのSQLiteデータとMarkdown本文を24時間ごとに保存します。</small>
         </span>
       </label>
-      <p class="backup-help">バックアップはAtlas Noteの内部管理領域に保存され、外部フォルダは使用しません。</p>
+      <p class="backup-help">保存先は「設定 > 保存場所」から変更できます。変更後は次回起動時に適用されます。</p>
     </div>
 
     <div class="backup-heading-row">

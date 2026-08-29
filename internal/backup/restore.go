@@ -36,11 +36,18 @@ type pendingMarker struct {
 
 type RestorePaths struct {
 	ManagementRoot string
-	BackupRoot     string
-	SpaceID        string
-	DataDir        string
-	DatabasePath   string
-	NotesDir       string
+	// ArchiveRoot mirrors Service.Paths.ArchiveRoot. An empty value keeps the
+	// legacy management-root backup layout.
+	ArchiveRoot string
+	// RestoreWorkspaceRoot is a local root for staged restore files. It is
+	// intentionally separate from BackupRoot so an external archive can be
+	// detached after staging.
+	RestoreWorkspaceRoot string
+	BackupRoot           string
+	SpaceID              string
+	DataDir              string
+	DatabasePath         string
+	NotesDir             string
 }
 
 type ApplyResult struct {
@@ -77,8 +84,9 @@ func (s *Service) ExecuteRestore(ctx context.Context, input RestoreExecutionInpu
 	if err != nil {
 		return RestoreResult{}, err
 	}
-	stageDir := filepath.Join(s.stagingRootLocked(), operationID)
-	if !safePathWithin(s.backupRootLocked(), stageDir) {
+	stageRoot := s.restoreStagingRootLocked()
+	stageDir := filepath.Join(stageRoot, operationID)
+	if !safePathWithin(filepath.Dir(stageRoot), stageRoot) || !safePathWithin(stageRoot, stageDir) {
 		return RestoreResult{}, ErrValidation
 	}
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
@@ -101,7 +109,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, input RestoreExecutionInpu
 		SpaceID: s.paths.SpaceID, ManifestHash: authorization.ManifestHash,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Phase: pendingPhaseStaged,
 	}
-	markerPath := filepath.Join(s.backupRootLocked(), pendingName)
+	markerPath := s.pendingMarkerPathLocked()
 	if err := writePendingMarker(markerPath, marker); err != nil {
 		return RestoreResult{}, err
 	}
@@ -118,7 +126,17 @@ func (s *Service) CancelRestore(ctx context.Context) (RestoreResult, error) {
 	if err := s.readyLocked(); err != nil {
 		return RestoreResult{}, err
 	}
-	marker, markerPath, err := readPendingMarker(s.backupRootLocked(), s.paths.SpaceID)
+	markerPath := s.pendingMarkerPathLocked()
+	marker, err := readPendingMarkerAt(markerPath, s.paths.SpaceID)
+	if errors.Is(err, os.ErrNotExist) && s.usesLocalRestoreWorkspace() {
+		// Older builds kept the marker and staging directory in the archive.
+		// Keep that marker readable after upgrading to a separate archive layout.
+		legacyPath := filepath.Join(s.backupRootLocked(), pendingName)
+		marker, err = readPendingMarkerAt(legacyPath, s.paths.SpaceID)
+		if err == nil {
+			markerPath = legacyPath
+		}
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return RestoreResult{Canceled: true, Message: "復元待機状態はありません。"}, nil
 	}
@@ -131,12 +149,18 @@ func (s *Service) CancelRestore(ctx context.Context) (RestoreResult, error) {
 	if err := os.Remove(markerPath); err != nil {
 		return RestoreResult{}, err
 	}
-	stageDir := filepath.Join(s.stagingRootLocked(), marker.ID)
-	rollbackDir := filepath.Join(s.backupRootLocked(), rollbackName, marker.ID)
-	if safePathWithin(s.backupRootLocked(), stageDir) {
+	stageRoot := s.restoreStagingRootLocked()
+	rollbackRoot := s.restoreRollbackRootLocked()
+	if markerPath == filepath.Join(s.backupRootLocked(), pendingName) {
+		stageRoot = s.stagingRootLocked()
+		rollbackRoot = filepath.Join(s.backupRootLocked(), rollbackName)
+	}
+	stageDir := filepath.Join(stageRoot, marker.ID)
+	rollbackDir := filepath.Join(rollbackRoot, marker.ID)
+	if safePathWithin(filepath.Dir(stageRoot), stageDir) {
 		_ = os.RemoveAll(stageDir)
 	}
-	if safePathWithin(s.backupRootLocked(), rollbackDir) {
+	if safePathWithin(filepath.Dir(rollbackRoot), rollbackDir) {
 		_ = os.RemoveAll(rollbackDir)
 	}
 	if err := ctx.Err(); err != nil {
@@ -149,8 +173,7 @@ func ApplyPendingRestore(ctx context.Context, paths RestorePaths) (ApplyResult, 
 	if err := validateRestorePaths(paths); err != nil {
 		return ApplyResult{}, err
 	}
-	markerPath := filepath.Join(paths.BackupRoot, pendingName)
-	marker, _, err := readPendingMarker(paths.BackupRoot, paths.SpaceID)
+	marker, markerPath, err := readPendingRestoreMarker(paths)
 	if errors.Is(err, os.ErrNotExist) {
 		return ApplyResult{}, nil
 	}
@@ -169,35 +192,55 @@ func ApplyPendingRestore(ctx context.Context, paths RestorePaths) (ApplyResult, 
 	if err := validatePendingMarker(marker, paths); err != nil {
 		return ApplyResult{}, err
 	}
+	stageRoot := restoreStagingRoot(paths)
+	rollbackRoot := restoreRollbackRoot(paths)
+	legacyMarkerPath := filepath.Join(filepath.Clean(paths.BackupRoot), pendingName)
+	if filepath.Clean(markerPath) == legacyMarkerPath {
+		// A restore staged by an older build keeps its files in the archive's
+		// staging/rollback directories. Continue that transaction in place.
+		stageRoot = filepath.Join(filepath.Clean(paths.BackupRoot), stagingName)
+		rollbackRoot = filepath.Join(filepath.Clean(paths.BackupRoot), rollbackName)
+	}
+	stageDir := filepath.Join(stageRoot, marker.ID)
+	rollbackDir := filepath.Join(rollbackRoot, marker.ID)
+	if !safePathWithin(filepath.Dir(stageRoot), stageRoot) || !safePathWithin(stageRoot, stageDir) || !safePathWithin(filepath.Dir(rollbackRoot), rollbackRoot) || !safePathWithin(rollbackRoot, rollbackDir) {
+		return ApplyResult{}, ErrRestoreApply
+	}
 	generationsRoot := filepath.Join(paths.BackupRoot, generationsName)
 	if !safePathWithin(paths.BackupRoot, generationsRoot) {
 		return ApplyResult{}, ErrRestoreApply
 	}
 	manifest, raw, err := loadManifestAt(generationsRoot, marker.BackupID, paths.SpaceID)
+	generationAvailable := err == nil
 	if err != nil {
-		return ApplyResult{}, wrapTampered(err)
+		if !usesLocalRestoreWorkspace(paths) {
+			return ApplyResult{}, wrapTampered(err)
+		}
+		// Once the generation has been copied into the local restore workspace,
+		// applying it must not require the external archive to stay mounted.
+		manifest, raw, err = loadRestoreStageManifest(stageDir, paths.SpaceID, marker.BackupID)
+		if err != nil {
+			return ApplyResult{}, wrapTampered(err)
+		}
 	}
 	if hashBytes(raw) != marker.ManifestHash {
 		return ApplyResult{}, ErrTampered
 	}
-	if err := validateGenerationFiles(ctx, filepath.Join(generationsRoot, marker.BackupID), manifest); err != nil {
-		return ApplyResult{}, wrapTampered(err)
-	}
-	stageDir := filepath.Join(paths.BackupRoot, stagingName, marker.ID)
-	rollbackDir := filepath.Join(paths.BackupRoot, rollbackName, marker.ID)
-	if !safePathWithin(paths.BackupRoot, stageDir) || !safePathWithin(paths.BackupRoot, rollbackDir) {
-		return ApplyResult{}, ErrRestoreApply
+	if generationAvailable {
+		if err := validateGenerationFiles(ctx, filepath.Join(generationsRoot, marker.BackupID), manifest); err != nil {
+			return ApplyResult{}, wrapTampered(err)
+		}
 	}
 	if marker.Phase == pendingPhaseStaged {
 		if err := validateRestoreStage(ctx, stageDir, manifest); err != nil {
 			return ApplyResult{}, wrapTampered(err)
 		}
 		if err := createRestoreSafetyBackup(ctx, paths, marker.ID); err != nil {
-			return ApplyResult{}, wrapRestoreApply(err)
+			return ApplyResult{}, wrapRestoreApply(fmt.Errorf("create restore safety backup: %w", err))
 		}
 		if err := moveCurrentToRollback(paths, rollbackDir); err != nil {
 			rollbackRestore(paths, stageDir, rollbackDir)
-			return ApplyResult{}, wrapRestoreApply(err)
+			return ApplyResult{}, wrapRestoreApply(fmt.Errorf("move current data to rollback: %w", err))
 		}
 		marker.Phase = pendingPhaseBackedUp
 		if err := writePendingMarker(markerPath, marker); err != nil {
@@ -209,7 +252,7 @@ func ApplyPendingRestore(ctx context.Context, paths RestorePaths) (ApplyResult, 
 		if err := installRestoreStage(paths, stageDir); err != nil {
 			// Keep the marker and the partially moved components. The next
 			// startup can resume each idempotent move from the backed-up phase.
-			return ApplyResult{}, wrapRestoreApply(err)
+			return ApplyResult{}, wrapRestoreApply(fmt.Errorf("install restore stage: %w", err))
 		}
 		marker.Phase = pendingPhaseInstalled
 		if err := writePendingMarker(markerPath, marker); err != nil {
@@ -223,7 +266,7 @@ func ApplyPendingRestore(ctx context.Context, paths RestorePaths) (ApplyResult, 
 	}
 	if err := validateInstalledRestore(ctx, paths); err != nil {
 		rollbackRestore(paths, stageDir, rollbackDir)
-		return ApplyResult{}, wrapRestoreApply(err)
+		return ApplyResult{}, wrapRestoreApply(fmt.Errorf("validate installed restore: %w", err))
 	}
 	if err := os.Remove(markerPath); err != nil {
 		return ApplyResult{}, wrapRestoreApply(err)
@@ -241,7 +284,20 @@ func validateRestorePaths(paths RestorePaths) error {
 	if err != nil {
 		return ErrValidation
 	}
-	expectedBackupRoot, err := RootFor(managementRoot, paths.SpaceID)
+	archiveRoot := managementRoot
+	if strings.TrimSpace(paths.ArchiveRoot) != "" {
+		archiveRoot, err = filepath.Abs(filepath.Clean(paths.ArchiveRoot))
+		if err != nil {
+			return ErrValidation
+		}
+	}
+	if strings.TrimSpace(paths.RestoreWorkspaceRoot) != "" {
+		workspaceRoot, workspaceErr := filepath.Abs(filepath.Clean(paths.RestoreWorkspaceRoot))
+		if workspaceErr != nil || !safePathWithinOrEqual(managementRoot, workspaceRoot) {
+			return ErrValidation
+		}
+	}
+	expectedBackupRoot, err := RootFor(archiveRoot, paths.SpaceID)
 	if err != nil || filepath.Clean(expectedBackupRoot) != filepath.Clean(paths.BackupRoot) {
 		return ErrValidation
 	}
@@ -255,27 +311,94 @@ func validateRestorePaths(paths RestorePaths) error {
 	return nil
 }
 
+func restoreStagingRoot(paths RestorePaths) string {
+	if !usesLocalRestoreWorkspace(paths) {
+		return filepath.Join(paths.BackupRoot, stagingName)
+	}
+	return filepath.Join(filepath.Clean(paths.RestoreWorkspaceRoot), restoreWorkspaceDirectory, paths.SpaceID, stagingName)
+}
+
+func restoreRollbackRoot(paths RestorePaths) string {
+	if !usesLocalRestoreWorkspace(paths) {
+		return filepath.Join(paths.BackupRoot, rollbackName)
+	}
+	return filepath.Join(filepath.Clean(paths.RestoreWorkspaceRoot), restoreWorkspaceDirectory, paths.SpaceID, rollbackName)
+}
+
+func restorePendingMarkerPath(paths RestorePaths) string {
+	if !usesLocalRestoreWorkspace(paths) {
+		return filepath.Join(filepath.Clean(paths.BackupRoot), pendingName)
+	}
+	return filepath.Join(filepath.Clean(paths.RestoreWorkspaceRoot), restoreWorkspaceDirectory, paths.SpaceID, pendingName)
+}
+
+func usesLocalRestoreWorkspace(paths RestorePaths) bool {
+	archiveRoot := paths.ArchiveRoot
+	if strings.TrimSpace(archiveRoot) == "" {
+		archiveRoot = paths.ManagementRoot
+	}
+	return strings.TrimSpace(paths.RestoreWorkspaceRoot) != "" && filepath.Clean(archiveRoot) != filepath.Clean(paths.ManagementRoot)
+}
+
 func readPendingMarker(backupRoot string, spaceID string) (pendingMarker, string, error) {
 	markerPath := filepath.Join(filepath.Clean(backupRoot), pendingName)
+	marker, err := readPendingMarkerAt(markerPath, spaceID)
+	return marker, markerPath, err
+}
+
+func readPendingRestoreMarker(paths RestorePaths) (pendingMarker, string, error) {
+	activePath := restorePendingMarkerPath(paths)
+	pathsToTry := []string{activePath}
+	legacyPath := filepath.Join(filepath.Clean(paths.BackupRoot), pendingName)
+	if legacyPath != activePath {
+		pathsToTry = append(pathsToTry, legacyPath)
+	}
+	for _, markerPath := range pathsToTry {
+		marker, err := readPendingMarkerAt(markerPath, paths.SpaceID)
+		if err == nil {
+			return marker, markerPath, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return pendingMarker{}, markerPath, err
+		}
+	}
+	return pendingMarker{}, activePath, os.ErrNotExist
+}
+
+func readPendingMarkerAt(markerPath string, spaceID string) (pendingMarker, error) {
 	info, err := os.Lstat(markerPath)
 	if err != nil {
-		return pendingMarker{}, markerPath, err
+		return pendingMarker{}, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-		return pendingMarker{}, markerPath, ErrRestoreApply
+		return pendingMarker{}, ErrRestoreApply
 	}
 	encoded, err := os.ReadFile(markerPath)
 	if err != nil {
-		return pendingMarker{}, markerPath, err
+		return pendingMarker{}, err
 	}
 	var marker pendingMarker
 	if err := json.Unmarshal(encoded, &marker); err != nil {
-		return pendingMarker{}, markerPath, err
+		return pendingMarker{}, err
 	}
 	if err := validatePendingMarker(marker, RestorePaths{SpaceID: spaceID}); err != nil {
-		return pendingMarker{}, markerPath, err
+		return pendingMarker{}, err
 	}
-	return marker, markerPath, nil
+	return marker, nil
+}
+
+func pendingRestoreExistsAt(markerPath string) (bool, error) {
+	info, err := os.Lstat(markerPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		return false, ErrRestoreApply
+	}
+	return true, nil
 }
 
 func validatePendingMarker(marker pendingMarker, paths RestorePaths) error {
@@ -455,6 +578,33 @@ func loadManifestAt(generationsRoot string, backupID string, spaceID string) (Ma
 	return manifest, raw, nil
 }
 
+func loadRestoreStageManifest(stageDir string, spaceID string, backupID string) (Manifest, []byte, error) {
+	info, err := os.Lstat(stageDir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return Manifest{}, nil, ErrRestoreApply
+	}
+	manifestPath := filepath.Join(stageDir, manifestName)
+	manifestInfo, err := os.Lstat(manifestPath)
+	if err != nil || manifestInfo.Mode()&os.ModeSymlink != 0 || !manifestInfo.Mode().IsRegular() || manifestInfo.Size() > maximumManifestSize {
+		return Manifest{}, nil, ErrRestoreApply
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return Manifest{}, nil, err
+	}
+	var manifest Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return Manifest{}, nil, err
+	}
+	if manifest.ID != backupID {
+		return Manifest{}, nil, ErrTampered
+	}
+	if err := validateManifest(manifest, backupID, spaceID); err != nil {
+		return Manifest{}, nil, err
+	}
+	return manifest, raw, nil
+}
+
 func createRestoreSafetyBackup(ctx context.Context, paths RestorePaths, id string) error {
 	generationsRoot := filepath.Join(paths.BackupRoot, generationsName)
 	generationDir := filepath.Join(generationsRoot, id)
@@ -550,7 +700,15 @@ func copyColdDatabase(ctx context.Context, sourcePath string, destinationPath st
 }
 
 func moveCurrentToRollback(paths RestorePaths, rollbackDir string) error {
-	if !safePathWithin(paths.BackupRoot, rollbackDir) {
+	rollbackRoot := restoreRollbackRoot(paths)
+	if !validRestoreRootPath(rollbackRoot, rollbackDir) {
+		legacyRoot := filepath.Join(filepath.Clean(paths.BackupRoot), rollbackName)
+		if !validRestoreRootPath(legacyRoot, rollbackDir) {
+			return ErrRestoreApply
+		}
+		rollbackRoot = legacyRoot
+	}
+	if !safePathWithin(filepath.Dir(rollbackRoot), rollbackRoot) || !safePathWithin(rollbackRoot, rollbackDir) {
 		return ErrRestoreApply
 	}
 	if err := os.MkdirAll(rollbackDir, 0o700); err != nil {
@@ -568,7 +726,7 @@ func moveCurrentIfNeeded(sourcePath string, destinationPath string) error {
 	sourceExists := pathExists(sourcePath)
 	destinationExists := pathExists(destinationPath)
 	if sourceExists && destinationExists {
-		return ErrRestoreApply
+		return fmt.Errorf("%w: both source and destination exist (%s, %s)", ErrRestoreApply, sourcePath, destinationPath)
 	}
 	if !sourceExists {
 		return nil
@@ -615,8 +773,14 @@ func validateInstalledRestore(ctx context.Context, paths RestorePaths) error {
 }
 
 func rollbackRestore(paths RestorePaths, stageDir string, rollbackDir string) {
-	if !safePathWithin(paths.BackupRoot, rollbackDir) || !safePathWithin(paths.BackupRoot, stageDir) {
-		return
+	stageRoot := restoreStagingRoot(paths)
+	rollbackRoot := restoreRollbackRoot(paths)
+	if !validRestoreRootPath(stageRoot, stageDir) || !validRestoreRootPath(rollbackRoot, rollbackDir) {
+		stageRoot = filepath.Join(filepath.Clean(paths.BackupRoot), stagingName)
+		rollbackRoot = filepath.Join(filepath.Clean(paths.BackupRoot), rollbackName)
+		if !validRestoreRootPath(stageRoot, stageDir) || !validRestoreRootPath(rollbackRoot, rollbackDir) {
+			return
+		}
 	}
 	for _, item := range []struct{ active, staged, old string }{
 		{paths.DatabasePath + "-shm", filepath.Join(stageDir, "atlasnote.db-shm"), filepath.Join(rollbackDir, "atlasnote.db-shm")},
@@ -635,6 +799,10 @@ func rollbackRestore(paths RestorePaths, stageDir string, rollbackDir string) {
 	}
 }
 
+func validRestoreRootPath(root string, candidate string) bool {
+	return safePathWithin(filepath.Dir(root), root) && safePathWithin(root, candidate)
+}
+
 func moveIfPresent(sourcePath string, destinationPath string) error {
 	info, err := os.Lstat(sourcePath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -644,10 +812,10 @@ func moveIfPresent(sourcePath string, destinationPath string) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return ErrRestoreApply
+		return fmt.Errorf("%w: symlink source %s", ErrRestoreApply, sourcePath)
 	}
 	if pathExists(destinationPath) {
-		return ErrRestoreApply
+		return fmt.Errorf("%w: destination already exists %s", ErrRestoreApply, destinationPath)
 	}
 	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
 		return err

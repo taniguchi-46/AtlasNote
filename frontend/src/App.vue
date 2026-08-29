@@ -6,6 +6,11 @@
       :space-name="startupStatus.activeStorageSpace?.name ?? '保存空間'"
       @unlocked="handleStorageSpaceUnlocked"
     />
+    <StorageLocationSetupScreen
+      v-else-if="startupStatus?.setupRequired || startupStatus?.phase === 'setup-required'"
+      :initial-status="startupStatus?.storageLocations"
+      @completed="handleStorageLocationCompleted"
+    />
     <template v-else>
     <AppTopBar
       ref="appTopBarRef"
@@ -127,6 +132,7 @@ import NoteImportModal from './components/NoteImportModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
 import StorageSpaceUnlockScreen from './components/StorageSpaceUnlockScreen.vue'
+import StorageLocationSetupScreen from './components/StorageLocationSetupScreen.vue'
 import ContentUnlockDialog from './components/ContentUnlockDialog.vue'
 import {
   deleteMissingNote,
@@ -148,6 +154,7 @@ import { useAIAssistantStore } from './stores/useAIAssistantStore'
 import { useAILibrarianStore } from './stores/useAILibrarianStore'
 import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
+import { useStorageLocationStore } from './stores/useStorageLocationStore'
 import { useBackupStore } from './stores/useBackupStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
@@ -189,6 +196,7 @@ const aiAssistantStore = useAIAssistantStore()
 const aiLibrarianStore = useAILibrarianStore()
 const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
+const storageLocationStore = useStorageLocationStore()
 const backupStore = useBackupStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
@@ -200,7 +208,7 @@ contentLockStore.setBeforeLock(() => noteStore.flushAllDirtyNotes())
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
-    isBackupBusy: () => backupStore.isBusy,
+     isBackupBusy: () => backupStore.isBusy || backupStore.status?.pendingRestore === true,
     isSyncBusy: () => syncStore.isBusy,
     isAIBusy: () => (
       aiStore.isSettingsBusy
@@ -216,6 +224,30 @@ storageSpaceStore.setSwitchLifecycle(
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
     notify: (message, code) => notificationStore.notify(message, {
       kind: 'warning', source: 'storage-space', code,
+    }),
+  }),
+  async () => {
+    await RestartApp()
+  },
+)
+storageLocationStore.setLifecycle(
+  () => prepareStorageSpaceSwitch({
+     isBackupBusy: () => backupStore.isBusy || backupStore.status?.pendingRestore === true,
+    isSyncBusy: () => syncStore.isBusy,
+    isAIBusy: () => (
+      aiStore.isSettingsBusy
+      || aiStore.isGenerating
+      || aiAssistantStore.isBusy
+      || aiLibrarianStore.isGenerating
+      || aiWritingStore.isBusy
+    ),
+    isImportBusy: () => noteImportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy,
+    suspendSync: () => syncStore.suspend(),
+    resumeSync: () => syncStore.resume(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    notify: (message, code) => notificationStore.notify(message, {
+      kind: 'warning', source: 'storage-location', code,
     }),
   }),
   async () => {
@@ -557,6 +589,18 @@ async function handleStorageSpaceUnlocked() {
   }
 }
 
+async function handleStorageLocationCompleted() {
+  try {
+    const status = await getStartupStatus()
+    startupStatus.value = status
+    if (status.ready) await initializeReadyWorkspace(status)
+  } catch {
+    notificationStore.notify('保存場所の設定後に起動状態を確認できませんでした', {
+      kind: 'error', source: 'storage-location', code: 'STORAGE_LOCATION_STARTUP_REFRESH_FAILED',
+    })
+  }
+}
+
 async function handleReinspectRecovery() {
   isRecoveryBusy.value = true
   recoveryError.value = ''
@@ -759,7 +803,7 @@ onMounted(async () => {
     ])
   }
 
-  if (startupStatus.value?.ready !== true) await storageSpaceStore.initialize()
+  if (startupStatus.value?.ready !== true && !startupStatus.value?.setupRequired) await storageSpaceStore.initialize()
 
   // Apply initial always-on-top status
   try {
@@ -779,6 +823,7 @@ onBeforeUnmount(() => {
   syncStore.dispose()
   backupStore.dispose()
   storageSpaceStore.clearSwitchLifecycle()
+  storageLocationStore.clearLifecycle()
   aiStore.discardSummary()
   contentLockAutoLock.dispose()
   contentLockStore.cancelAccessRequest()

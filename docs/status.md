@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-28
+最終更新: 2026-08-29
 
 ## 現在のフェーズ
 
@@ -28,7 +28,8 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「md・txt・HTMLからインポート」。OSネイティブの複数ファイル選択から、最上位・既存ノートブック・新規トップレベルノートブックへ1ファイル1ノートとして保存する。タイトルは自動・ファイル名・先頭見出し・メタデータから選択でき、候補がない場合はファイル名へフォールバックする。HTMLは許可した文書構造だけをMarkdownへ変換し、`hidden`属性を持つ本文と子孫、raw HTML、属性、スクリプト、CSS、外部リソースを保存しない。既存のNote Serviceを通じてMarkdown、SQLite、操作journal、検索・リンク索引、同期outbox、コンテンツロックを維持し、変換失敗はファイル単位、保存失敗は成功済みノートを保持する部分成功として扱う。インポート中は保存空間の切替を拒否する。設計は`docs/development/note-import.md`を正とする（2026-08-26）
 - Pre-Phase 5「単一ノートのHTML・PDFエクスポート」。dirty draftを既存保存laneでflushし、保存済みMarkdownとrevisionをsnapshotとしてGo側で再検証した後、OSネイティブ保存ダイアログの選択先へ原子的に出力する。HTMLはallowlist再サニタイズ、CSP、固定CSSを持つ自己完結文書とし、PDFは同梱Noto Sans JPを使うA4縦の直接生成とする。外部リソース・画像データは含めず、保護ノートは平文出力警告と明示確認を必須とする。エクスポート中の保存空間切替と重複実行を拒否し、保存先フルパス・本文・payloadをログや結果へ返さない。設計は`docs/development/note-export.md`を正とする（2026-08-27）
 - Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
-- Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを内部管理領域へ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
+- Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
+- Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト

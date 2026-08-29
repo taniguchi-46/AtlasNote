@@ -131,6 +131,103 @@ func TestBackupRootRejectsNonDirectoryInternalPath(t *testing.T) {
 	}
 }
 
+func TestAutomaticBackupUsesSeparateArchiveRoot(t *testing.T) {
+	workspace := newBackupTestWorkspace(t)
+	archiveRoot := t.TempDir()
+	workspace.service.paths.ArchiveRoot = archiveRoot
+	if _, err := workspace.notes.Create(t.Context(), note.CreateInput{Title: "外部保存", Content: "本文"}); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	result, err := workspace.service.CreateAutomaticBackup(t.Context())
+	if err != nil || result.Backup == nil {
+		t.Fatalf("create archive backup: %#v %v", result, err)
+	}
+	archivePath := filepath.Join(archiveRoot, backupDirectoryName, workspace.service.paths.SpaceID, generationsName, result.Backup.ID)
+	if _, err := os.Stat(filepath.Join(archivePath, manifestName)); err != nil {
+		t.Fatalf("archive manifest missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace.root, backupDirectoryName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("internal archive was unexpectedly used: %v", err)
+	}
+}
+
+func TestRestoreStagesInLocalWorkspaceWhenArchiveIsSeparate(t *testing.T) {
+	workspace := newBackupTestWorkspace(t)
+	archiveRoot := t.TempDir()
+	workspace.service.paths.ArchiveRoot = archiveRoot
+	workspace.service.paths.RestoreWorkspaceRoot = workspace.root
+	_, err := workspace.notes.Create(t.Context(), note.CreateInput{Title: "外部復元", Content: "復元前"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	automatic, err := workspace.service.CreateAutomaticBackup(t.Context())
+	if err != nil || automatic.Backup == nil {
+		t.Fatalf("create backup: %#v %v", automatic, err)
+	}
+	preview, err := workspace.service.PreviewRestore(t.Context(), automatic.Backup.ID)
+	if err != nil {
+		t.Fatalf("preview restore: %v", err)
+	}
+	if _, err := workspace.service.ExecuteRestore(t.Context(), RestoreExecutionInput{Token: preview.Token}); err != nil {
+		t.Fatalf("stage restore: %v", err)
+	}
+	localMarker := filepath.Join(workspace.root, restoreWorkspaceDirectory, workspace.service.paths.SpaceID, pendingName)
+	if _, err := os.Stat(localMarker); err != nil {
+		t.Fatalf("local pending marker missing: %v", err)
+	}
+	archiveMarker := filepath.Join(archiveRoot, backupDirectoryName, workspace.service.paths.SpaceID, pendingName)
+	if _, err := os.Stat(archiveMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("external archive contains pending marker: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace.root, restoreWorkspaceDirectory, workspace.service.paths.SpaceID, stagingName, preview.Token)); !errors.Is(err, os.ErrNotExist) {
+		// The staging directory is keyed by the generated operation ID, not the
+		// preview token. Check its parent instead.
+		if _, parentErr := os.Stat(filepath.Join(workspace.root, restoreWorkspaceDirectory, workspace.service.paths.SpaceID, stagingName)); parentErr != nil {
+			t.Fatalf("local restore staging missing: %v", parentErr)
+		}
+	}
+}
+
+func TestApplyPendingRestoreDoesNotRequireSeparateArchiveAfterStaging(t *testing.T) {
+	workspace := newBackupTestWorkspace(t)
+	archiveRoot := t.TempDir()
+	workspace.service.paths.ArchiveRoot = archiveRoot
+	workspace.service.paths.RestoreWorkspaceRoot = workspace.root
+	if _, err := workspace.notes.Create(t.Context(), note.CreateInput{Title: "外部復元適用", Content: "復元本文"}); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	automatic, err := workspace.service.CreateAutomaticBackup(t.Context())
+	if err != nil || automatic.Backup == nil {
+		t.Fatalf("create backup: %#v %v", automatic, err)
+	}
+	preview, err := workspace.service.PreviewRestore(t.Context(), automatic.Backup.ID)
+	if err != nil {
+		t.Fatalf("preview restore: %v", err)
+	}
+	if _, err := workspace.service.ExecuteRestore(t.Context(), RestoreExecutionInput{Token: preview.Token}); err != nil {
+		t.Fatalf("stage restore: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(archiveRoot, backupDirectoryName)); err != nil {
+		t.Fatalf("detach archive: %v", err)
+	}
+	workspace.service.Shutdown()
+	workspace.locks.Close()
+	if err := workspace.db.Close(); err != nil {
+		t.Fatalf("close current database: %v", err)
+	}
+	backupRoot, err := RootFor(archiveRoot, workspace.service.paths.SpaceID)
+	if err != nil {
+		t.Fatalf("resolve archive root: %v", err)
+	}
+	if _, err := ApplyPendingRestore(t.Context(), RestorePaths{
+		ManagementRoot: workspace.root, ArchiveRoot: archiveRoot, RestoreWorkspaceRoot: workspace.root,
+		BackupRoot: backupRoot, SpaceID: workspace.service.paths.SpaceID, DataDir: workspace.root,
+		DatabasePath: filepath.Join(workspace.root, "atlasnote.db"), NotesDir: filepath.Join(workspace.root, "notes"),
+	}); err != nil {
+		t.Fatalf("apply staged restore without archive: %v", err)
+	}
+}
+
 func TestRestoreStagesAndAppliesPreviousVaultWithSafetyBackup(t *testing.T) {
 	workspace := newBackupTestWorkspace(t)
 	created, err := workspace.notes.Create(t.Context(), note.CreateInput{Title: "復元前", Content: "元の本文"})

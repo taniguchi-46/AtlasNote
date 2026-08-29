@@ -23,7 +23,7 @@ export type SettingsTab =
   | 'shortcuts'
   | 'sync'
   | 'ai'
-  | 'storage-spaces'
+  | 'storage-locations'
   | 'backups'
   | 'locks'
 

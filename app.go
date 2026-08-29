@@ -42,9 +42,13 @@ type App struct {
 	backupService               *backupservice.Service
 	spaceRegistry               *notespace.Registry
 	activeSpace                 notespace.Space
+	managementRoot              string
+	archiveRoot                 string
+	locationResolution          config.LocationResolution
 	dataDir                     string
 	notesDir                    string
 	startupErr                  error
+	startupPhase                StartupPhase
 	startupLocked               bool
 	recoveryReport              note.RecoveryReport
 	syncRecoveryBackup          string
@@ -55,11 +59,16 @@ type App struct {
 	allowClose                  bool
 	importMu                    sync.Mutex
 	openImportFiles             func(context.Context, runtime.OpenDialogOptions) ([]string, error)
+	openDirectory               func(context.Context, runtime.OpenDialogOptions) (string, error)
 	exportMu                    sync.Mutex
 	saveExportFile              func(context.Context, runtime.SaveDialogOptions) (string, error)
 	restartExecutable           string
 	startProcess                func(string) error
 	quitApplication             func(context.Context)
+	locationMu                  sync.Mutex
+	pendingDataRoot             string
+	pendingBackupRoot           string
+	pendingBackupFollowsData    bool
 }
 
 var (
@@ -76,6 +85,8 @@ func backupStartupError(err error) error {
 }
 
 type StartupStatus struct {
+	Phase                       StartupPhase            `json:"phase,omitempty"`
+	SetupRequired               bool                    `json:"setupRequired"`
 	Ready                       bool                    `json:"ready"`
 	Locked                      bool                    `json:"locked"`
 	Degraded                    bool                    `json:"degraded"`
@@ -85,7 +96,18 @@ type StartupStatus struct {
 	SyncRecoveryBackup          string                  `json:"syncRecoveryBackup,omitempty"`
 	BackupRestoreSafetyBackupID string                  `json:"backupRestoreSafetyBackupId,omitempty"`
 	ActiveStorageSpace          *notespace.Space        `json:"activeStorageSpace,omitempty"`
+	StorageLocations            *StorageLocationStatus  `json:"storageLocations,omitempty"`
 }
+
+type StartupPhase string
+
+const (
+	StartupPhaseInitializing  StartupPhase = "initializing"
+	StartupPhaseSetupRequired StartupPhase = "setup-required"
+	StartupPhaseReady         StartupPhase = "ready"
+	StartupPhaseLocked        StartupPhase = "locked"
+	StartupPhaseError         StartupPhase = "error"
+)
 
 type MissingNoteDiagnostic struct {
 	ID       string `json:"id"`
@@ -1421,6 +1443,12 @@ func (a *App) prepareStorageSpace(ctx context.Context, dataDir string) (returnEr
 func (a *App) GetStartupStatus() StartupStatus {
 	a.statusMu.RLock()
 	defer a.statusMu.RUnlock()
+	locationStatus, _ := a.storageLocationStatus()
+	locationStatusPtr := &locationStatus
+	phase := a.startupPhase
+	if phase == "" {
+		phase = StartupPhaseReady
+	}
 
 	var activeStorageSpace *notespace.Space
 	if a.activeSpace.ID != "" {
@@ -1430,16 +1458,31 @@ func (a *App) GetStartupStatus() StartupStatus {
 
 	if a.startupErr != nil {
 		return StartupStatus{
+			Phase:                       StartupPhaseError,
 			Ready:                       false,
 			Message:                     a.startupErr.Error(),
 			DataDir:                     a.dataDir,
 			MissingNotes:                []MissingNoteDiagnostic{},
 			BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
 			ActiveStorageSpace:          activeStorageSpace,
+			StorageLocations:            locationStatusPtr,
+		}
+	}
+	if phase == StartupPhaseSetupRequired || a.locationResolution.SetupRequired {
+		return StartupStatus{
+			Phase:                       StartupPhaseSetupRequired,
+			SetupRequired:               true,
+			Ready:                       false,
+			Message:                     "保存場所を選択するとAtlas Noteを開始できます。",
+			DataDir:                     a.dataDir,
+			MissingNotes:                []MissingNoteDiagnostic{},
+			BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
+			StorageLocations:            locationStatusPtr,
 		}
 	}
 	if a.startupLocked {
 		return StartupStatus{
+			Phase:                       StartupPhaseLocked,
 			Ready:                       false,
 			Locked:                      true,
 			Message:                     "この保存空間はロックされています。",
@@ -1447,6 +1490,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 			MissingNotes:                []MissingNoteDiagnostic{},
 			BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
 			ActiveStorageSpace:          activeStorageSpace,
+			StorageLocations:            locationStatusPtr,
 		}
 	}
 
@@ -1459,6 +1503,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 		})
 	}
 	return StartupStatus{
+		Phase:                       phase,
 		Ready:                       true,
 		Degraded:                    len(missingNotes) > 0,
 		DataDir:                     a.dataDir,
@@ -1466,25 +1511,58 @@ func (a *App) GetStartupStatus() StartupStatus {
 		SyncRecoveryBackup:          a.syncRecoveryBackup,
 		BackupRestoreSafetyBackupID: a.backupRestoreSafetyBackupID,
 		ActiveStorageSpace:          activeStorageSpace,
+		StorageLocations:            locationStatusPtr,
 	}
 }
 
 func (a *App) initialize(ctx context.Context) {
-	basePaths, err := config.LoadPaths()
-	if err != nil {
+	a.statusMu.Lock()
+	a.startupPhase = StartupPhaseInitializing
+	a.statusMu.Unlock()
+	if _, err := config.ApplyPendingStorageLocationMigration(ctx); err != nil {
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
-	a.dataDir = basePaths.DataDir
-	spaceRegistry, err := notespace.Open(basePaths.DataDir)
+	resolution, err := config.ResolveStorageLocations()
 	if err != nil {
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
+		return
+	}
+	a.locationResolution = resolution
+	a.managementRoot = resolution.Locations.DataRoot
+	a.archiveRoot = resolution.Locations.BackupRoot
+	if a.archiveRoot == "" {
+		a.archiveRoot = a.managementRoot
+	}
+	a.dataDir = a.managementRoot
+	if resolution.SetupRequired {
+		a.statusMu.Lock()
+		a.startupPhase = StartupPhaseSetupRequired
+		a.statusMu.Unlock()
+		return
+	}
+	spaceRegistry, err := notespace.Open(a.managementRoot)
+	if err != nil {
+		a.statusMu.Lock()
+		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	a.spaceRegistry = spaceRegistry
+	a.managementRoot = spaceRegistry.Root()
 	activeSpace, activeDataDir, err := spaceRegistry.Active()
 	if err != nil {
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	a.activeSpace = activeSpace
@@ -1493,25 +1571,34 @@ func (a *App) initialize(ctx context.Context) {
 	a.notesDir = paths.NotesDir
 	dataLock, err := datalock.Acquire(paths.LockPath)
 	if err != nil {
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	a.dataLock = dataLock
-	backupRoot, err := backupservice.RootFor(spaceRegistry.Root(), activeSpace.ID)
+	backupRoot, err := backupservice.RootFor(a.archiveRoot, activeSpace.ID)
 	if err != nil {
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
 		a.startupErr = backupStartupError(err)
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	backupApplyResult, err := backupservice.ApplyPendingRestore(ctx, backupservice.RestorePaths{
-		ManagementRoot: spaceRegistry.Root(), BackupRoot: backupRoot, SpaceID: activeSpace.ID,
+		ManagementRoot: spaceRegistry.Root(), ArchiveRoot: a.archiveRoot, RestoreWorkspaceRoot: spaceRegistry.Root(), BackupRoot: backupRoot, SpaceID: activeSpace.ID,
 		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
 	})
 	if err != nil {
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
 		a.startupErr = backupStartupError(err)
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	a.backupRestoreSafetyBackupID = backupApplyResult.RestoreSafetyBackupID
@@ -1521,7 +1608,10 @@ func (a *App) initialize(ctx context.Context) {
 	if err != nil {
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	a.syncRecoveryBackup = backupPath
@@ -1530,7 +1620,10 @@ func (a *App) initialize(ctx context.Context) {
 	if err != nil {
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
+		a.startupPhase = StartupPhaseError
 		a.startupErr = err
+		a.statusMu.Unlock()
 		return
 	}
 
@@ -1539,7 +1632,10 @@ func (a *App) initialize(ctx context.Context) {
 		_ = db.Close()
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
+		a.startupPhase = StartupPhaseError
 		a.startupErr = err
+		a.statusMu.Unlock()
 		return
 	}
 
@@ -1554,7 +1650,10 @@ func (a *App) initialize(ctx context.Context) {
 		a.db = nil
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	spaceStatus, err := a.contentLocks.GetTargetStatus(ctx, contentlock.Target{Type: contentlock.TargetSpace})
@@ -1566,11 +1665,17 @@ func (a *App) initialize(ctx context.Context) {
 		a.db = nil
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
 		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
 		return
 	}
 	if spaceStatus.Locked {
+		a.statusMu.Lock()
 		a.startupLocked = true
+		a.startupPhase = StartupPhaseLocked
+		a.statusMu.Unlock()
 		return
 	}
 	if err := a.initializeServices(ctx, db, store, paths); err != nil {
@@ -1581,8 +1686,15 @@ func (a *App) initialize(ctx context.Context) {
 		a.db = nil
 		_ = a.dataLock.Release()
 		a.dataLock = nil
+		a.statusMu.Lock()
+		a.startupPhase = StartupPhaseError
 		a.startupErr = err
+		a.statusMu.Unlock()
+		return
 	}
+	a.statusMu.Lock()
+	a.startupPhase = StartupPhaseReady
+	a.statusMu.Unlock()
 }
 
 func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage.MarkdownStore, paths config.Paths) error {
@@ -1617,11 +1729,11 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	if a.spaceRegistry == nil {
 		return backupservice.ErrUnavailable
 	}
-	if _, err := backupservice.RootFor(a.spaceRegistry.Root(), a.activeSpace.ID); err != nil {
+	if _, err := backupservice.RootFor(a.archiveRoot, a.activeSpace.ID); err != nil {
 		return err
 	}
 	backupService := backupservice.NewService(db, service, a.contentLocks, backupservice.Paths{
-		ManagementRoot: a.spaceRegistry.Root(), SpaceID: a.activeSpace.ID,
+		ManagementRoot: a.spaceRegistry.Root(), ArchiveRoot: a.archiveRoot, RestoreWorkspaceRoot: a.spaceRegistry.Root(), SpaceID: a.activeSpace.ID,
 		DataDir: paths.DataDir, DatabasePath: paths.DatabasePath, NotesDir: paths.NotesDir,
 	})
 	if backupService == nil {

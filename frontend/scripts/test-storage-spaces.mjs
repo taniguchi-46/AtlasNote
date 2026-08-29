@@ -74,8 +74,13 @@ try {
     readFile(appPath, 'utf8'),
     readFile(topBarPath, 'utf8'),
   ])
-  assert.match(settingsSource, /value="storage-spaces"/, 'Settings must contain the storage-space tab')
-  assert.match(settingsSource, /StorageSpaceSettingsPanel/, 'Settings must render the storage-space panel')
+  assert.match(settingsSource, /value="storage-locations"/, 'Settings must contain the storage-location tab')
+  assert.doesNotMatch(settingsSource, /value="storage-spaces"/, 'Settings must not keep a standalone storage-space tab')
+  assert.match(
+    settingsSource,
+    /<StorageLocationSettingsPanel\s*\/>\s*<div class="storage-space-settings-section">\s*<StorageSpaceSettingsPanel\s*\/>/,
+    'Settings must render storage spaces below storage locations',
+  )
   assert.match(panelSource, /保存空間の一覧/, 'the panel must expose a storage-space list')
   assert.match(panelSource, /新しい保存空間/, 'the panel must expose internal space creation')
   assert.match(panelSource, /保存して再起動/, 'switching must clearly state the automatic restart flow')
