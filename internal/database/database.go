@@ -3,21 +3,31 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
 
+// ErrDatabaseVersionTooNew indicates that the database requires a newer Atlas Note version.
+var ErrDatabaseVersionTooNew = errors.New("database version is newer than supported")
+
 func Open(ctx context.Context, databasePath string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(databasePath), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", databasePath)
+	db, err := sql.Open("sqlite", sqliteDSN(databasePath))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
+	}
+
+	if _, err := validateSchemaVersion(ctx, db, len(migrations)); err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	if err := configure(ctx, db); err != nil {
@@ -33,17 +43,40 @@ func Open(ctx context.Context, databasePath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func configure(ctx context.Context, db *sql.DB) error {
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA journal_mode = WAL",
-	}
+func sqliteDSN(databasePath string) string {
+	return sqliteDSNWithMode(databasePath, "")
+}
 
-	for _, pragma := range pragmas {
-		if _, err := db.ExecContext(ctx, pragma); err != nil {
-			return fmt.Errorf("configure sqlite: %w", err)
+func sqliteDSNWithMode(databasePath string, mode string) string {
+	dsn := &url.URL{
+		Scheme: "file",
+		Opaque: filepath.ToSlash(databasePath),
+	}
+	query := dsn.Query()
+	if mode != "" {
+		query.Add("mode", mode)
+		if mode == "ro" {
+			// Validation must not create WAL/SHM sidecars beside an immutable
+			// snapshot or observe a partially changing file.
+			query.Add("immutable", "1")
 		}
+	}
+	query.Add("_pragma", "foreign_keys(ON)")
+	query.Add("_pragma", "busy_timeout(5000)")
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
+}
+
+func configure(ctx context.Context, db *sql.DB) error {
+	var journalMode string
+	// デフォルトのDELETEモードではなくWAL（Write-Ahead Logging）モードを明示的に指定する。
+	// これにより、読み込みと書き込みが互いにブロックしにくくなり並行処理性能が向上するだけでなく、
+	// アプリケーションがクラッシュした際のデータベース破損リスクも低減される。
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+		return fmt.Errorf("configure sqlite journal mode: %w", err)
+	}
+	if journalMode != "wal" {
+		return fmt.Errorf("configure sqlite journal mode: got %q, want %q", journalMode, "wal")
 	}
 
 	return nil
@@ -51,26 +84,429 @@ func configure(ctx context.Context, db *sql.DB) error {
 
 var migrations = []string{
 	`
+CREATE TABLE IF NOT EXISTS notebooks (
+	id TEXT PRIMARY KEY,
+	parent_id TEXT,
+	name TEXT NOT NULL,
+	icon TEXT NOT NULL DEFAULT 'default:note',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS notes (
 	id TEXT PRIMARY KEY,
+	notebook_id TEXT,
 	title TEXT NOT NULL,
 	content_path TEXT NOT NULL UNIQUE,
+	is_favorite BOOLEAN NOT NULL DEFAULT 0,
+	is_pinned BOOLEAN NOT NULL DEFAULT 0,
+	is_trashed BOOLEAN NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(notebook_id) REFERENCES notebooks(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
+`,
+	`
+CREATE TABLE IF NOT EXISTS note_storage_operations (
+	operation_id TEXT PRIMARY KEY,
+	note_id TEXT NOT NULL UNIQUE,
+	operation_type TEXT NOT NULL CHECK(operation_type IN ('upsert', 'delete')),
+	content_hash TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
+	ON note_storage_operations(note_id);
+`,
+	`
+ALTER TABLE notes
+	ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1);
+	`,
+	`
+CREATE VIRTUAL TABLE IF NOT EXISTS note_search USING fts5(
+	note_id UNINDEXED,
+	title,
+	body,
+	tokenize = 'trigram'
+);
+
+CREATE TABLE IF NOT EXISTS note_search_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
+	ON note_search_state(indexed_revision);
+	`,
+	`
+ALTER TABLE note_search_state
+	ADD COLUMN content_mtime_ns INTEGER NOT NULL DEFAULT 0;
+	`,
+	`
+CREATE TABLE IF NOT EXISTS tags (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+	normalized_name TEXT NOT NULL UNIQUE CHECK(length(normalized_name) > 0),
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
-`,
+CREATE TABLE IF NOT EXISTS note_tags (
+	note_id TEXT NOT NULL,
+	tag_id TEXT NOT NULL,
+	PRIMARY KEY (note_id, tag_id),
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+	CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
+		ON note_tags(tag_id, note_id);
+	`,
+	`
+CREATE TABLE IF NOT EXISTS note_links (
+	source_note_id TEXT NOT NULL,
+	target_note_id TEXT NOT NULL,
+	PRIMARY KEY (source_note_id, target_note_id),
+	FOREIGN KEY(source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_links_target_source
+	ON note_links(target_note_id, source_note_id);
+
+CREATE TABLE IF NOT EXISTS note_link_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
+	indexed_at TEXT NOT NULL,
+FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+	`,
+	`
+CREATE TABLE IF NOT EXISTS sync_connections (
+	id INTEGER PRIMARY KEY CHECK(id = 1),
+	endpoint TEXT NOT NULL,
+	remote_root TEXT NOT NULL,
+	username TEXT NOT NULL DEFAULT '',
+	vault_id TEXT NOT NULL,
+	head_manifest_hash TEXT NOT NULL DEFAULT '',
+	head_etag TEXT NOT NULL DEFAULT '',
+	last_sync_at TEXT,
+	status TEXT NOT NULL DEFAULT 'disabled',
+	auto_sync BOOLEAN NOT NULL DEFAULT 0,
+	credential_ref TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_item_states (
+	entity_key TEXT PRIMARY KEY,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL DEFAULT '',
+	base_object_hash TEXT NOT NULL DEFAULT '',
+	remote_object_hash TEXT NOT NULL DEFAULT '',
+	body_hash TEXT NOT NULL DEFAULT '',
+	metadata_hash TEXT NOT NULL DEFAULT '',
+	resolution_state TEXT NOT NULL DEFAULT 'synced',
+	snapshot_json TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+	change_set_id TEXT NOT NULL,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	base_manifest_hash TEXT NOT NULL DEFAULT '',
+	base_head_etag TEXT NOT NULL DEFAULT '',
+	object_json TEXT NOT NULL DEFAULT '',
+	deleted BOOLEAN NOT NULL DEFAULT 0,
+	attempt_count INTEGER NOT NULL DEFAULT 0,
+	next_retry_at TEXT NOT NULL,
+	failed_class TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	UNIQUE(change_set_id, entity_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending
+	ON sync_outbox(next_retry_at, sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_entity
+	ON sync_outbox(entity_key, sequence);
+
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+	conflict_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL,
+	base_object_hash TEXT NOT NULL,
+	remote_object_hash TEXT NOT NULL,
+	local_snapshot_json TEXT NOT NULL DEFAULT '',
+	base_snapshot_json TEXT NOT NULL DEFAULT '',
+	remote_snapshot_json TEXT NOT NULL DEFAULT '',
+	conflict_type TEXT NOT NULL,
+	resolution_status TEXT NOT NULL DEFAULT 'open',
+	created_at TEXT NOT NULL,
+	resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status
+	ON sync_conflicts(resolution_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sync_snapshots (
+	snapshot_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	object_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_snapshots_entity
+	ON sync_snapshots(entity_key, created_at);
+	`,
+	`
+ALTER TABLE sync_connections
+	ADD COLUMN allow_insecure_http BOOLEAN NOT NULL DEFAULT 0;
+	`,
+	`
+ALTER TABLE sync_connections
+	ADD COLUMN sync_interval_seconds INTEGER NOT NULL DEFAULT 0
+	CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400));
+UPDATE sync_connections
+	SET sync_interval_seconds = CASE WHEN auto_sync THEN 300 ELSE 0 END;
+ALTER TABLE sync_connections
+	ADD COLUMN fail_safe BOOLEAN NOT NULL DEFAULT 1;
+ALTER TABLE sync_connections
+	ADD COLUMN custom_tls_certificates TEXT NOT NULL DEFAULT '';
+ALTER TABLE sync_connections
+	ADD COLUMN ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_enabled BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE sync_connections
+	ADD COLUMN proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1
+	CHECK(proxy_timeout_seconds BETWEEN 1 AND 60);
+	`,
+	`
+CREATE TABLE IF NOT EXISTS ai_provider_settings (
+	provider_id TEXT PRIMARY KEY CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL DEFAULT '',
+	credential_ref TEXT NOT NULL,
+	credential_storage TEXT NOT NULL CHECK(credential_storage IN ('persistent', 'session-only')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+	`,
+	`
+CREATE TABLE IF NOT EXISTS ai_histories (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('qa', 'brainstorm')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_messages (
+	history_id TEXT NOT NULL,
+	sequence INTEGER NOT NULL CHECK(sequence >= 1),
+	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY(history_id, sequence),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_sources (
+	history_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(history_id, note_id),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_histories_status_updated_at
+	ON ai_histories(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_history_sources_note_id
+	ON ai_history_sources(note_id);
+
+CREATE TABLE IF NOT EXISTS ai_artifacts (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_artifact_sources (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+	`,
+	`
+-- SQLite cannot extend a CHECK constraint in place. Rebuild the artifact
+-- tables inside the migration transaction so existing writing artifacts and
+-- their source references remain intact while adding the summary kind.
+CREATE TABLE ai_artifacts_v13 (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('summary', 'prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE ai_artifact_sources_v13 (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts_v13(id) ON DELETE CASCADE
+);
+
+INSERT INTO ai_artifacts_v13(
+	id, kind, title, provider_id, model_id, content, status, created_at, updated_at
+)
+SELECT id, kind, title, provider_id, model_id, content, status, created_at, updated_at
+FROM ai_artifacts;
+
+INSERT INTO ai_artifact_sources_v13(artifact_id, note_id, input_revision)
+SELECT artifact_id, note_id, input_revision
+FROM ai_artifact_sources;
+
+DROP TABLE ai_artifact_sources;
+DROP TABLE ai_artifacts;
+ALTER TABLE ai_artifacts_v13 RENAME TO ai_artifacts;
+ALTER TABLE ai_artifact_sources_v13 RENAME TO ai_artifact_sources;
+
+CREATE INDEX idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+	`,
+	`
+ALTER TABLE ai_provider_settings
+	ADD COLUMN is_selected BOOLEAN NOT NULL DEFAULT 0 CHECK(is_selected IN (0, 1));
+
+-- Earlier versions stored credentials and models per provider but did not
+-- retain which configured provider the user had applied most recently.
+UPDATE ai_provider_settings
+SET is_selected = 1
+WHERE provider_id = (
+	SELECT provider_id
+	FROM ai_provider_settings
+	ORDER BY updated_at DESC, provider_id ASC
+	LIMIT 1
+);
+
+CREATE UNIQUE INDEX idx_ai_provider_settings_one_selected
+	ON ai_provider_settings(is_selected)
+	WHERE is_selected = 1;
+	`,
+	`
+CREATE TABLE IF NOT EXISTS content_locks (
+	id TEXT PRIMARY KEY,
+	target_type TEXT NOT NULL CHECK(target_type IN ('space', 'notebook', 'note')),
+	target_id TEXT NOT NULL,
+	kdf_salt BLOB NOT NULL,
+	kdf_memory_kib INTEGER NOT NULL CHECK(kdf_memory_kib >= 8192),
+	kdf_iterations INTEGER NOT NULL CHECK(kdf_iterations >= 1),
+	kdf_parallelism INTEGER NOT NULL CHECK(kdf_parallelism >= 1),
+	wrap_nonce BLOB NOT NULL,
+	wrapped_key BLOB NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	UNIQUE(target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_locks_target
+	ON content_locks(target_type, target_id);
+
+-- Lock conversion is staged before metadata becomes visible.  After the
+-- metadata transaction commits, all temporary files are already present and
+-- can be atomically promoted without requiring a passphrase during startup
+-- recovery.
+CREATE TABLE IF NOT EXISTS content_lock_operations (
+	operation_id TEXT PRIMARY KEY,
+	operation_kind TEXT NOT NULL CHECK(operation_kind IN ('enable', 'disable')),
+	target_type TEXT NOT NULL CHECK(target_type IN ('space', 'notebook', 'note')),
+	target_id TEXT NOT NULL,
+	lock_id TEXT NOT NULL,
+	kdf_salt BLOB,
+	kdf_memory_kib INTEGER,
+	kdf_iterations INTEGER,
+	kdf_parallelism INTEGER,
+	wrap_nonce BLOB,
+	wrapped_key BLOB,
+	delete_ai_records BOOLEAN NOT NULL DEFAULT 0,
+	stage TEXT NOT NULL CHECK(stage IN ('staging', 'committing')),
+	created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS content_lock_operation_notes (
+	operation_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	PRIMARY KEY(operation_id, note_id),
+	FOREIGN KEY(operation_id) REFERENCES content_lock_operations(operation_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_lock_operation_notes_note
+	ON content_lock_operation_notes(note_id);
+	`,
+	`
+-- Notebook deletion in older databases could leave notes pointing at
+-- a notebook that no longer exists. Clear only those invalid references so
+-- note metadata and content remain unchanged.
+UPDATE notes
+SET notebook_id = NULL
+WHERE notebook_id IS NOT NULL
+	AND NOT EXISTS (
+		SELECT 1
+		FROM notebooks
+		WHERE notebooks.id = notes.notebook_id
+	);
+	`,
 }
 
 func Migrate(ctx context.Context, db *sql.DB) error {
-	var userVersion int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
+	return migrate(ctx, db, migrations)
+}
+
+func migrate(ctx context.Context, db *sql.DB, migrationSet []string) error {
+	userVersion, err := validateSchemaVersion(ctx, db, len(migrationSet))
+	if err != nil {
+		return err
 	}
 
-	if userVersion >= len(migrations) {
-		return nil // Up to date
+	if userVersion == len(migrationSet) {
+		return ensureCompatibleSchema(ctx, db)
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -79,13 +515,13 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	for i := userVersion; i < len(migrations); i++ {
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
+	for i := userVersion; i < len(migrationSet); i++ {
+		if _, err := tx.ExecContext(ctx, migrationSet[i]); err != nil {
 			return fmt.Errorf("migrate version %d: %w", i+1, err)
 		}
 	}
 
-	newVersion := len(migrations)
+	newVersion := len(migrationSet)
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", newVersion)); err != nil {
 		return fmt.Errorf("update user_version: %w", err)
 	}
@@ -94,5 +530,404 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("commit migration tx: %w", err)
 	}
 
+	return ensureCompatibleSchema(ctx, db)
+}
+
+func validateSchemaVersion(ctx context.Context, db *sql.DB, currentVersion int) (int, error) {
+	var userVersion int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVersion); err != nil {
+		return 0, fmt.Errorf("read user_version: %w", err)
+	}
+
+	// 現在のアプリが想定しているマイグレーションの数（currentVersion）よりも
+	// DBファイルのバージョン（userVersion）が新しい場合、起動をブロックする。
+	// これを許可してしまうと、古い仕様のアプリが新しいスキーマのデータを誤って読み書きし、
+	// データ構造を修復不能な状態に破壊してしまう恐れがあるため。
+	if userVersion > currentVersion {
+		return 0, fmt.Errorf("%w: database version %d, supported version %d", ErrDatabaseVersionTooNew, userVersion, currentVersion)
+	}
+
+	return userVersion, nil
+}
+
+func ensureCompatibleSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS notebooks (
+	id TEXT PRIMARY KEY,
+	parent_id TEXT,
+	name TEXT NOT NULL,
+	icon TEXT NOT NULL DEFAULT 'default:note',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(parent_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+`); err != nil {
+		return fmt.Errorf("ensure notebooks table: %w", err)
+	}
+
+	notebookColumns, err := tableColumns(ctx, db, "notebooks")
+	if err != nil {
+		return err
+	}
+	if !notebookColumns["icon"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE notebooks ADD COLUMN icon TEXT NOT NULL DEFAULT 'default:note'"); err != nil {
+			return fmt.Errorf("add notebooks.icon column: %w", err)
+		}
+	}
+
+	columns, err := tableColumns(ctx, db, "notes")
+	if err != nil {
+		return err
+	}
+
+	requiredColumns := map[string]string{
+		"notebook_id": "TEXT",
+		"is_favorite": "BOOLEAN NOT NULL DEFAULT 0",
+		"is_pinned":   "BOOLEAN NOT NULL DEFAULT 0",
+		"is_trashed":  "BOOLEAN NOT NULL DEFAULT 0",
+		"revision":    "INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1)",
+	}
+	for name, definition := range requiredColumns {
+		if columns[name] {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE notes ADD COLUMN %s %s", name, definition)); err != nil {
+			return fmt.Errorf("add notes.%s column: %w", name, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS note_storage_operations (
+	operation_id TEXT PRIMARY KEY,
+	note_id TEXT NOT NULL UNIQUE,
+	operation_type TEXT NOT NULL CHECK(operation_type IN ('upsert', 'delete')),
+	content_hash TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
+CREATE INDEX IF NOT EXISTS idx_notebooks_parent_id ON notebooks(parent_id);
+CREATE INDEX IF NOT EXISTS idx_note_storage_operations_note_id
+	ON note_storage_operations(note_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS note_search USING fts5(
+	note_id UNINDEXED,
+	title,
+	body,
+	tokenize = 'trigram'
+);
+
+CREATE TABLE IF NOT EXISTS note_search_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_search_state_revision
+	ON note_search_state(indexed_revision);
+
+CREATE TABLE IF NOT EXISTS tags (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+	normalized_name TEXT NOT NULL UNIQUE CHECK(length(normalized_name) > 0),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS note_tags (
+	note_id TEXT NOT NULL,
+	tag_id TEXT NOT NULL,
+	PRIMARY KEY (note_id, tag_id),
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id_note_id
+	ON note_tags(tag_id, note_id);
+
+CREATE TABLE IF NOT EXISTS note_links (
+	source_note_id TEXT NOT NULL,
+	target_note_id TEXT NOT NULL,
+	PRIMARY KEY (source_note_id, target_note_id),
+	FOREIGN KEY(source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+	FOREIGN KEY(target_note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_links_target_source
+	ON note_links(target_note_id, source_note_id);
+
+CREATE TABLE IF NOT EXISTS note_link_state (
+	note_id TEXT PRIMARY KEY,
+	indexed_revision INTEGER NOT NULL CHECK(indexed_revision >= 1),
+	content_hash TEXT NOT NULL,
+	content_mtime_ns INTEGER NOT NULL DEFAULT 0,
+	indexed_at TEXT NOT NULL,
+	FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+`); err != nil {
+		return fmt.Errorf("ensure indexes: %w", err)
+	}
+
+	if err := ensureSyncSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureAIProviderSettingsSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureAIHistorySchema(ctx, db); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func ensureAIProviderSettingsSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS ai_provider_settings (
+	provider_id TEXT PRIMARY KEY CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL DEFAULT '',
+	credential_ref TEXT NOT NULL,
+	credential_storage TEXT NOT NULL CHECK(credential_storage IN ('persistent', 'session-only')),
+	is_selected BOOLEAN NOT NULL DEFAULT 0 CHECK(is_selected IN (0, 1)),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_provider_settings_one_selected
+	ON ai_provider_settings(is_selected)
+	WHERE is_selected = 1;
+`); err != nil {
+		return fmt.Errorf("ensure AI provider settings schema: %w", err)
+	}
+	return nil
+}
+
+func ensureAIHistorySchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS ai_histories (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('qa', 'brainstorm')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_messages (
+	history_id TEXT NOT NULL,
+	sequence INTEGER NOT NULL CHECK(sequence >= 1),
+	role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY(history_id, sequence),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_history_sources (
+	history_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(history_id, note_id),
+	FOREIGN KEY(history_id) REFERENCES ai_histories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_histories_status_updated_at
+	ON ai_histories(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_history_sources_note_id
+	ON ai_history_sources(note_id);
+
+CREATE TABLE IF NOT EXISTS ai_artifacts (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK(kind IN ('summary', 'prompt', 'prompt-improvement', 'readme', 'document', 'blog', 'requirements')),
+	title TEXT NOT NULL DEFAULT '',
+	provider_id TEXT NOT NULL CHECK(provider_id IN ('openrouter', 'gemini')),
+	model_id TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved', 'stale', 'orphaned')),
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_artifact_sources (
+	artifact_id TEXT NOT NULL,
+	note_id TEXT NOT NULL,
+	input_revision INTEGER NOT NULL CHECK(input_revision >= 1),
+	PRIMARY KEY(artifact_id, note_id),
+	FOREIGN KEY(artifact_id) REFERENCES ai_artifacts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_artifacts_status_updated_at
+	ON ai_artifacts(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_artifact_sources_note_id
+	ON ai_artifact_sources(note_id);
+`); err != nil {
+		return fmt.Errorf("ensure AI history schema: %w", err)
+	}
+	return nil
+}
+
+func ensureSyncSchema(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS sync_connections (
+	id INTEGER PRIMARY KEY CHECK(id = 1),
+	endpoint TEXT NOT NULL,
+	remote_root TEXT NOT NULL,
+	username TEXT NOT NULL DEFAULT '',
+	vault_id TEXT NOT NULL,
+	head_manifest_hash TEXT NOT NULL DEFAULT '',
+	head_etag TEXT NOT NULL DEFAULT '',
+	last_sync_at TEXT,
+	status TEXT NOT NULL DEFAULT 'disabled',
+	auto_sync BOOLEAN NOT NULL DEFAULT 0,
+	allow_insecure_http BOOLEAN NOT NULL DEFAULT 0,
+	sync_interval_seconds INTEGER NOT NULL DEFAULT 0
+		CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400)),
+	fail_safe BOOLEAN NOT NULL DEFAULT 1,
+	custom_tls_certificates TEXT NOT NULL DEFAULT '',
+	ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0,
+	proxy_enabled BOOLEAN NOT NULL DEFAULT 0,
+	proxy_url TEXT NOT NULL DEFAULT '',
+	proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1
+		CHECK(proxy_timeout_seconds BETWEEN 1 AND 60),
+	credential_ref TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_item_states (
+	entity_key TEXT PRIMARY KEY,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL DEFAULT '',
+	base_object_hash TEXT NOT NULL DEFAULT '',
+	remote_object_hash TEXT NOT NULL DEFAULT '',
+	body_hash TEXT NOT NULL DEFAULT '',
+	metadata_hash TEXT NOT NULL DEFAULT '',
+	resolution_state TEXT NOT NULL DEFAULT 'synced',
+	snapshot_json TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+	sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+	change_set_id TEXT NOT NULL,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	base_manifest_hash TEXT NOT NULL DEFAULT '',
+	base_head_etag TEXT NOT NULL DEFAULT '',
+	object_json TEXT NOT NULL DEFAULT '',
+	deleted BOOLEAN NOT NULL DEFAULT 0,
+	attempt_count INTEGER NOT NULL DEFAULT 0,
+	next_retry_at TEXT NOT NULL,
+	failed_class TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	UNIQUE(change_set_id, entity_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending
+	ON sync_outbox(next_retry_at, sequence);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_entity
+	ON sync_outbox(entity_key, sequence);
+
+CREATE TABLE IF NOT EXISTS sync_conflicts (
+	conflict_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	local_object_hash TEXT NOT NULL,
+	base_object_hash TEXT NOT NULL,
+	remote_object_hash TEXT NOT NULL,
+	local_snapshot_json TEXT NOT NULL DEFAULT '',
+	base_snapshot_json TEXT NOT NULL DEFAULT '',
+	remote_snapshot_json TEXT NOT NULL DEFAULT '',
+	conflict_type TEXT NOT NULL,
+	resolution_status TEXT NOT NULL DEFAULT 'open',
+	created_at TEXT NOT NULL,
+	resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status
+	ON sync_conflicts(resolution_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sync_snapshots (
+	snapshot_id TEXT PRIMARY KEY,
+	entity_key TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	object_hash TEXT NOT NULL,
+	object_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_snapshots_entity
+	ON sync_snapshots(entity_key, created_at);
+`); err != nil {
+		return fmt.Errorf("ensure sync schema: %w", err)
+	}
+	columns, err := tableColumns(ctx, db, "sync_connections")
+	if err != nil {
+		return err
+	}
+	if !columns["username"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sync_connections ADD COLUMN username TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add sync connection username column: %w", err)
+		}
+	}
+	if !columns["allow_insecure_http"] {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sync_connections ADD COLUMN allow_insecure_http BOOLEAN NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add sync connection http policy column: %w", err)
+		}
+	}
+	additions := []struct {
+		column string
+		query  string
+	}{
+		{"sync_interval_seconds", "ALTER TABLE sync_connections ADD COLUMN sync_interval_seconds INTEGER NOT NULL DEFAULT 0 CHECK(sync_interval_seconds IN (0, 300, 600, 1800, 3600, 43200, 86400))"},
+		{"fail_safe", "ALTER TABLE sync_connections ADD COLUMN fail_safe BOOLEAN NOT NULL DEFAULT 1"},
+		{"custom_tls_certificates", "ALTER TABLE sync_connections ADD COLUMN custom_tls_certificates TEXT NOT NULL DEFAULT ''"},
+		{"ignore_tls_errors", "ALTER TABLE sync_connections ADD COLUMN ignore_tls_errors BOOLEAN NOT NULL DEFAULT 0"},
+		{"proxy_enabled", "ALTER TABLE sync_connections ADD COLUMN proxy_enabled BOOLEAN NOT NULL DEFAULT 0"},
+		{"proxy_url", "ALTER TABLE sync_connections ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''"},
+		{"proxy_timeout_seconds", "ALTER TABLE sync_connections ADD COLUMN proxy_timeout_seconds INTEGER NOT NULL DEFAULT 1 CHECK(proxy_timeout_seconds BETWEEN 1 AND 60)"},
+	}
+	for _, addition := range additions {
+		if columns[addition.column] {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, addition.query); err != nil {
+			return fmt.Errorf("add sync connection %s column: %w", addition.column, err)
+		}
+	}
+
+	return nil
+}
+
+func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, fmt.Errorf("read %s columns: %w", table, err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, fmt.Errorf("scan %s column: %w", table, err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s columns: %w", table, err)
+	}
+
+	return columns, nil
 }

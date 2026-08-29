@@ -15,20 +15,31 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:  "Atlas Note",
-		Width:  1280,
-		Height: 800,
+		Title:     "Atlas Note",
+		Width:     1280,
+		Height:    800,
+		MinWidth:  900,
+		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 248, G: 250, B: 252, A: 1},
 		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
+		// OnBeforeCloseをフックすることで、ユーザーが「×」ボタンでウィンドウを閉じようとした際に、
+		// 未保存の入力データをDBやファイルに保存し終わるまでアプリの終了を待機させる。
+		OnBeforeClose: app.beforeClose,
+		OnShutdown:    app.shutdown,
+		// フロントエンド（JS/TS）からGoのメソッドを呼び出せるようにバインディングを登録する。
 		Bind: []interface{}{
 			app,
 		},
 	})
 	if err != nil {
 		println("Error:", err.Error())
+		return
+	}
+	// wails.Run returns after OnShutdown, so the current DB and writer lock are already released.
+	if err := app.launchRestartIfRequested(); err != nil {
+		println("Error: Atlas Note could not restart automatically")
 	}
 }

@@ -1,0 +1,985 @@
+import { defineStore } from 'pinia'
+import { ref, computed, watch } from 'vue'
+import type { note } from '../../wailsjs/go/models'
+import {
+  listNotesPage,
+  getNote,
+  createNote,
+  updateNote,
+  deleteNote,
+  NoteRevisionConflictError,
+} from '../api/notes'
+import { createLatestRequestGuard } from '../utils/latestRequestGuard'
+import { createNoteAutoSave, type NoteSaveSnapshot } from '../utils/noteAutoSave'
+import { createNoteOperationQueue } from '../utils/noteOperationQueue'
+import { createRequestCounter } from '../utils/requestCounter'
+import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSequentially'
+import { updateNotesSequentially } from '../utils/updateNotesSequentially'
+import { applyAgentEditHunk } from '../utils/agentEditProposal'
+import type { AgentEditProposal } from '../api/ai'
+import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
+import { useNotificationStore, type NotificationAction } from './useNotificationStore'
+import { parseNoteSortOption, useAppStore } from './useAppStore'
+import { useContentLockStore } from './useContentLockStore'
+
+const DEFAULT_NOTE_TITLE = '新しいノート'
+const CONFLICT_COPY_SUFFIX = ' (競合コピー)'
+const MAX_NOTE_TITLE_LENGTH = 200
+const NOTE_LIST_PAGE_SIZE = 100
+
+export type NoteDraft = NoteSaveSnapshot & {
+  status: 'dirty' | 'saving' | 'failed' | 'conflicted'
+  error: string | null
+  conflict: {
+    code: string
+    noteId: string
+    expectedRevision: number
+    actualRevision: number
+  } | null
+}
+
+export type AIWritingApplyMode = 'append' | 'replace'
+export type AgentEditProposalApplyOutcome =
+  | 'applied'
+  | 'applied-with-draft-conflict'
+  | 'conflict'
+  | 'save-failure'
+
+export type AgentEditorHighlight = {
+  id: number
+  noteId: string
+  revision: number
+  start: number
+  end: number
+  beforeMarkdown: string
+  changeKind: 'replace' | 'delete'
+}
+
+function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
+  const markers: Record<EditorFirstLineStyle, string> = {
+    heading1: '# ',
+    heading2: '## ',
+    heading3: '### ',
+    paragraph: '',
+  }
+
+  return markers[firstLineStyle]
+}
+
+function createConflictCopyTitle(title: string) {
+  const suffixLength = Array.from(CONFLICT_COPY_SUFFIX).length
+  const baseTitle = Array.from(title.trim() || DEFAULT_NOTE_TITLE)
+    .slice(0, MAX_NOTE_TITLE_LENGTH - suffixLength)
+    .join('')
+  return `${baseTitle}${CONFLICT_COPY_SUFFIX}`
+}
+
+function toSummary(updated: note.Note): note.Summary {
+  const lockState = updated as note.Note & {
+    protected?: boolean
+    locked?: boolean
+    lockSource?: string
+  }
+  return {
+    id: updated.id,
+    notebookId: updated.notebookId,
+    title: updated.title,
+    isFavorite: updated.isFavorite,
+    isPinned: updated.isPinned,
+    isTrashed: updated.isTrashed,
+    revision: updated.revision,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+    protected: lockState.protected,
+    locked: lockState.locked,
+    lockSource: lockState.lockSource,
+  } as unknown as note.Summary
+}
+
+type NoteErrorContext = {
+  code: string
+  action?: NotificationAction
+}
+
+export const useNoteStore = defineStore('notes', () => {
+  // State
+  const summaries = ref<note.Summary[]>([])
+  const hasMoreNotes = ref(false)
+  const isLoadingMore = ref(false)
+  const activeNote = ref<note.Note | null>(null)
+  const activeTagId = ref<string | null>(null)
+  const isLoading = ref(false)
+  const isSaving = ref(false)
+  const error = ref<string | null>(null)
+  const autoTitleNoteId = ref<string | null>(null)
+  const drafts = ref<Record<string, NoteDraft>>({})
+  const saveFeedbackVersion = ref(0)
+  const lastSavedNoteId = ref<string | null>(null)
+  const agentEditorHighlight = ref<AgentEditorHighlight | null>(null)
+  let nextDraftVersion = 0
+  let nextAgentEditorHighlightId = 0
+  let currentListPage = 0
+  let excludedNoteIds = new Set<string>()
+  const noteSelectionRequests = createLatestRequestGuard()
+  const noteOperations = createNoteOperationQueue()
+  const notificationStore = useNotificationStore()
+  const appStore = useAppStore()
+  const errorContext = ref<NoteErrorContext | null>(null)
+  const savingRequests = createRequestCounter((count) => {
+    isSaving.value = count > 0
+  })
+  const noteListRequests = createLatestRequestGuard()
+
+  watch(error, (message) => {
+    if (!message) {
+      notificationStore.dismissBySource('notes')
+      return
+    }
+
+    const context = errorContext.value ?? { code: 'NOTE_OPERATION_FAILED' }
+    notificationStore.notify(message, {
+      kind: 'error',
+      source: 'notes',
+      code: context.code,
+      retryable: Boolean(context.action),
+      action: context.action,
+      dedupeKey: `notes:${context.code}`,
+    })
+  }, { flush: 'sync' })
+
+  function setErrorContext(context: NoteErrorContext) {
+    errorContext.value = context
+  }
+
+  // Computed
+  const pinnedNotes = computed(() =>
+    summaries.value.filter((n: note.Summary) => n.isPinned && !n.isTrashed)
+  )
+  const favoriteNotes = computed(() =>
+    summaries.value.filter((n: note.Summary) => n.isFavorite && !n.isTrashed)
+  )
+  const trashedNotes = computed(() =>
+    summaries.value.filter((n: note.Summary) => n.isTrashed)
+  )
+  const activeNotes = computed(() =>
+    summaries.value.filter((n: note.Summary) => !n.isTrashed)
+  )
+  const activeDraft = computed(() => {
+    const id = activeNote.value?.id
+    return id ? drafts.value[id] ?? null : null
+  })
+  const hasDirtyNotes = computed(() => Object.keys(drafts.value).length > 0)
+
+  function getDraft(noteId: string) {
+    return drafts.value[noteId] ?? null
+  }
+
+  function replaceDraft(noteId: string, draft: NoteDraft | null) {
+    const nextDrafts = { ...drafts.value }
+    if (draft) {
+      nextDrafts[noteId] = draft
+    } else {
+      delete nextDrafts[noteId]
+    }
+    // Vueのリアクティビティを確実にするため、オブジェクトのプロパティを直接変更するのではなく、
+    // 新しいオブジェクトを丸ごと代入して状態を更新する。
+    drafts.value = nextDrafts
+  }
+
+  function sortSummaries() {
+    const sort = parseNoteSortOption(appStore.sortOption)
+    const sortBy = sort?.sortBy ?? 'updatedAt'
+    const direction = sort?.sortDirection === 'asc' ? 1 : -1
+
+    summaries.value = [...summaries.value].sort((left, right) => {
+      let comparison = 0
+      if (sortBy === 'title') {
+        comparison = left.title.localeCompare(right.title, 'ja')
+      } else if (sortBy === 'createdAt') {
+        comparison = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+      } else {
+        comparison = new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()
+      }
+      return comparison === 0 ? left.id.localeCompare(right.id) : comparison * direction
+    })
+  }
+
+  // Actions
+  function createNoteListInput(page: number, tagId: string | null, todayOnly = false) {
+    const sort = parseNoteSortOption(appStore.sortOption)
+    return {
+      page,
+      pageSize: NOTE_LIST_PAGE_SIZE,
+      ...(tagId ? { tagId } : {}),
+      ...(sort ? sort : {}),
+      ...(todayOnly ? { todayOnly: true } : {}),
+    } as note.NoteListInput
+  }
+
+  let currentTodayOnly = false
+
+  async function fetchNotes(
+    excludedIds: string[] = [],
+    tagId: string | null = null,
+    todayOnly?: boolean,
+  ) {
+    const isLatestRequest = noteListRequests.begin()
+    activeTagId.value = tagId
+    const effectiveTodayOnly = todayOnly ?? appStore.sidebarSection === 'recent'
+    currentTodayOnly = effectiveTodayOnly
+    isLoading.value = true
+    isLoadingMore.value = false
+    error.value = null
+    currentListPage = 0
+    hasMoreNotes.value = false
+    excludedNoteIds = new Set(excludedIds)
+    try {
+      const result = await listNotesPage(createNoteListInput(1, tagId, effectiveTodayOnly))
+      if (!isLatestRequest()) return
+
+      currentListPage = result.page
+      hasMoreNotes.value = result.hasNext
+      summaries.value = (result.items ?? []).filter((note) => !excludedNoteIds.has(note.id))
+      void refreshActiveNoteLockStatus()
+    } catch (e) {
+      if (!isLatestRequest()) return
+
+      setErrorContext({
+        code: 'NOTE_LIST_FAILED',
+        action: { label: '再試行', run: () => fetchNotes(excludedIds, tagId, effectiveTodayOnly) },
+      })
+      error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
+    } finally {
+      if (isLatestRequest()) isLoading.value = false
+    }
+  }
+
+  function clearTagFilter() {
+    noteListRequests.begin()
+    activeTagId.value = null
+    isLoading.value = false
+    isLoadingMore.value = false
+  }
+
+  async function selectNote(id: string) {
+    // ノートを連続で高速に切り替えた際、過去のリクエストのレスポンスが遅延して到着し、
+    // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
+    // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
+    const isLatestRequest = noteSelectionRequests.begin()
+    const targetLabel = summaries.value.find((note) => note.id === id)?.title ?? 'ノート'
+    const accessAllowed = await useContentLockStore().requestAccess({ type: 'note', id }, targetLabel)
+    if (!isLatestRequest() || !accessAllowed) return false
+
+    clearAgentEditorHighlight()
+    await flushPendingDraft()
+    if (!isLatestRequest()) return false
+
+    isLoading.value = true
+    error.value = null
+    autoTitleNoteId.value = null
+    try {
+      const selectedNote = await getNote(id)
+      if (isLatestRequest()) {
+        activeNote.value = selectedNote
+        return true
+      }
+    } catch (e) {
+      if (isLatestRequest()) {
+        setErrorContext({
+          code: 'NOTE_LOAD_FAILED',
+          action: { label: '再試行', run: () => selectNote(id) },
+        })
+        error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
+      }
+    } finally {
+      if (isLatestRequest()) {
+        isLoading.value = false
+      }
+    }
+    return false
+  }
+
+  async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
+    clearAgentEditorHighlight()
+    await flushPendingDraft()
+    const endSaving = savingRequests.begin()
+    error.value = null
+    try {
+      const settingsStore = useSettingsStore()
+      const initialTitle = title.trim() || DEFAULT_NOTE_TITLE
+      const shouldCreateInitialContent = !content.trim()
+      const initialContent = shouldCreateInitialContent
+        ? createInitialNoteContent(settingsStore.editorFirstLineStyle)
+        : content
+      const created = await createNote({
+        title: initialTitle,
+        content: initialContent,
+        ...(notebookId ? { notebookId } : {}),
+      })
+      if (!summaries.value) {
+        summaries.value = []
+      }
+      summaries.value.unshift(toSummary(created))
+      sortSummaries()
+      // 新規追加だけで次ページの有無は変わらないため、現在のページング状態を維持する。
+      autoTitleNoteId.value = shouldCreateInitialContent ? created.id : null
+      activeNote.value = created
+      return created
+    } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CREATE_FAILED',
+        action: {
+          label: '再試行',
+          run: () => newNote(title, content, notebookId),
+        },
+      })
+      error.value = e instanceof Error ? e.message : 'ノートの作成に失敗しました'
+      return null
+    } finally {
+      endSaving()
+    }
+  }
+
+  function applyPersistedNote(updated: note.Note, applyToActiveNote = true) {
+    if (applyToActiveNote && activeNote.value?.id === updated.id) {
+      activeNote.value = updated
+    }
+    const idx = summaries.value.findIndex((n: note.Summary) => n.id === updated.id)
+    if (idx !== -1) {
+      summaries.value[idx] = toSummary(updated)
+    }
+    sortSummaries()
+    currentListPage = 0
+    hasMoreNotes.value = summaries.value.length > 0
+  }
+
+  function clearAgentEditorHighlight(noteId?: string) {
+    if (noteId && agentEditorHighlight.value?.noteId !== noteId) return
+    agentEditorHighlight.value = null
+  }
+
+  // Lock configuration changes preserve an active editor's local draft, while
+  // this refresh keeps its protected/locked badges in sync with the server.
+  async function refreshActiveNoteLockStatus() {
+    const current = activeNote.value
+    if (!current) return false
+    const status = await useContentLockStore().refreshTarget({ type: 'note', id: current.id })
+    if (!status || activeNote.value?.id !== current.id) return false
+    if (status.locked) {
+      clearActiveNote()
+      return true
+    }
+    activeNote.value = {
+      ...current,
+      protected: status.protected,
+      locked: status.locked,
+      lockSource: status.source,
+    }
+    return false
+  }
+
+  function clearActiveNote() {
+    noteSelectionRequests.begin()
+    autoTitleNoteId.value = null
+    activeNote.value = null
+    clearAgentEditorHighlight()
+  }
+
+  function getPersistedRevision(noteId: string) {
+    if (activeNote.value?.id === noteId) return activeNote.value.revision
+    return summaries.value.find((note) => note.id === noteId)?.revision ?? null
+  }
+
+  function requirePersistedRevision(noteId: string) {
+    const revision = getPersistedRevision(noteId)
+    if (typeof revision !== 'number' || revision < 1) {
+      throw new Error('ノートのrevisionを取得できません。再読み込みしてください')
+    }
+    return revision
+  }
+
+  async function persistNoteNow(
+    id: string,
+    input: note.UpdateInput,
+    onFailure?: (failure: unknown) => void,
+  ) {
+    const endSaving = savingRequests.begin()
+    error.value = null
+    try {
+      return await updateNote(id, {
+        ...input,
+        expectedRevision: requirePersistedRevision(id),
+      })
+    } catch (e) {
+      setErrorContext({
+        code: e instanceof NoteRevisionConflictError ? e.code : 'NOTE_SAVE_FAILED',
+      })
+      onFailure?.(e)
+      error.value = e instanceof Error ? e.message : 'ノートの保存に失敗しました'
+      return null
+    } finally {
+      endSaving()
+    }
+  }
+
+  async function persistDraftSnapshot(snapshot: NoteSaveSnapshot) {
+    const current = getDraft(snapshot.noteId)
+    if (current?.draftVersion === snapshot.draftVersion) {
+      replaceDraft(snapshot.noteId, { ...current, status: 'saving', error: null, conflict: null })
+    }
+
+    return persistNoteNow(snapshot.noteId, {
+      title: snapshot.title,
+      content: snapshot.content,
+    }, (failure) => {
+      const failedDraft = getDraft(snapshot.noteId)
+      if (
+        failedDraft?.draftVersion !== snapshot.draftVersion
+        || !(failure instanceof NoteRevisionConflictError)
+      ) return
+
+      replaceDraft(snapshot.noteId, {
+        ...failedDraft,
+        status: 'conflicted',
+        error: failure.message,
+        conflict: {
+          code: failure.code,
+          noteId: failure.noteId,
+          expectedRevision: failure.expectedRevision,
+          actualRevision: failure.actualRevision,
+        },
+      })
+    })
+  }
+
+  const autoSave = createNoteAutoSave<note.Note>({
+    delayMs: 1000,
+    save: persistDraftSnapshot,
+    execute: noteOperations.enqueue,
+    shouldApply: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
+    isCurrent: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
+    applyResult: (snapshot, updated) => {
+      const applyToActiveNote = activeNote.value?.id === snapshot.noteId
+      applyPersistedNote(updated, applyToActiveNote)
+    },
+    onSaved: (snapshot) => {
+      if (getDraft(snapshot.noteId)?.draftVersion !== snapshot.draftVersion) return
+
+      replaceDraft(snapshot.noteId, null)
+      lastSavedNoteId.value = snapshot.noteId
+      saveFeedbackVersion.value += 1
+    },
+    onFailed: (snapshot) => {
+      const current = getDraft(snapshot.noteId)
+      if (current?.draftVersion !== snapshot.draftVersion) return
+      if (current.status === 'conflicted') return
+
+      replaceDraft(snapshot.noteId, {
+        ...current,
+        status: 'failed',
+        error: error.value ?? 'ノートの保存に失敗しました',
+        conflict: null,
+      })
+    },
+  })
+
+  function scheduleDraft(noteId: string, title: string, content: string) {
+    // ユーザーの入力ごとに毎回バックエンドAPI（DBおよびファイルシステム）へ保存リクエストを送ると、
+    // 通信量やディスクI/Oが過剰になりパフォーマンスが低下する。
+    // そのため、入力を一旦ドラフト（dirty状態）としてメモリ上に保持し、
+    // autoSave によって一定時間（delayMs）経過後にまとめてバックエンドへ書き込む（デバウンス処理）。
+    const snapshot: NoteSaveSnapshot = {
+      noteId,
+      title,
+      content,
+      draftVersion: ++nextDraftVersion,
+    }
+    const current = getDraft(noteId)
+    if (current?.status === 'conflicted') {
+      replaceDraft(noteId, {
+        ...snapshot,
+        status: 'conflicted',
+        error: current.error,
+        conflict: current.conflict,
+      })
+      return snapshot
+    }
+    if (current?.status === 'failed') {
+      replaceDraft(noteId, {
+        ...snapshot,
+        status: 'failed',
+        error: current.error,
+        conflict: null,
+      })
+      return snapshot
+    }
+
+    replaceDraft(noteId, { ...snapshot, status: 'dirty', error: null, conflict: null })
+    autoSave.schedule(snapshot)
+    return snapshot
+  }
+
+  async function flushPendingDraft() {
+    const noteId = activeNote.value?.id
+    return noteId ? autoSave.flush(noteId) : true
+  }
+
+  async function retryDraftSave(noteId: string) {
+    const draft = getDraft(noteId)
+    if (!draft) return true
+    if (draft.status === 'conflicted') return false
+
+    replaceDraft(noteId, { ...draft, status: 'dirty', error: null, conflict: null })
+    autoSave.retry(draft)
+    await autoSave.flush(noteId)
+    return getDraft(noteId) === null
+  }
+
+  async function flushAllDirtyNotes() {
+    await autoSave.flush()
+
+    for (const draft of Object.values(drafts.value)) {
+      const current = getDraft(draft.noteId)
+      if (!current || current.draftVersion !== draft.draftVersion) continue
+      if (current.status === 'conflicted') continue
+
+      autoSave.retry(current)
+      await autoSave.flush(current.noteId)
+    }
+
+    return Object.keys(drafts.value).length === 0
+  }
+
+  function discardDraft(noteId: string) {
+    autoSave.cancel(noteId)
+    replaceDraft(noteId, null)
+  }
+
+  async function reloadConflictedNote(noteId: string) {
+    const draft = getDraft(noteId)
+    if (draft?.status !== 'conflicted') return null
+
+    const capturedDraftVersion = draft.draftVersion
+    isLoading.value = true
+    error.value = null
+    try {
+      const latestNote = await getNote(noteId)
+      const current = getDraft(noteId)
+      if (current?.status !== 'conflicted' || current.draftVersion !== capturedDraftVersion) {
+        return null
+      }
+
+      applyPersistedNote(latestNote)
+      discardDraft(noteId)
+      return latestNote
+    } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CONFLICT_RELOAD_FAILED',
+        action: { label: '再試行', run: () => reloadConflictedNote(noteId) },
+      })
+      error.value = e instanceof Error ? e.message : 'ノートの再読み込みに失敗しました'
+      return null
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function fetchNextPage() {
+    if (isLoading.value || isLoadingMore.value || !hasMoreNotes.value) return
+
+    const isLatestRequest = noteListRequests.begin()
+    isLoadingMore.value = true
+    error.value = null
+    try {
+      const result = await listNotesPage(createNoteListInput(currentListPage + 1, activeTagId.value, currentTodayOnly))
+      if (!isLatestRequest()) return
+
+      const existingIds = new Set(summaries.value.map((note) => note.id))
+      const nextItems = (result.items ?? []).filter((note) =>
+        !excludedNoteIds.has(note.id) && !existingIds.has(note.id)
+      )
+      summaries.value = [...summaries.value, ...nextItems]
+      currentListPage = result.page
+      hasMoreNotes.value = result.hasNext
+    } catch (e) {
+      if (!isLatestRequest()) return
+
+      setErrorContext({
+        code: 'NOTE_LIST_MORE_FAILED',
+        action: { label: '再試行', run: () => fetchNextPage() },
+      })
+      error.value = e instanceof Error ? e.message : 'ノートの読み込みに失敗しました'
+    } finally {
+      isLoadingMore.value = false
+    }
+  }
+
+  async function copyConflictedDraft(noteId: string) {
+    const draft = getDraft(noteId)
+    if (draft?.status !== 'conflicted') return null
+
+    const capturedDraftVersion = draft.draftVersion
+    const sourceNote = activeNote.value?.id === noteId
+      ? activeNote.value
+      : summaries.value.find((summary) => summary.id === noteId)
+
+    const endSaving = savingRequests.begin()
+    error.value = null
+    try {
+      const created = await createNote({
+        title: createConflictCopyTitle(draft.title),
+        content: draft.content,
+        ...(sourceNote?.notebookId ? { notebookId: sourceNote.notebookId } : {}),
+      })
+      summaries.value.unshift(toSummary(created))
+      sortSummaries()
+      autoTitleNoteId.value = null
+      activeNote.value = created
+
+      const current = getDraft(noteId)
+      if (current?.status === 'conflicted' && current.draftVersion === capturedDraftVersion) {
+        discardDraft(noteId)
+      }
+      return created
+    } catch (e) {
+      setErrorContext({
+        code: 'NOTE_CONFLICT_COPY_FAILED',
+        action: { label: '再試行', run: () => copyConflictedDraft(noteId) },
+      })
+      error.value = e instanceof Error ? e.message : '競合下書きのコピー保存に失敗しました'
+      return null
+    } finally {
+      endSaving()
+    }
+  }
+
+  async function persistNote(id: string, input: note.UpdateInput) {
+    return noteOperations.enqueue(id, async () => {
+      const updated = await persistNoteNow(id, input)
+      if (updated) applyPersistedNote(updated)
+      return updated
+    })
+  }
+
+  async function applyAIWritingContent(
+    noteId: string,
+    generatedContent: string,
+    expectedRevision: number,
+    mode: AIWritingApplyMode,
+  ) {
+    const content = generatedContent.trim()
+    const current = activeNote.value
+    if (
+      !content
+      || !current
+      || current.id !== noteId
+      || current.isTrashed
+      || current.revision !== expectedRevision
+      || activeDraft.value
+    ) {
+      setErrorContext({ code: 'AI_WRITING_APPLY_PRECONDITION_FAILED' })
+      error.value = 'AI生成結果を反映できません。ノートを保存・再確認してからもう一度実行してください'
+      return false
+    }
+
+    return noteOperations.enqueue(noteId, async () => {
+      const latest = activeNote.value
+      if (
+        !latest
+        || latest.id !== noteId
+        || latest.isTrashed
+        || latest.revision !== expectedRevision
+        || activeDraft.value
+      ) {
+        setErrorContext({ code: 'AI_WRITING_APPLY_PRECONDITION_FAILED' })
+        error.value = 'AI生成結果を反映できません。ノートが更新されています'
+        return false
+      }
+
+      const nextContent = mode === 'replace'
+        ? content
+        : latest.content.trimEnd()
+          ? `${latest.content.trimEnd()}\n\n${content}`
+          : content
+      const endSaving = savingRequests.begin()
+      error.value = null
+      try {
+        const updated = await updateNote(noteId, {
+          content: nextContent,
+          expectedRevision,
+        })
+        applyPersistedNote(updated)
+        return true
+      } catch (e) {
+        setErrorContext({
+          code: e instanceof NoteRevisionConflictError ? e.code : 'AI_WRITING_APPLY_FAILED',
+        })
+        error.value = e instanceof Error ? e.message : 'AI生成結果をノートへ反映できませんでした'
+        return false
+      } finally {
+        endSaving()
+      }
+    })
+  }
+
+  async function applyAgentEditProposal(
+    proposal: AgentEditProposal,
+  ): Promise<AgentEditProposalApplyOutcome> {
+    const noteId = proposal.targetNoteID.trim()
+    clearAgentEditorHighlight()
+    const current = activeNote.value
+    if (
+      !noteId
+      || proposal.baseRevision < 1
+      || !proposal.before
+      || proposal.before === proposal.after
+      || !current
+      || current.id !== noteId
+      || current.isTrashed
+      || current.revision !== proposal.baseRevision
+      || activeDraft.value
+    ) return 'conflict'
+
+    return noteOperations.enqueue(noteId, async () => {
+      const latest = activeNote.value
+      if (
+        !latest
+        || latest.id !== noteId
+        || latest.isTrashed
+        || latest.revision !== proposal.baseRevision
+        || activeDraft.value
+      ) return 'conflict'
+
+      const patched = applyAgentEditHunk(latest.content, proposal)
+      if (patched.status !== 'ok') return 'conflict'
+
+      const endSaving = savingRequests.begin()
+      error.value = null
+      try {
+        const updated = await updateNote(noteId, {
+          content: patched.content,
+          expectedRevision: proposal.baseRevision,
+        })
+        const pendingDraft = getDraft(noteId)
+        if (pendingDraft) {
+          autoSave.cancel(noteId)
+          replaceDraft(noteId, {
+            ...pendingDraft,
+            status: 'conflicted',
+            error: 'Agentの更新中にローカル編集が行われたため、下書きを競合として保持しています',
+            conflict: {
+              code: 'NOTE_REVISION_CONFLICT',
+              noteId,
+              expectedRevision: proposal.baseRevision,
+              actualRevision: updated.revision,
+            },
+          })
+        }
+        applyPersistedNote(updated)
+        const isTargetStillActive = activeNote.value?.id === noteId
+          && activeNote.value.revision === updated.revision
+        if (!pendingDraft && isTargetStillActive) {
+          agentEditorHighlight.value = {
+            id: ++nextAgentEditorHighlightId,
+            noteId,
+            revision: updated.revision,
+            start: patched.range.start,
+            end: patched.range.end,
+            beforeMarkdown: latest.content,
+            changeKind: proposal.after === '' ? 'delete' : 'replace',
+          }
+        }
+        return pendingDraft ? 'applied-with-draft-conflict' : 'applied'
+      } catch (e) {
+        if (e instanceof NoteRevisionConflictError) return 'conflict'
+        setErrorContext({ code: 'AI_AGENT_PROPOSAL_APPLY_FAILED' })
+        error.value = 'Agentの変更提案をノートへ反映できませんでした'
+        return 'save-failure'
+      } finally {
+        endSaving()
+      }
+    })
+  }
+
+  function discardAllDrafts() {
+    autoSave.cancel()
+    drafts.value = {}
+  }
+
+  async function saveNote(id: string, input: note.UpdateInput) {
+    const updated = await persistNote(id, input)
+    if (!updated) return false
+    return true
+  }
+
+  async function trashNote(id: string) {
+    await saveNote(id, { isTrashed: true })
+  }
+
+  async function restoreNote(id: string) {
+    await saveNote(id, { isTrashed: false })
+  }
+
+  async function updateNotes(ids: string[], input: note.UpdateInput) {
+    if (ids.length === 0) return
+
+    const endSaving = savingRequests.begin()
+    error.value = null
+    try {
+      return await updateNotesSequentially(ids, async (id) => {
+        await noteOperations.enqueue(id, async () => {
+          const updated = await updateNote(id, {
+            ...input,
+            expectedRevision: requirePersistedRevision(id),
+          })
+          applyPersistedNote(updated)
+        })
+      })
+    } catch (e) {
+      setErrorContext({ code: 'NOTES_BATCH_UPDATE_FAILED' })
+      error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
+      throw e
+    } finally {
+      endSaving()
+    }
+  }
+
+  async function trashNotes(ids: string[]) {
+    await updateNotes(ids, { isTrashed: true })
+  }
+
+  async function restoreNotes(ids: string[]) {
+    await updateNotes(ids, { isTrashed: false })
+  }
+
+  async function moveNotesToNotebook(ids: string[], notebookId: string | null) {
+    await updateNotes(
+      ids,
+      notebookId ? { notebookId } : ({ clearNotebook: true } as note.UpdateInput),
+    )
+  }
+
+  async function permanentlyDeleteNote(id: string) {
+    error.value = null
+    try {
+      await noteOperations.enqueue(
+        id,
+        () => deleteNote(id, requirePersistedRevision(id)),
+      )
+      discardDraft(id)
+      summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
+      if (activeNote.value?.id === id) activeNote.value = null
+    } catch (e) {
+      const isRevisionConflict = e instanceof NoteRevisionConflictError
+      setErrorContext({
+        code: isRevisionConflict ? e.code : 'NOTE_DELETE_FAILED',
+        action: isRevisionConflict
+          ? undefined
+          : { label: '再試行', run: () => permanentlyDeleteNote(id) },
+      })
+      error.value = e instanceof Error ? e.message : 'ノートの削除に失敗しました'
+      throw e
+    }
+  }
+
+  async function permanentlyDeleteNotes(ids: string[]) {
+    if (ids.length === 0) return
+
+    const endSaving = savingRequests.begin()
+    error.value = null
+    let deletedIds: string[] = []
+    try {
+      deletedIds = await deleteNotesSequentially(
+        ids,
+        (id) => noteOperations.enqueue(
+          id,
+          () => deleteNote(id, requirePersistedRevision(id)),
+        ),
+      )
+    } catch (e) {
+      setErrorContext({ code: 'NOTES_BATCH_DELETE_FAILED' })
+      if (e instanceof NoteDeleteError) deletedIds = e.deletedIds
+      error.value = e instanceof Error ? e.message : 'ノートの一括削除に失敗しました'
+      throw e
+    } finally {
+      const idSet = new Set(deletedIds)
+      deletedIds.forEach(discardDraft)
+      summaries.value = summaries.value.filter((n: note.Summary) => !idSet.has(n.id))
+      if (activeNote.value && idSet.has(activeNote.value.id)) {
+        activeNote.value = null
+      }
+      endSaving()
+    }
+  }
+
+  async function emptyTrash() {
+    const ids = trashedNotes.value.map((n: note.Summary) => n.id)
+    await permanentlyDeleteNotes(ids)
+  }
+
+  async function toggleFavorite(id: string) {
+    const n = summaries.value.find((s: note.Summary) => s.id === id)
+    if (!n) return
+    await saveNote(id, { isFavorite: !n.isFavorite })
+  }
+
+  async function togglePinned(id: string) {
+    const n = summaries.value.find((s: note.Summary) => s.id === id)
+    if (!n) return
+    await saveNote(id, { isPinned: !n.isPinned })
+  }
+
+  return {
+    summaries,
+    hasMoreNotes,
+    isLoadingMore,
+    activeNote,
+    activeTagId,
+    isLoading,
+    isSaving,
+    error,
+    autoTitleNoteId,
+    drafts,
+    activeDraft,
+    hasDirtyNotes,
+    saveFeedbackVersion,
+    lastSavedNoteId,
+    agentEditorHighlight,
+    pinnedNotes,
+    favoriteNotes,
+    trashedNotes,
+    activeNotes,
+    fetchNotes,
+    refreshActiveNoteLockStatus,
+    clearTagFilter,
+    fetchNextPage,
+    selectNote,
+    newNote,
+    persistNote,
+    applyAIWritingContent,
+    applyAgentEditProposal,
+    clearAgentEditorHighlight,
+    clearActiveNote,
+    applyPersistedNote,
+    getDraft,
+    scheduleDraft,
+    flushPendingDraft,
+    flushAllDirtyNotes,
+    retryDraftSave,
+    discardDraft,
+    reloadConflictedNote,
+    copyConflictedDraft,
+    discardAllDrafts,
+    saveNote,
+    trashNote,
+    restoreNote,
+    trashNotes,
+    restoreNotes,
+    moveNotesToNotebook,
+    permanentlyDeleteNote,
+    permanentlyDeleteNotes,
+    emptyTrash,
+    toggleFavorite,
+    togglePinned,
+  }
+})

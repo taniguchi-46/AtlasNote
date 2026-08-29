@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev-MVP
+      - dev-Phase2
+      - dev-phese3
+      - dev-phese4
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.19.5
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+
+      # A clean checkout does not contain the ignored frontend/wailsjs bindings.
+      # It also does not contain frontend/dist, which main.go embeds during Go builds.
+      # Wails generates both before compiling the production application.
+      - name: Build Wails application
+        run: wails build -clean
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Run frontend typecheck
+        run: npm --prefix frontend run typecheck
+
+      - name: Run serializer tests
+        run: npm --prefix frontend run test:serializer
+
+      - name: Run autosave concurrency tests
+        run: npm --prefix frontend run test:auto-save
+
+      - name: Run note selection race tests
+        run: npm --prefix frontend run test:note-selection
+
+      - name: Run note delete recovery tests
+        run: npm --prefix frontend run test:note-delete
+
+      - name: Run notebook hierarchy tests
+        run: npm --prefix frontend run test:notebook-hierarchy
+
+      - name: Run note operation queue tests
+        run: npm --prefix frontend run test:note-operation-queue
+
+      - name: Run note batch tests
+        run: npm --prefix frontend run test:note-batch
+
+      - name: Run notification store tests
+        run: npm --prefix frontend run test:notifications
+
+      - name: Run sync store tests
+        run: npm --prefix frontend run test:sync
+
+      - name: Run storage space tests
+        run: npm --prefix frontend run test:storage-spaces
+
+      - name: Run backup and restore tests
+        run: npm --prefix frontend run test:backups
+
+      - name: Run note import tests
+        run: npm --prefix frontend run test:note-import
+
+      - name: Run note export tests
+        run: npm --prefix frontend run test:note-export
+
+      - name: Run AI store tests
+        run: npm --prefix frontend run test:ai-store
+
+      - name: Run AI librarian tests
+        run: npm --prefix frontend run test:ai-librarian
+
+      - name: Run AI v3 tests
+        run: npm --prefix frontend run test:ai-v3
+
+      - name: Run Agent proposal tests
+        run: npm --prefix frontend run test:agent-proposal
+
+      - name: Run AI workspace tests
+        run: npm --prefix frontend run test:ai-workspace
+
+      - name: Run AI markup safety tests
+        run: npm --prefix frontend run test:ai-markup-safety
+
+      - name: Run AI chat tests
+        run: npm --prefix frontend run test:ai-chat
+
+      - name: Run tag store tests
+        run: npm --prefix frontend run test:tags
+
+      - name: Run operation logger tests
+        run: npm --prefix frontend run test:operation-logger
+
+      - name: Run note link tests
+        run: npm --prefix frontend run test:note-links
+
+      - name: Run note list view tests
+        run: npm --prefix frontend run test:note-list-view
+
+      - name: Run table copy tests
+        run: npm --prefix frontend run test:table-copy
+
+      - name: Run markdown safety tests
+        run: npm --prefix frontend run test:markdown-safety

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atlas Note Implementation"
+  short_description: "承認済み実装計画に従い、最小差分で実装・テスト・差分確認を行う"
+  default_prompt: "$implementation を使用して、承認済みのAtlas Note実装計画を最小差分で実装・検証してください。"

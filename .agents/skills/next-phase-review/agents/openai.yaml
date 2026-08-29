@@ -1,0 +1,4 @@
+interface:
+  display_name: "次フェーズ移行前レビュー"
+  short_description: "現在フェーズの完了度と次フェーズへの移行可否を根拠付きで判定"
+  default_prompt: "$next-phase-review を使って、現在フェーズから次フェーズへの移行可否をレビューしてください。"

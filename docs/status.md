@@ -1,172 +1,211 @@
 # プロジェクト状況
 
-最終更新: 2026-07-02
+最終更新: 2026-08-29
 
-## 概要
+## 現在のフェーズ
 
-| 項目 | 内容 |
-| --- | --- |
-| プロジェクト名 | `Atlas Note` |
-| 種別 | ローカルファーストのデスクトップ知識管理 / Second Brain アプリ |
-| フレームワーク | Wails + Vue 3 + Vite |
-| 言語 | Go + TypeScript |
-| スタイル | UnoCSS + Reka UI |
-| 実行環境 | Wails デスクトップアプリ、開発時は Go / Node.js / Vite |
-| 配信 / デプロイ | デスクトップアプリとして配布予定。具体的な配布方式は未確定 |
+MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機能は実装済みです。Phase 2のCI受け入れは [GitHub ActionsのCI run #29383600495](https://github.com/taniguchi-46/AtlasNote/actions/runs/29383600495) で成功しています。残課題とPhase 3への持ち越し条件は下記に分けて記録します。関連メモはPhase 4 v2へ完全移管しています。
 
-## 主要コマンド
+Phase 3「同期」は、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な再アップロード/再ダウンロード復旧、ローカル自動検証、非本番の実WebDAV受け入れ、手動UI受け入れ、CI最終確認まで完了しています（2026-07-19）。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-現時点ではアプリ本体の `package.json`、`go.mod`、Wails 設定ファイルは未配置です。実装開始後に実際の構成に合わせて更新してください。
+要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗・受け入れ記録は `docs/todo/todo-phese3.md` を正とします。Phase 4 v1〜v3の進捗・スコープは、各versionのscope／TODO（`scope-phese4*.md`、`todo-phese4*.md`）で管理します。v1〜v3の自動検証、最終CI、利用者による手動UI受け入れが完了したため、2026-08-24付でPhase 4完了とします。
 
-想定コマンド:
+## 実装済み
 
-```bash
-wails dev
-wails build
-npm install
-npm run build
-go test ./...
-```
+- High着手条件のrevision・CAS・競合検出・ノート単位保存キューは実装・最終検証完了（2026-07-12）
 
-## 完了済み
+- Wails v2 + Go + Vue 3 + TypeScript + Vite のデスクトップアプリ基盤
+- Markdown本文とSQLiteメタデータを組み合わせたローカル保存
+- Note / Notebook Repository、Service、Wails API
+- 3ペインUI、ノートブック、お気に入り、ピン留め、ゴミ箱
+- Markdown / RichエディタとMarkdown serializer
+- SQLite / Markdown操作ジャーナル、補償処理、起動時復旧
+- 自動保存、dirty draft、保存失敗時の再試行・破棄、終了前flush
+- ノート選択の非同期応答逆転防止
+- データディレクトリ単位の単一writer保証
+- Pre-Phase 5「ノート保存空間の分割」。既存ルートを移動せず「メイン」として登録し、追加空間を内部ID配下へ作成する。空間ごとにSQLite、Markdown、WebDAV設定・outbox・競合、AIローカル設定・履歴・成果物、同期復旧、単一writer lockを分離する。設定画面の一覧から選択し、同期／AI busy確認とdirty draftのflush、対象空間の事前検証後に選択を保存して自動再起動する。保存空間の削除・改名・外部フォルダ選択は対象外。設計は`docs/development/storage-spaces.md`を正とする（2026-08-25）
+- Pre-Phase 5「ロック機能」。保存空間・ノートブック・ノート単位でMarkdown本文を認証付き暗号化し、名前・タイトルは平文として保持する。保存空間は設定画面から、ノートブック・ノートは3ペインの編集ポップアップから設定でき、設定画面のロック一覧で解除・パスフレーズ変更を行う。ロック済みノート／ノートブックの選択時には、継承元を含む未解除ロックを共通ダイアログで順に要求し、キャンセル時は選択を変更しない。解除時点から固定時間で再ロックする設定（既定はアプリ終了時のみ、1/5/15/30/60分）を備え、操作では期限を延長しない。期限到来時は下書きを保存し、失敗時は鍵を保持して再試行する。保護対象はAIで利用不可とし、既存AI記録は明示確認後だけ削除する。旧平文同期先は設定前に切断し、暗号化同期形式を別途実装するまで保護済み保存空間の同期は拒否する。設計は`docs/development/content-locks.md`を正とする（2026-08-26）
+- Pre-Phase 5「md・txt・HTMLからインポート」。OSネイティブの複数ファイル選択から、最上位・既存ノートブック・新規トップレベルノートブックへ1ファイル1ノートとして保存する。タイトルは自動・ファイル名・先頭見出し・メタデータから選択でき、候補がない場合はファイル名へフォールバックする。HTMLは許可した文書構造だけをMarkdownへ変換し、`hidden`属性を持つ本文と子孫、raw HTML、属性、スクリプト、CSS、外部リソースを保存しない。既存のNote Serviceを通じてMarkdown、SQLite、操作journal、検索・リンク索引、同期outbox、コンテンツロックを維持し、変換失敗はファイル単位、保存失敗は成功済みノートを保持する部分成功として扱う。インポート中は保存空間の切替を拒否する。設計は`docs/development/note-import.md`を正とする（2026-08-26）
+- Pre-Phase 5「単一ノートのHTML・PDFエクスポート」。dirty draftを既存保存laneでflushし、保存済みMarkdownとrevisionをsnapshotとしてGo側で再検証した後、OSネイティブ保存ダイアログの選択先へ原子的に出力する。HTMLはallowlist再サニタイズ、CSP、固定CSSを持つ自己完結文書とし、PDFは同梱Noto Sans JPを使うA4縦の直接生成とする。外部リソース・画像データは含めず、保護ノートは平文出力警告と明示確認を必須とする。エクスポート中の保存空間切替と重複実行を拒否し、保存先フルパス・本文・payloadをログや結果へ返さない。設計は`docs/development/note-export.md`を正とする（2026-08-27）
+- Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
+- Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
+- Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
+- Notebook階層の循環防止
+- migration境界、SQLite接続設定、Critical / High項目のCI検証
+- Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
+- schema version 3の `notes.revision` migration、既存行のrevision `1` backfill、Note / Summaryモデルへのrevision追加
+- schema version 5の検索状態`content_mtime_ns` migrationと既存行の初回hash再照合
+- schema version 6の`tags` / `note_tags` migration、Unicode正規化・case-foldによる同名防止、外部キーCASCADE
+- schema version 7の`note_links` / `note_link_state` migration、target/source逆引きINDEX、外部キーCASCADE
+- schema version 8〜10の同期状態・outbox・conflict・HTTP許可・同期間隔・フェイルセーフ・TLS・proxy設定migration
+- schema version 16で、旧版のノートブック削除時に残った存在しない`notebook_id`参照を起動時に安全に切り離し、ゴミ箱操作・コンテンツロック状態取得・削除時の同期payloadを整合
+- Atlas Note固有のformat/head/manifest/object、strong ETag、tombstone、durable outboxによるWebDAV同期
+- 単一WebDAV URL、同期間隔、読み取り専用設定確認、Apply/OK/戻るdraft方式の同期設定UI
+- HTTPS既定・明示的HTTP許可、custom root CA、明示的TLS error ignore、HTTP/HTTPS proxy、redirect拒否
+- target一致時だけの資格情報再利用、OS CredentialStore保存とsession-only fallback通知
+- 空同期先フェイルセーフ、確認token付き条件更新によるlocal再アップロード
+- remote全件を別SQLite/notesへ検証し、起動時に旧vaultをbackupしてswap/rollbackする再ダウンロード復旧
+- タグのRepository / Service / Wails API、構造化タグエラー、フロントAPI / Pinia Store
+- ノート編集画面の既存タグ選択ポップアップ、サイドバーでのタグ一覧表示・作成・改名・削除
+- ノートリンクのMarkdown記法・抽出、SQLiteリンク索引、バックリンクAPI・Store・UI
+- `expectedRevision`・構造化競合結果モデル、Repositoryの原子的な更新・削除CAS
+- Serviceの通常更新・完全削除へのCAS接続、Wails / Storeからの `expectedRevision` 受け渡し
+- ノートブック削除に伴うノートのtrash・切り離し時のrevision増加
+- Wails APIの構造化競合結果とフロントAPIの型付き `NoteRevisionConflictError`
+- Storeの `conflicted` draft状態、競合情報とローカル下書きの保持
+- 永続revisionと区別したフロントdraft世代 `draftVersion`
+- NoteEditorの保存競合・下書き保持表示
+- 競合draftを破棄してサーバー最新版を再読み込む解決操作
+- 競合draftを同じノートブックの新規ノートへコピー保存する解決操作
+- autosave・メタデータ更新・削除を直列化するノート単位の操作lane
+- autosave失敗laneの停止・手動再開、対象別 `flush`
+- 保存要求数による正確な `isSaving` 表示
+- ノート操作laneと保存要求カウンターの専用回帰テスト
+- contentful SQLite FTS5 + trigramによるタイトル・本文検索、ページング、入力検証、再構築可能な索引
+- 検索API、検索Store/UI、検索失敗時の共通通知と再試行アクション
+- ノート・ノートブック・検索Store/APIの操作別エラーコード、共通通知、再試行アクション
+- SHA-256 hashによる外部Markdown編集検知、revision更新、検索索引再構築
+- Markdown欠落のMissingNotes報告とrename後の孤児ファイル隔離
+- ノート一覧の固定上限付きページング、Store・一覧UIの追加読込
+- 起動復旧のMarkdown存在確認をノートごとの`Stat`から管理ファイル一覧の一括取得へ変更
+- 起動復旧・検索・一覧の大量データベンチマークと計測手順（`docs/development/performance.md`）
+- 検索状態へのMarkdown mtime保存migration、mtime一致時の索引再利用、変更時hash照合フォールバック
+- Markdown/Rich変換の空段落、code fence、URL、多重markの境界テスト
+- batch操作の完了ID・失敗IDを保持する部分成功処理と、UIイベントのPromise rejection処理
+- `noteAutoSave.ts`によるautosave coordinator分離とunexpected rejectionの失敗lane処理
+- 本文を含めないoperationログ（note ID、処理段階、エラー分類のみ）
+- 単一タグ遷移、解除・0件表示
+- ノート一覧の許可リスト付き並び替え（更新日時、作成日時、タイトル）
+- 「最近更新した」一覧（ローカル日付の当日00:00〜翌日00:00未満、`updated_at`基準、ゴミ箱除外）
+- ノートブックのドラッグ＆ドロップ移動（循環配置防止、ルート移動）
+- 表全体のMarkdown / Richコピー（Markdown入り`text/plain`・Rich貼り付け用`text/html`出力、標準MIME型、特殊文字・改行テスト）
+- Phase 4 v3のAIアシスタント／AIライティング基本経路、schema version 12のローカル履歴・成果物とversion 13の要約履歴、明示保存・個別／一括削除、stale／orphaned評価、WebDAV非同期境界テスト。2026-08-23にWails公開API→Service→Repository→一時SQLiteのライフサイクル、version 10既存データ保持、version 12→13専用rollback、Provider失敗後のローカル保存・検索・同期outbox継続を追加検証し、2026-08-24に空結果・候補なし・長文のFrontend通し異常系、最終CI、手動UI受け入れまで完了した
+- Phase 4のAIワークスペースを単一チャットtimelineへ刷新。開いているノートの固定context chip、追加ノート／Notebook検索scope、要約・文章作成6種・タイトル・タグ・分類・関連・重複・Web検索の`＋`メニュー、Ask／Agent切替、入力欄右下の送信ボタン、候補の明示採用、構造化tool traceとtrace直後の候補カードを実装した。Web検索は実行ごとの明示確認を伴うOpenRouter Web Search／Exa固定のProvider管理ツールとする。Notebook scopeは直下ノートIDへ最大10件で解決し、本文・revisionは既存バックエンドでsnapshot化する。制限付きAgentは開いているノート本文の単一差分を構造化提案として表示し、端末ローカル設定の既定「提案のみ」では明示適用／破棄、「更新可能」では送信前確認後に検証済み提案だけをrevision/CAS・ノート単位保存queueで自動適用する。適用成功後は保存済み本文を開いているMarkdown／WYSIWYGエディタへ直ちに反映する。Agent保存中に作成されたdraftは未開始autosaveを取り消して競合として保持し、古い本文の後追い保存とエディタ上書きを防ぐ。自動適用後も変更前後の差分を現在のtimelineで確認でき、競合・保存失敗時は本文を変更しない。右側／下側配置・ドラッグ寸法、狭幅対応、履歴・成果物の既存保存境界を維持し、`test:auto-save`、`test:agent-proposal`、`test:ai-chat`、`test:ai-v3`、`test:ai-workspace`を追加・更新した。エディタ即時反映と保存中draft保護の自動テストは2026-08-23、手動UI受け入れは2026-08-24に完了した
+- AIコンテキストへ全文文字数、送信済み本文バイト数、全文バイト数、切り詰め有無、作成日時、更新日時を追加し、OpenRouterの`stream`誤判定によるAgent拒否を修正した。Geminiを含むモデル能力一覧は不明値を実行時判定へ委譲し、SSEの機械可読エラーを安全なAIエラーへ分類する回帰テストを追加した（2026-08-15）。
+- Phase 4 v2の大量候補pool、候補採用異常系、全保存境界、キーボード操作契約を2026-08-24に自動検証した。AI司書は20件上限・重複／不正候補除外、保存失敗・revision競合・ノート切替・cancel時の非適用、partial／prompt／candidate／resultのMarkdown・SQLite・検索索引・操作journal・WebDAV outbox非保存を確認した。Assistantは正式差分レビューで検出した生成中revision変更とcancel応答待ち中clearの競合を修正し、stale結果・Agent提案・履歴を採用せず、request IDと送信lockを終端まで維持する再現テストを追加した。
 
-- `README.md` にプロジェクトコンセプト、AI Documents、技術スタック、概略アーキテクチャを記載。
-- AI Agent 向けの共通ドキュメントを `docs/` に配置。
-- Codex 固有の作業指針を `.agents/AGENTS.md` に配置。
-- 汎用開発 skill を `.agents/skills/skill.md` に配置。
-- Wails プロジェクト本体を作成し、Go / TypeScript / Vue 3 / Vite の実ファイル構成を確定する。
+## Phase 2の完了範囲
 
-## 次にやること
+- 既存検索UIへの実検索処理の接続（完了）
+- タイトル検索、本文全文検索、タグ条件による通常一覧遷移（完了）
+- タグの追加、編集、削除、ノートへの付与・解除、単一タグの通常一覧遷移（完了。タグ名検索と全文検索へのタグ条件は対象外）
+- ノートリンク・バックリンク（完了）
+- テーブルコピー（完了）
 
-### 実装計画
+## Phase 2で確定した設計
 
-1. 開発前の懸念解消
-   - 画面文言と一部ドキュメントで文字化けして見える箇所を確認し、実際に壊れているファイルは現在の機能に合わせて正常な日本語へ戻す。
-   - Go / Wails / Node.js の実行 PATH を再確認し、`.tools/` 配下のローカル Go / Wails CLI を使う前提を開発手順に反映する。
-2. ローカルデータ基盤の実装
-   - SQLite、Markdown Storage、Repository の責務境界を先にコードへ落とし込む。
-   - ノート本文は Markdown、メタデータは SQLite に保存する最小構成を作る。
-   - DB スキーマ、保存先ディレクトリ、初期化処理、入力検証、エラー処理を最小範囲で実装する。
-3. Wails API とフロントエンドの最小接続
-   - Go 側にノート作成・取得・更新・削除のアプリケーションサービスを用意する。
-   - Vue 側は Wails API を直接散らさず、composable または API クライアント層から呼び出す。
-   - まずは一覧、選択、編集、保存の最小 UI に限定する。
-4. 編集体験の拡張
-   - 基本 CRUD が安定してから Tiptap / CodeMirror の導入範囲を決める。
-   - 依存追加が必要な場合は目的、影響範囲、代替案を確認してから行う。
-5. 後続機能の仕様具体化
-   - WebDAV 同期、AI API Key 管理、AI 連携は、ローカル保存基盤が固まってから個別に設計する。
-   - API Key は平文ログや例外表示に出さない方針を維持し、保存方式は OS Keychain 可否を確認してから決める。
+- revision、競合検出、保存キューの仕様は `docs/development/note-concurrency.md` で確定済み
+- 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定済み
+- 検索API、ページング、入力検証、エラー形式は `docs/development/search-api.md` で確定済み
+- タグのデータモデルと制約（`docs/development/tag-design.md`で確定・実装済み）
+- ノートリンク・バックリンクの記法、抽出規則、更新境界は設計・実装済み。関連メモの当時の未完了項目はPhase 4 v2のAI司書へ移管し、2026-08-24に受け入れを完了した。
+- 検索とタグ遷移の画面状態、および並び替えとの組み合わせは実装済み。
+- schema version 3〜7のmigration、既存データへの影響、rollback方法を確認済み
 
-詳細: `docs/development/implementation-plan.md`
+## Phase 2 CI受け入れ結果
 
-- SQLite、Markdown Storage、Repository + Squirrel の責務境界をコードに落とし込む。
-- Tiptap / CodeMirror を使う編集体験の最小構成を設計する。
-- WebDAV 同期と AI API Key 管理の仕様を具体化する。
-- 実際の確認コマンドを `docs/rules/conventions.md` とこのファイルに反映する。
+- 2026-07-15の`dev-Phase2`、commit `5dc5df4`に対するCI run #29383600495が成功した。
+- Wails build、Go tests、Frontend typecheck、serializer、autosave、note selection/delete、notebook hierarchy、note operation queue、batch、notifications、tags、operation logger、note links、note list view、table copy、Markdown safetyの全ステップが成功した。
+- Phase 2 CIの結果はPhase 2の完了記録であり、Phase 3の受け入れ判定は下記のPhase 3 CI結果と実WebDAV受け入れ記録を根拠とする。
+
+## Phase 3 CI受け入れ結果
+
+- `dev-phese3` の受け入れ対象HEAD（commit `a84203673a09bea1d45a021da0d1e7745236a5d0`）に対する [GitHub Actions CI run #29658225886](https://github.com/taniguchi-46/AtlasNote/actions/runs/29658225886) が成功した（2026-07-18）。
+- Wails build、Go tests、Frontend typecheck、同期を含むFrontendテストの全ステップが成功した。
+
+## 継続課題
+
+- 大量ノート時の性能確認（ベンチマーク、一覧APIのページング、Store・一覧UIの追加読込、起動復旧の差分検知、5,000件基準値の記録まで完了。Phase 3受け入れ後も同期・一覧更新の比較を継続する）
+- 競合解決UIのコンポーネントテスト（Phase 3受け入れ後もUI変更時に追加確認する）
+- Rich機能を追加する際のserializer round-tripテスト（Rich serializer変更時のみ対応し、Phase 3同期の開始条件にはしない）
+
+## Phase 3受け入れ・Phase 4完了記録
+
+- WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
+- Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
+- 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
+- Phase 4 v1はD-01〜D-07の設計承認、実装、保存/同期境界テスト、CI、ローカル受け入れを完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Phase 4全体の完了条件はv2のAI司書・実行体験とv3のAIアシスタント・ライティング・ローカル履歴までを含み、2026-08-24のv3受け入れ完了をもってPhase 4完了としました。GitHub ActionsのD-07 CIは[run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)で成功しています。
+- Phase 4 v3の保存仕様（明示保存する会話・成果物、生成成功時に自動保存する要約履歴、SQLiteローカル管理データ、アプリケーション上の完全削除、参照元ノート削除後の保持、CI例外の扱い）は確定しています。schema version 12〜13の詳細は `docs/development/ai-integration.md` を正とします。
+- Phase 4 v3の実装・検証記録は `docs/todo/todo-phese4-v3.md` で管理しています。基本実装、制限付きAgentの本文差分提案・編集権限設定（明示適用／検証済み自動適用）、適用成功後のエディタ即時反映、Agent編集権限UI分岐、AI司書とAssistant／Agentの利用者cancel、timeout応答、空結果・候補なし・長文、v2の大量候補pool・候補採用・全保存境界、Wails API／SQLite／migration／rollback／Provider失敗後継続の自動テストを完了しました。実画面の手動UI受け入れも利用者が「現状OK」と確認しています（2026-08-24）。
+- 2026-08-23のローカル自動受け入れでは、実Providerを呼ばずに`go test ./...`、AI関連Frontend 9 script、Frontend typecheck、Frontend production buildが成功した。ローカル環境にWails CLIがなく未実行だったWails clean buildは、後続の最終CI run [#32722645563](https://github.com/taniguchi-46/AtlasNote/actions/runs/32722645563) で成功を確認した。
+- 2026-08-24にAgent編集権限UI分岐を動的テストへ拡張し、`review-required`の自動保存0回、`auto-update`の保存1回、応答待ち中の設定変更に対する送信開始時権限の固定、提案なし・送信失敗時の保存0回、自動適用失敗時の提案保持を確認した。`test:ai-workspace`、`test:agent-proposal`、`test:ai-chat`、Frontend typecheck／production buildは成功した。
+- 2026-08-24にFrontendのcancel／timeout異常系を拡張した。AI司書は利用者cancelとtimeoutをWails mock、実Pinia Store、実chat timelineまで通し、開始応答前のcancel予約、遅延完了の破棄、安全なエラー、自動retryなし、cancel API失敗時の実行継続・終端監視を確認した。Assistant／Agentは`AI_TIMEOUT`／`AI_CANCELLED`応答時の提案・自動適用・履歴保存なしと安全なtimelineエラー、Writingはtimeout時の成果物非保存を確認した。Go全体、Frontend全22 script、typecheck、production buildはローカルで成功した。この検証時点で未実装だったAssistant／Agentの利用者停止操作は、後続差分で実装・自動検証した。
+- `origin/dev-phese4`のcommit `e8f6816f60e61c4de149aaa45f778812c0ad86a8`に対する最終CI [run #32722645563](https://github.com/taniguchi-46/AtlasNote/actions/runs/32722645563) は2026-08-24に全工程成功した。Wails clean build、Go tests、Frontend typecheck、全Frontend scriptが成功し、大量候補pool、候補採用、全保存境界、キーボード操作契約、Assistantの生成中revision変更・cancel中clear競合修正まで確認した。
+- 2026-08-24の後続ローカル自動受け入れでは、実Providerを呼ばないWails mockで、AI司書の正常な候補0件、要約・Assistant・Writingの空／無効応答、長文contextの切り詰めmetadata、`AI_INPUT_TOO_LARGE`時の安全なエラー、非保存、自動retryなし、明示再試行を追加検証した。この差分は後続のCI run #32700754252に含まれ、全工程成功を確認した。
+- 2026-08-24にAssistant／Agentの利用者停止操作を追加した。Frontend生成のrequest IDをWails API、Service、Provider contextまで相関し、context準備中のProvider非呼び出し、生成中の停止、`canceling`中の送信lock、wrong／stale／terminal済みIDの拒否、停止API失敗後の終端監視、Provider停止と生成lock解放、`AI_CANCELLED`の安全な表示、下書き・user entry保持、Agent提案・自動適用・履歴保存・自動retryなしを自動検証した。この差分は後続のCI run #32700754252に含まれ、Wails clean buildを含む全工程成功を確認した。
+- 2026-08-24の最新ローカル自動受け入れでは、v2の大量候補pool、候補採用異常系、全保存境界、キーボード操作契約と、Assistantの生成中revision変更・cancel中clear競合修正を追加した。`go test ./... -count=1`、Frontend全22 script、typecheckを含むproduction build、差分検査が成功した。この追加分はcommit `e8f6816f60e61c4de149aaa45f778812c0ad86a8`へ反映し、CI run [#32722645563](https://github.com/taniguchi-46/AtlasNote/actions/runs/32722645563) の成功を確認した。
+- CI run [#30527792029](https://github.com/taniguchi-46/AtlasNote/actions/runs/30527792029) はWails clean build、Go tests、Frontend typecheck、全Frontend scriptを含む全工程に成功しました（2026-07-30）。AI司書キャンセル時の生成ロックに関する既知CI例外は解消し、当時残っていた手動受け入れと追加検証も2026-08-24に完了しました。
+- AI自由記述のMarkdown出力契約とAI専用DOMサニタイズ表示を実装し、通常ノートのraw HTML無効化・AI原文保存・危険なURL／外部リソース遮断を維持しました。`test:ai-markup-safety`、既存AIテスト、Go全体テスト、Frontend typecheck/buildはローカル成功済みです（2026-08-01）。当時ローカル未確認だったWails統合ビルドは、後続のCI run #32666344532で成功を確認済みです。
 
 ## 保留事項
 
-- デスクトップアプリの対応 OS と配布方式。
-- Markdown ファイル、SQLite メタデータ、添付ファイルの保存ディレクトリ構成。
-- WebDAV 同期時の競合解決方針。
-- ユーザー API Key の保存方式と暗号化方針。
-- AI 機能の対象プロバイダ、モデル選択、課金表示の扱い。
+- デスクトップアプリの対応OSと配布方式
+- 添付ファイルの保存設計
+- Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
+- Phase 4 v1〜v3は承認・実装・自動検証・利用者による手動UI受け入れを完了し、2026-08-24付でPhase 4完了とする。今後はAI関連実装またはUI変更時の回帰確認として管理する。チャット履歴の永続化はv3の確定保存仕様に従う。正本は [`scope-phese4.md`](development/scopes/scope-phese4.md)、[`scope-phese4-v2.md`](development/scopes/scope-phese4-v2.md)、[`scope-phese4-v3.md`](development/scopes/scope-phese4-v3.md)、各TODO、`docs/development/ai-integration.md` とする。
+
+## 主要コマンド
+
+```bash
+npm run frontend:build
+npm run frontend:typecheck
+npm run frontend:lint
+npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-operation-queue
+npm --prefix frontend run test:sync
+npm --prefix frontend run test:storage-spaces
+npm --prefix frontend run test:backups
+npm --prefix frontend run test:note-batch
+npm --prefix frontend run test:note-selection
+npm --prefix frontend run test:note-delete
+npm --prefix frontend run test:note-export
+npm --prefix frontend run test:notifications
+npm --prefix frontend run test:tags
+npm --prefix frontend run test:notebook-hierarchy
+npm --prefix frontend run test:note-list-view
+npm --prefix frontend run test:serializer
+npm --prefix frontend run test:table-copy
+npm --prefix frontend run test:markdown-safety
+npm --prefix frontend run test:operation-logger
+npm --prefix frontend run test:note-links
+npm --prefix frontend run test:ai-chat
+npm --prefix frontend run test:ai-workspace
+go test ./...
+wails build
+```
+
+`frontend/wailsjs/`はGit管理対象外です。クリーンcheckout直後は、必要に応じて先に`wails build`でbindingsを生成します。
 
 ## 関連ファイル
 
 | ファイル | 役割 |
 | --- | --- |
-| `README.md` | プロジェクト概要、技術スタック、概略アーキテクチャ |
-| `docs/rules/ai.md` | AI Agent 共通ルール |
-| `docs/rules/architecture.md` | 設計情報 |
+| `docs/README.md` | ドキュメント入口と正本の役割 |
+| `README.md` | プロジェクト概要 |
+| `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
+| `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
+| `docs/development/scopes/scope-phese4.md` | Phase 4 v1の実装前詳細スコープ |
+| `docs/development/scopes/scope-phese4-v2.md` | Phase 4 v2のAI司書・実行体験スコープ |
+| `docs/development/scopes/scope-phese4-v3.md` | Phase 4 v3のAIアシスタント・ライティング・履歴スコープ |
+| `docs/development/ai-chat.md` | 単一AIチャット、context、Ask／Agent、ツール実行・保存境界 |
+| `docs/development/implementation-plan.md` | 現在フェーズの実装順序 |
+| `docs/development/webdav-sync.md` | Phase 3 WebDAV同期の確定設計 |
+| `docs/development/storage-spaces.md` | 保存空間のディレクトリ、台帳、分離境界、再起動切替 |
+| `docs/development/backup-restore.md` | 自動バックアップ、完全性検証、再起動時の復元・rollback |
+| `docs/development/note-export.md` | 単一ノートのHTML・PDF出力、snapshot再検証、ロック、原子的保存 |
+| `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
+| `docs/todo/todo-phese4.md` | Phase 4 v1の実装前課題・受け入れTODO |
+| `docs/todo/todo-phese4-v2.md` | Phase 4 v2の実装・検証TODO |
+| `docs/todo/todo-phese4-v3.md` | Phase 4 v3の実装・検証TODOと完了条件 |
+| `docs/development/note-concurrency.md` | revision、競合検出、保存キューの確定仕様 |
+| `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
+| `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |
+| `docs/development/tag-design.md` | タグの制約、migration、API、実装・検証状況 |
+| `docs/todo/todo-phese2.md` | Phase 2の実績・残課題 |
+| `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
+| `docs/development/setup.md` | 開発環境セットアップ |
+| `docs/development/tech-stack.md` | 採用技術 |
+| `docs/rules/architecture.md` | アーキテクチャとデータ設計 |
 | `docs/rules/conventions.md` | 実装規約 |
-| `docs/rules/loop.md` | AI 作業フロー |
-| `docs/rules/glossary.md` | 用語集 |
-| `docs/rules/BRANCHING.md` | ブランチ、コミット、PR の運用ルール |
-| `docs/development/tech-stack.md` | 採用予定技術と未確定の開発環境情報 |
-| `docs/development/setup.md` | 開発環境セットアップと起動方法 |
-| `.env.example` | ローカル環境変数のサンプル。実値は含めない |
-| `.agents/skills/skill.md` | 汎用開発 skill |
-| `.agents/AGENTS.md` | Codex 固有の作業指針 |
-
-## 2026-07-03 追記: Wails プロジェクト本体の初期作成
-
-- Wails v2 想定の最小バックエンドを追加。
-  - `main.go`
-  - `app.go`
-  - `go.mod`
-  - `wails.json`
-- Vue 3 + TypeScript + Vite の最小フロントエンドを追加。
-  - `frontend/package.json`
-  - `frontend/package-lock.json`
-  - `frontend/index.html`
-  - `frontend/vite.config.ts`
-  - `frontend/tsconfig.json`
-  - `frontend/src/`
-- ルートの npm 補助スクリプトを `package.json` に追加。
-- `.gitignore` を追加し、`node_modules/`、`frontend/dist/`、`.env` などを除外。
-
-確認済み:
-
-```bash
-npm run build
-npm audit --audit-level=moderate
-```
-
-確認済み:
-
-- `wails dev` 起動成功。開発用 URL は `http://localhost:34115`。
-- `wails build` 成功。`build/bin/AtlasNote.exe` を生成。
-
-## 2026-07-03 追記: Go の導入
-
-- Chocolatey での `golang` インストールは、管理者権限不足と Chocolatey の lockfile 権限問題により失敗。
-- 代替として公式 `go1.26.4.windows-amd64.zip` を `.tools/go` に展開。
-- SHA256 を公式値 `3ca8fb4630b07c419cbdd51f754e31363cfcfb83b3a5354d9e895c90be2cc345` と照合済み。
-- ユーザー PATH に `.tools/go/bin` を追加。
-- `go mod tidy` で `go.sum` を作成。
-
-確認済み:
-
-```bash
-go version
-go test ./...
-```
-
-結果:
-
-- `go version go1.26.4 windows/amd64`
-- `go test ./...` 成功
-
-## 2026-07-03 追記: Wails CLI の導入
-
-- Wails CLI `v2.10.1` を `.tools/go-bin` にインストール。
-- Go モジュール側の Wails 依存 `github.com/wailsapp/wails/v2 v2.10.1` と CLI バージョンを合わせた。
-- ユーザー PATH に `.tools/go-bin` を追加。
-
-確認済み:
-
-```bash
-wails version
-wails doctor
-```
-
-結果:
-
-- `wails version`: `v2.10.1`
-- `wails doctor`: `Your system is ready for Wails development!`
-
-## 2026-07-03 追記: Wails dev / build の確認
-
-確認済み:
-
-```bash
-wails dev
-wails build
-```
-
-結果:
-
-- `wails dev`: 起動成功。開発用 URL は `http://localhost:34115`。
-- `wails build`: 成功。`build/bin/AtlasNote.exe` を生成。
+| `docs/rules/BRANCHING.md` | Git運用ルール |
+| `docs/rules/ai.md` | AI Agent共通ガイド |

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atlas Note Refactoring"
+  short_description: "壊れにくさを最優先し、Highリスクから評価して安全にリファクタリングする"
+  default_prompt: "$refactoring を使用して、[対象ファイルまたは機能]の[改善点]を、[完了条件]を満たすよう外部挙動を維持して安全にリファクタリングしてください。"

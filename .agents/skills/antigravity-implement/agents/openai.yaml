@@ -1,0 +1,4 @@
+interface:
+  display_name: "Antigravity Implement"
+  short_description: "Safely delegate bounded coding to Antigravity"
+  default_prompt: "Use $antigravity-implement to implement this approved task through Antigravity CLI."

@@ -1,15 +1,17 @@
 # ブランチ運用ルール
 
-Atlas Note のブランチ、コミット、PR の基本ルールです。実際のリポジトリ運用が決まったら、このファイルを更新してください。
+Atlas Note のブランチ、コミット、PR の基本ルールです。Phaseごとの統合ブランチと、そこから分ける作業ブランチを使います。
 
 ## ブランチ構造
 
 ```text
 main
-  └─ feature/<topic>
-  └─ fix/<topic>
-  └─ docs/<topic>
-  └─ chore/<topic>
+  └─ dev
+      └─ dev-PhaseN
+          ├─ feature/<topic>
+          ├─ fix/<topic>
+          ├─ docs/<topic>
+          └─ chore/<topic>
 ```
 
 ## 各ブランチの役割
@@ -17,17 +19,24 @@ main
 | ブランチ | 役割 | マージ先 |
 | --- | --- | --- |
 | `main` | 安定版。常にビルド可能な状態を維持する | - |
-| `feature/<topic>` | 新機能の追加 | `main` |
-| `fix/<topic>` | バグ修正 | `main` |
-| `docs/<topic>` | ドキュメントのみの変更 | `main` |
-| `chore/<topic>` | 設定、依存関係、リポジトリ整備 | `main` |
+| `dev` | 開発統合用。次のPhaseブランチの起点 | `main` |
+| `dev-PhaseN` | Phase単位の実装・検証を統合する | `dev` |
+| `feature/<topic>` | 新機能の追加 | 対象の `dev-PhaseN` |
+| `fix/<topic>` | バグ修正 | 対象の `dev-PhaseN` |
+| `docs/<topic>` | ドキュメントのみの変更 | 対象の `dev-PhaseN` |
+| `chore/<topic>` | 設定、依存関係、リポジトリ整備 | 対象の `dev-PhaseN` |
+
+現在のPhase 3統合ブランチは既存の `dev-phese3` です。この表記の修正やブランチ名変更は、このドキュメント整理の対象外とします。
 
 ## 機能開発フロー
 
 ```bash
-git checkout main
-git pull origin main
+git checkout dev
+git pull origin dev
 
+git checkout -b dev-PhaseN
+
+git checkout dev-PhaseN
 git checkout -b feature/<topic>
 
 # 実装・確認

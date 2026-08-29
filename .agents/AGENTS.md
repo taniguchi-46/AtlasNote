@@ -5,11 +5,12 @@
 ## 参照順
 
 1. `README.md`
-2. `docs/status.md`
-3. `docs/rules/ai.md`
-4. `docs/rules/architecture.md`
-5. `docs/rules/conventions.md`
-6. 必要に応じて `.agents/skills/skill.md`
+2. `docs/README.md`
+3. `docs/status.md`
+4. `docs/rules/ai.md`
+5. `docs/rules/architecture.md`
+6. `docs/rules/conventions.md`
+7. 必要に応じて `.agents/skills/skill.md`
 
 ## 基本方針
 
@@ -22,7 +23,7 @@
 
 ## 作業時の注意
 
-- 現時点ではアプリ本体のコードが未配置のため、コマンドやディレクトリ構成を断定しない。
+- アプリ本体のコードと設定は配置済みだが、コマンドやディレクトリ構成は実ファイルで確認してから断定する。
 - Wails / Vue / Go の実ファイルが追加されたら、`docs/status.md`、`docs/rules/architecture.md`、`docs/rules/conventions.md` を合わせて更新する。
 - UI 文言やコメントに文字化けがある場合は、現在の機能に合わせて正常な日本語へ書き直す。
 - テンプレート化できる知識は `.codex/templates/` に汎用化して反映する。

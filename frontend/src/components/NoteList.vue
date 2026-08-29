@@ -1,0 +1,1134 @@
+<template>
+  <section class="note-list-pane" aria-label="ノート一覧">
+    <!-- Header -->
+    <div class="note-list-header">
+      <h2 class="note-list-title">{{ sectionTitle }}</h2>
+      <span class="note-list-count">{{ displayedCount }}</span>
+      <DropdownMenuRoot>
+        <DropdownMenuTrigger as-child>
+          <button
+            class="note-list-sort-trigger"
+            :class="{ 'is-active': appStore.sortOption }"
+            type="button"
+            aria-label="並び替え"
+            aria-haspopup="menu"
+            :title="sortButtonLabel"
+          >
+            <ArrowDownUpIcon :size="16" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuPortal>
+          <DropdownMenuContent
+            class="note-list-sort-menu"
+            :data-theme="appStore.theme"
+            side="bottom"
+            align="end"
+            :side-offset="6"
+          >
+            <DropdownMenuLabel class="note-list-sort-label">並び替え</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              :model-value="appStore.sortOption"
+              @update:model-value="handleSortChange"
+            >
+              <DropdownMenuRadioItem
+                v-for="option in sortOptions"
+                :key="option.value || 'default'"
+                class="note-list-sort-item"
+                :value="option.value"
+              >
+                <DropdownMenuItemIndicator class="note-list-sort-indicator">
+                  <CheckIcon :size="14" />
+                </DropdownMenuItemIndicator>
+                {{ option.value ? option.label : defaultSortLabel }}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenuPortal>
+      </DropdownMenuRoot>
+      <button
+        v-if="!isTrashSection"
+        id="btn-new-note"
+        class="note-list-new-note-btn"
+        type="button"
+        :disabled="noteStore.isSaving"
+        @click="createNewNote"
+      >
+        <span>新規</span>
+        <PlusIcon :size="15" />
+      </button>
+      <button
+        v-if="isTrashSection"
+        class="empty-trash-btn"
+        type="button"
+        :disabled="noteStore.isSaving || noteStore.trashedNotes.length === 0"
+        @click="emptyTrash"
+      >
+        ゴミ箱を空にする
+      </button>
+      <button
+        v-if="!isAllNotesList"
+        class="note-list-back-button"
+        type="button"
+        title="すべてのノート一覧に戻る"
+        aria-label="すべてのノート一覧に戻る"
+        @click="returnToNormalList"
+      >
+        <XIcon :size="14" />
+      </button>
+    </div>
+
+    <!-- Loading -->
+    <div v-if="(noteStore.isLoading || searchStore.isSearching) && displayedNotes.length === 0" class="note-list-empty">
+      <div class="spinner" aria-label="読み込み中..." />
+    </div>
+
+    <!-- Empty state -->
+    <div v-else-if="displayedNotes.length === 0" class="note-list-empty">
+      <FileTextIcon :size="32" class="empty-icon" />
+      <p class="empty-label">{{ searchStore.isActive ? '検索結果がありません' : 'ノートはありません' }}</p>
+    </div>
+
+    <p v-if="searchStore.isActive && searchStore.hasNext" class="note-list-search-limit">
+      検索結果が多いため、追加の結果を読み込めます。
+    </p>
+    <button
+      v-if="searchStore.isActive && searchStore.hasNext"
+      class="note-list-search-more"
+      type="button"
+      :disabled="searchStore.isSearching"
+      @click="searchStore.nextPage()"
+    >
+      {{ searchStore.isSearching ? '読み込み中...' : '次の検索結果を読み込む' }}
+    </button>
+
+    <!-- Note items -->
+    <ul v-if="displayedNotes.length > 0" ref="noteListRef" class="note-list" role="list">
+      <ContextMenuRoot
+        v-for="note in displayedNotes"
+        :key="note.id"
+        @update:open="handleContextMenuOpen($event, note)"
+      >
+        <ContextMenuTrigger as-child>
+          <li
+            class="note-item"
+            :class="{
+              'is-active': noteStore.activeNote?.id === note.id,
+              'is-selected': selectedNoteIds.has(note.id),
+            }"
+            role="listitem"
+          >
+            <div class="note-item-layout">
+              <button
+                :id="`note-item-${note.id}`"
+                class="note-item-btn"
+                type="button"
+                @click="handleNoteClick($event, note)"
+              >
+                <!-- Icons row -->
+                <div class="note-item-meta">
+                  <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
+                  <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
+                  <LockKeyholeIcon v-if="isNoteLocked(note)" :size="12" class="meta-icon locked" />
+                  <LockIcon v-else-if="isNoteProtected(note)" :size="12" class="meta-icon protected" />
+                  <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
+                </div>
+                <p class="note-item-title">{{ note.title || '(無題)' }}</p>
+                <p v-if="searchSnippet(note.id)" class="note-item-snippet">
+                  {{ searchSnippet(note.id) }}
+                </p>
+              </button>
+              <div class="note-item-actions" @click.stop>
+              <PopoverRoot :open="editingNoteId === note.id" @update:open="setEditingNoteOpen(note, $event)">
+                <PopoverTrigger as-child>
+                  <button
+                    class="note-item-edit-button"
+                    type="button"
+                    title="編集・ロック設定"
+                    aria-label="編集・ロック設定"
+                    @click.stop="openNoteEditor(note)"
+                  >
+                    <Edit2Icon :size="14" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverPortal>
+                  <PopoverContent
+                    class="note-edit-popover"
+                    side="right"
+                    align="start"
+                    :side-offset="8"
+                    @click.stop
+                  >
+                    <form class="note-edit-form" @submit.prevent="saveNoteEditor(note)">
+                      <label :for="`note-title-${note.id}`">タイトル</label>
+                      <input :id="`note-title-${note.id}`" ref="editTitleInput" v-model="editTitle" type="text" maxlength="200" />
+                      <ContentLockControls
+                        :ref="(instance) => setNoteLockControls(note.id, instance)"
+                        :target="{ type: 'note', id: note.id }"
+                        :target-label="note.title || '無題のノート'"
+                        defer-save
+                        @changed="refreshAfterNoteLockChange"
+                      />
+                      <p v-if="noteEditorError" class="note-edit-error" role="alert">{{ noteEditorError }}</p>
+                      <div class="note-edit-actions">
+                        <button type="button" :disabled="isSavingNoteEditor" @click="cancelNoteEditor(note)">キャンセル</button>
+                        <button class="save-note-button" type="submit" :disabled="isSavingNoteEditor">
+                          {{ isSavingNoteEditor ? '保存中...' : '保存' }}
+                        </button>
+                      </div>
+                    </form>
+                  </PopoverContent>
+                </PopoverPortal>
+              </PopoverRoot>
+                <button
+                  class="note-item-delete-button"
+                  type="button"
+                  :disabled="noteStore.isSaving || isSavingNoteEditor"
+                  :title="note.isTrashed ? '完全に削除' : 'ゴミ箱へ移動'"
+                  :aria-label="note.isTrashed ? '完全に削除' : 'ゴミ箱へ移動'"
+                  @click.stop="deleteNoteFromList(note)"
+                >
+                  <Trash2Icon :size="14" />
+                </button>
+              </div>
+            </div>
+          </li>
+        </ContextMenuTrigger>
+
+        <ContextMenuPortal>
+          <ContextMenuContent class="context-menu" :data-theme="appStore.theme">
+            <ContextMenuLabel v-if="contextMenu.targetIds.length > 1" class="context-menu-label">
+              {{ contextMenu.targetIds.length }}件を選択中
+            </ContextMenuLabel>
+            <template v-if="!contextMenu.isTrashed">
+              <template v-if="contextMenu.targetIds.length === 1">
+                <ContextMenuItem class="context-menu-item" @select="handleContextAction('favorite')">
+                  <StarIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isFavorite }" />
+                  {{ contextMenu.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加' }}
+                </ContextMenuItem>
+                <ContextMenuItem class="context-menu-item" @select="handleContextAction('pin')">
+                  <PinIcon :size="14" class="mr-2" :class="{ filled: contextMenu.isPinned }" />
+                  {{ contextMenu.isPinned ? 'ピン留めを外す' : 'ピン留めする' }}
+                </ContextMenuItem>
+                <ContextMenuSeparator class="context-menu-divider" />
+              </template>
+
+              <ContextMenuSub>
+                <ContextMenuSubTrigger class="context-menu-item">
+                  <FolderInputIcon :size="14" class="mr-2" />
+                  ノートブックへ移動
+                  <ChevronRightIcon :size="14" class="context-menu-chevron" />
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent
+                  class="context-submenu-panel"
+                  :data-theme="appStore.theme"
+                  :side-offset="4"
+                  :align-offset="-4"
+                >
+                  <ContextMenuItem class="context-menu-item" @select="handleMoveToNotebook(null)">
+                    未分類
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    v-for="notebook in notebookOptions"
+                    :key="notebook.id"
+                    class="context-menu-item"
+                    @select="handleMoveToNotebook(notebook.id)"
+                  >
+                    {{ notebook.label }}
+                  </ContextMenuItem>
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+
+              <ContextMenuSeparator class="context-menu-divider" />
+              <ContextMenuItem class="context-menu-item danger" @select="handleContextAction('trash')">
+                <Trash2Icon :size="14" class="mr-2" />
+                ゴミ箱へ移動
+              </ContextMenuItem>
+            </template>
+            <template v-else>
+              <ContextMenuItem class="context-menu-item" @select="handleContextAction('restore')">
+                <RotateCcwIcon :size="14" class="mr-2" />
+                元に戻す
+              </ContextMenuItem>
+              <ContextMenuItem class="context-menu-item danger" @select="handleContextAction('delete')">
+                <Trash2Icon :size="14" class="mr-2" />
+                完全に削除
+              </ContextMenuItem>
+            </template>
+          </ContextMenuContent>
+        </ContextMenuPortal>
+      </ContextMenuRoot>
+      <li
+        v-if="shouldAutoLoadMore"
+        ref="loadMoreSentinel"
+        class="note-list-load-more-sentinel"
+        aria-hidden="true"
+      />
+    </ul>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import {
+  ArrowDownUpIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  Edit2Icon,
+  FolderInputIcon,
+  LockIcon,
+  LockKeyholeIcon,
+  PlusIcon,
+  StarIcon,
+  PinIcon,
+  Trash2Icon,
+  RotateCcwIcon,
+  XIcon,
+} from '@lucide/vue'
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuPortal,
+  ContextMenuRoot,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItemIndicator,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuRoot,
+  DropdownMenuTrigger,
+  PopoverContent,
+  PopoverPortal,
+  PopoverRoot,
+  PopoverTrigger,
+} from 'reka-ui'
+import type { note } from '../../wailsjs/go/models'
+import { useNoteStore } from '../stores/useNoteStore'
+import { NOTE_SORT_OPTIONS, useAppStore, type NoteSortOption } from '../stores/useAppStore'
+import { useNotebookStore } from '../stores/useNotebookStore'
+import { useSearchStore } from '../stores/useSearchStore'
+import { useTagStore } from '../stores/useTagStore'
+import { NoteDeleteError } from '../utils/deleteNotesSequentially'
+import { NoteUpdateError } from '../utils/updateNotesSequentially'
+import ContentLockControls from './ContentLockControls.vue'
+
+const noteStore = useNoteStore()
+const appStore = useAppStore()
+const notebookStore = useNotebookStore()
+const searchStore = useSearchStore()
+const tagStore = useTagStore()
+const sortOptions = NOTE_SORT_OPTIONS
+const defaultSortLabel = computed(() => (
+  searchStore.isActive ? '既定（関連度順）' : '既定（更新日時・新しい順）'
+))
+const sortButtonLabel = computed(() => {
+  const selected = sortOptions.find(option => option.value === appStore.sortOption)
+  return selected?.value ? selected.label : defaultSortLabel.value
+})
+const selectedNoteIds = ref<Set<string>>(new Set())
+const lastSelectedNoteId = ref<string | null>(null)
+const noteListRef = ref<HTMLUListElement | null>(null)
+const loadMoreSentinel = ref<HTMLLIElement | null>(null)
+const editingNoteId = ref<string | null>(null)
+const editTitle = ref('')
+const editTitleInput = ref<HTMLInputElement | null>(null)
+type ContentLockEditorHandle = {
+  save: () => Promise<boolean>
+  reset: () => void
+}
+const noteLockControls = new Map<string, ContentLockEditorHandle>()
+const isSavingNoteEditor = ref(false)
+const noteEditorError = ref('')
+let loadMoreObserver: IntersectionObserver | null = null
+
+const contextMenu = ref({
+  noteId: '',
+  targetIds: [] as string[],
+  isTrashed: false,
+  isFavorite: false,
+  isPinned: false,
+})
+
+function handleNoteClick(event: MouseEvent, note: note.Summary) {
+  if (event.shiftKey) {
+    toggleNoteSelection(note.id)
+    return
+  }
+
+  selectedNoteIds.value = new Set()
+  lastSelectedNoteId.value = note.id
+  noteStore.selectNote(note.id)
+}
+
+function isNoteProtected(item: note.Summary) {
+  return Boolean((item as note.Summary & { protected?: boolean }).protected)
+}
+
+function isNoteLocked(item: note.Summary) {
+  return Boolean((item as note.Summary & { locked?: boolean }).locked)
+}
+
+function openNoteEditor(item: note.Summary) {
+  if (editingNoteId.value && editingNoteId.value !== item.id) {
+    noteLockControls.get(editingNoteId.value)?.reset()
+  }
+  noteLockControls.get(item.id)?.reset()
+  noteEditorError.value = ''
+  editTitle.value = item.title
+  editingNoteId.value = item.id
+  void nextTick(() => {
+    editTitleInput.value?.focus()
+    editTitleInput.value?.select()
+  })
+}
+
+function setEditingNoteOpen(item: note.Summary, open: boolean) {
+  if (open) {
+    openNoteEditor(item)
+    return
+  }
+  if (editingNoteId.value === item.id) cancelNoteEditor(item)
+}
+
+function setNoteLockControls(noteId: string, instance: unknown) {
+  const handle = instance as Partial<ContentLockEditorHandle> | null
+  if (handle && typeof handle.save === 'function' && typeof handle.reset === 'function') {
+    noteLockControls.set(noteId, handle as ContentLockEditorHandle)
+    return
+  }
+  noteLockControls.delete(noteId)
+}
+
+async function saveNoteEditor(item: note.Summary) {
+  const lockControls = noteLockControls.get(item.id)
+  if (isSavingNoteEditor.value) return
+  if (!lockControls) {
+    noteEditorError.value = 'ロック設定の読み込みが完了していません。編集画面を開き直してください。'
+    return
+  }
+  noteEditorError.value = ''
+  isSavingNoteEditor.value = true
+  try {
+    if (!(await lockControls.save())) return
+
+    const title = editTitle.value.trim()
+    if (!title || title === item.title) {
+      editingNoteId.value = null
+      return
+    }
+    if (await noteStore.saveNote(item.id, { title })) editingNoteId.value = null
+  } finally {
+    isSavingNoteEditor.value = false
+  }
+}
+
+function cancelNoteEditor(item: note.Summary) {
+  if (isSavingNoteEditor.value) return
+  noteLockControls.get(item.id)?.reset()
+  noteEditorError.value = ''
+  if (editingNoteId.value === item.id) editingNoteId.value = null
+}
+
+async function refreshAfterNoteLockChange() {
+  await noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent')
+  if (searchStore.isActive) await searchStore.refresh()
+}
+
+function toggleNoteSelection(noteId: string) {
+  const nextSelectedIds = new Set(selectedNoteIds.value)
+
+  if (nextSelectedIds.has(noteId)) {
+    nextSelectedIds.delete(noteId)
+    selectedNoteIds.value = nextSelectedIds
+    return
+  }
+
+  nextSelectedIds.add(noteId)
+  selectedNoteIds.value = nextSelectedIds
+  lastSelectedNoteId.value = noteId
+}
+
+function prepareContextMenu(note: note.Summary) {
+  const displayedIds = new Set(displayedNotes.value.map(n => n.id))
+  const targetIds = selectedNoteIds.value.has(note.id)
+    ? Array.from(selectedNoteIds.value).filter(id => displayedIds.has(id))
+    : [note.id]
+
+  if (!selectedNoteIds.value.has(note.id)) {
+    selectedNoteIds.value = new Set([note.id])
+    lastSelectedNoteId.value = note.id
+  }
+
+  contextMenu.value = {
+    noteId: note.id,
+    targetIds,
+    isTrashed: note.isTrashed,
+    isFavorite: note.isFavorite,
+    isPinned: note.isPinned,
+  }
+}
+
+function handleContextMenuOpen(open: boolean, note: note.Summary) {
+  if (open) prepareContextMenu(note)
+}
+
+async function handleContextAction(action: 'favorite' | 'pin' | 'trash' | 'restore' | 'delete') {
+  const id = contextMenu.value.noteId
+  if (!id) return
+  const targetIds = contextMenu.value.targetIds.length > 0 ? contextMenu.value.targetIds : [id]
+
+  try {
+    switch (action) {
+      case 'favorite':
+        await noteStore.toggleFavorite(id)
+        break
+      case 'pin':
+        await noteStore.togglePinned(id)
+        break
+      case 'trash':
+        await noteStore.trashNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+      case 'restore':
+        await noteStore.restoreNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+      case 'delete':
+        await noteStore.permanentlyDeleteNotes(targetIds)
+        clearSelectedNotes(targetIds)
+        break
+    }
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
+async function deleteNoteFromList(item: note.Summary) {
+  if (noteStore.isSaving || isSavingNoteEditor.value) return
+
+  if (item.isTrashed) {
+    const title = item.title || '無題のノート'
+    const confirmed = window.confirm('「' + title + '」を完全に削除します。この操作は元に戻せません。')
+    if (!confirmed) return
+  }
+
+  if (editingNoteId.value === item.id) cancelNoteEditor(item)
+
+  try {
+    if (item.isTrashed) {
+      await noteStore.permanentlyDeleteNotes([item.id])
+    } else {
+      await noteStore.trashNotes([item.id])
+    }
+    clearSelectedNotes([item.id])
+    if (searchStore.isActive) await searchStore.refresh()
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
+async function handleMoveToNotebook(notebookId: string | null) {
+  const targetIds = contextMenu.value.targetIds
+  if (targetIds.length === 0) return
+
+  try {
+    await noteStore.moveNotesToNotebook(targetIds, notebookId)
+    if (searchStore.isActive) await searchStore.refresh()
+    clearSelectedNotes(targetIds)
+  } catch (error) {
+    clearSelectedNotes(completedBatchIds(error))
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
+function handleSortChange(value: unknown) {
+  if (typeof value !== 'string' || !sortOptions.some(option => option.value === value)) return
+  appStore.setSortOption(value as NoteSortOption)
+  if (searchStore.isActive) {
+    void searchStore.refresh()
+    return
+  }
+
+  void noteStore.fetchNotes([], noteStore.activeTagId, appStore.sidebarSection === 'recent')
+}
+
+function completedBatchIds(error: unknown) {
+  if (error instanceof NoteUpdateError) return error.updatedIds
+  if (error instanceof NoteDeleteError) return error.deletedIds
+  return []
+}
+
+function clearSelectedNotes(ids: string[]) {
+  const idSet = new Set(ids)
+  selectedNoteIds.value = new Set(Array.from(selectedNoteIds.value).filter(id => !idSet.has(id)))
+  if (lastSelectedNoteId.value && idSet.has(lastSelectedNoteId.value)) {
+    lastSelectedNoteId.value = null
+  }
+}
+
+async function emptyTrash() {
+  const count = noteStore.trashedNotes.length
+  if (count === 0) return
+
+  const confirmed = window.confirm(
+    `ゴミ箱内の${count}件のノートを完全に削除します。この操作は元に戻せません。`,
+  )
+  if (!confirmed) return
+
+  try {
+    await noteStore.emptyTrash()
+    if (searchStore.isActive) await searchStore.refresh()
+    selectedNoteIds.value = new Set()
+    lastSelectedNoteId.value = null
+  } catch {
+    if (searchStore.isActive) await searchStore.refresh()
+  }
+}
+
+function createNewNote() {
+  noteStore.newNote('新しいノート', '', notebookStore.activeNotebookId)
+}
+
+async function returnToNormalList() {
+  searchStore.clear()
+  noteStore.clearTagFilter()
+  notebookStore.activeNotebookId = null
+  appStore.setSidebarSection('notes')
+  await noteStore.fetchNotes([], null, false)
+}
+
+const isAllNotesList = computed(() => (
+  !searchStore.isActive
+  && !noteStore.activeTagId
+  && !notebookStore.activeNotebookId
+  && appStore.sidebarSection === 'notes'
+))
+
+const isTrashSection = computed(() =>
+  appStore.sidebarSection === 'trash' && !notebookStore.activeNotebookId
+)
+
+const sectionTitle = computed(() => {
+  if (searchStore.isActive) return '検索結果'
+  if (noteStore.activeTagId) {
+    const tag = tagStore.tags.find((candidate) => candidate.id === noteStore.activeTagId)
+    return tag ? tag.name : 'タグのノート'
+  }
+  if (notebookStore.activeNotebookId) {
+    const nb = notebookStore.notebooks.find(n => n.id === notebookStore.activeNotebookId)
+    return nb ? nb.name : 'すべてのノート'
+  }
+  switch (appStore.sidebarSection) {
+    case 'uncategorized': return '未分類'
+    case 'favorites': return 'お気に入り'
+    case 'pinned': return 'ピン留め'
+    case 'recent': return '最近更新した'
+    case 'trash': return 'ゴミ箱'
+    default: return 'すべてのノート'
+  }
+})
+
+const displayedNotes = computed(() => {
+  if (searchStore.isActive) {
+    let list = searchStore.items.map(item => item.note)
+    switch (appStore.sidebarSection) {
+      case 'uncategorized': list = list.filter(n => !n.notebookId); break
+      case 'favorites': list = list.filter(n => n.isFavorite && !n.isTrashed); break
+      case 'pinned': list = list.filter(n => n.isPinned && !n.isTrashed); break
+      case 'trash': list = list.filter(n => n.isTrashed); break
+      default: list = list.filter(n => !n.isTrashed); break
+    }
+    if (notebookStore.activeNotebookId) {
+      list = list.filter(n => n.notebookId === notebookStore.activeNotebookId)
+    }
+    return list
+  }
+
+  let list: note.Summary[] = []
+  switch (appStore.sidebarSection) {
+    case 'uncategorized': list = noteStore.activeNotes.filter(n => !n.notebookId); break
+    case 'favorites': list = noteStore.favoriteNotes; break
+    case 'pinned': list = noteStore.pinnedNotes; break
+    case 'recent': list = noteStore.activeNotes; break
+    case 'trash': list = noteStore.trashedNotes; break
+    default: list = noteStore.activeNotes; break
+  }
+  if (notebookStore.activeNotebookId) {
+    list = list.filter(n => n.notebookId === notebookStore.activeNotebookId)
+  }
+  return list
+})
+
+const displayedCount = computed(() => {
+  if (!searchStore.isActive) return displayedNotes.value.length
+  if (['uncategorized', 'favorites', 'pinned'].includes(appStore.sidebarSection)) {
+    return displayedNotes.value.length
+  }
+  return searchStore.total
+})
+const shouldAutoLoadMore = computed(() => !searchStore.isActive && noteStore.hasMoreNotes)
+const searchItemsById = computed(() => new Map(searchStore.items.map(item => [item.note.id, item])))
+
+function stopAutoLoadObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+}
+
+function observeLoadMore() {
+  stopAutoLoadObserver()
+  if (
+    !shouldAutoLoadMore.value
+    || noteStore.isLoadingMore
+    || !noteListRef.value
+    || !loadMoreSentinel.value
+  ) return
+
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting) && shouldAutoLoadMore.value) {
+      void noteStore.fetchNextPage()
+    }
+  }, {
+    root: noteListRef.value,
+    rootMargin: '0px 0px 160px 0px',
+  })
+  loadMoreObserver.observe(loadMoreSentinel.value)
+}
+
+watch(
+  () => [shouldAutoLoadMore.value, noteStore.isLoadingMore, displayedNotes.value.length],
+  async () => {
+    await nextTick()
+    observeLoadMore()
+  },
+  { flush: 'post', immediate: true },
+)
+
+onBeforeUnmount(stopAutoLoadObserver)
+
+function searchSnippet(noteId: string) {
+  return (searchItemsById.value.get(noteId)?.snippet ?? '').replace(/<\/?mark>/g, '')
+}
+
+const notebookOptions = computed(() => {
+  const depthById = new Map<string, number>()
+  const getDepth = (notebook: note.Notebook): number => {
+    if (!notebook.parentId) return 0
+    if (depthById.has(notebook.id)) return depthById.get(notebook.id) ?? 0
+
+    const parent = notebookStore.notebooks.find(n => n.id === notebook.parentId)
+    const depth = parent ? getDepth(parent) + 1 : 0
+    depthById.set(notebook.id, depth)
+    return depth
+  }
+
+  return notebookStore.notebooks.map(notebook => ({
+    id: notebook.id,
+    label: `${'  '.repeat(getDepth(notebook))}${notebook.name}`,
+  }))
+})
+
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) return d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+  if (diffDays < 7) return `${diffDays}日前`
+  return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })
+}
+</script>
+
+<style scoped>
+.note-list-sort-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.note-list-sort-trigger:hover,
+.note-list-sort-trigger[data-state='open'],
+.note-list-sort-trigger.is-active {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+:global(.note-list-sort-menu) {
+  z-index: 1300;
+  min-width: 214px;
+  padding: 4px 0;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  outline: none;
+}
+
+:global(.note-list-sort-label) {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.note-list-sort-item) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 12px 6px 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+:global(.note-list-sort-item[data-highlighted]) {
+  background-color: var(--bg-hover);
+  outline: none;
+}
+
+:global(.note-list-sort-indicator) {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  margin-right: 4px;
+  color: var(--brand-primary);
+}
+
+.note-list-new-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--brand-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.15s, opacity 0.12s;
+}
+
+.note-list-new-note-btn:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+
+.note-list-new-note-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+:global(.context-menu) {
+  z-index: 1300;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 160px;
+  outline: none;
+}
+
+.empty-trash-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--color-danger);
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.empty-trash-btn:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.empty-trash-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.note-list-search-limit {
+  margin: 8px 12px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.note-list-back-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.note-list-back-button:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.note-list-search-more {
+  align-self: center;
+  margin: 8px 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.note-list-search-more:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.note-list-search-more:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.note-list-load-more-sentinel {
+  height: 1px;
+  margin: 0;
+  list-style: none;
+}
+
+.note-item-snippet {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(.context-menu-item) {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+:global(.context-menu-item[data-highlighted]) {
+  background-color: var(--bg-hover);
+  outline: none;
+}
+
+:global(.context-menu-item.danger) {
+  color: var(--color-danger);
+}
+
+:global(.context-menu-item.danger[data-highlighted]) {
+  background-color: rgba(248, 81, 73, 0.1);
+}
+
+:global(.context-menu-divider) {
+  height: 1px;
+  background-color: var(--border);
+  margin: 4px 0;
+}
+
+.mr-2 {
+  margin-right: 8px;
+}
+
+.filled {
+  fill: currentColor;
+}
+
+.note-item.is-selected {
+  background: var(--bg-active);
+  outline: 1px solid var(--border-strong);
+}
+
+.note-item.is-selected .note-item-title {
+  color: var(--text-active);
+}
+
+:global(.context-menu-label) {
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.context-menu-chevron) {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+:global(.context-submenu-panel) {
+  z-index: 1301;
+  min-width: 180px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+  background-color: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  outline: none;
+}
+
+.note-item-layout {
+  display: flex;
+  align-items: stretch;
+}
+
+.note-item-layout .note-item-btn {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.note-item-actions {
+  position: static;
+  transform: none;
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin: 8px 7px 8px 0;
+}
+
+.note-item-edit-button,
+.note-item-delete-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.note-item-edit-button:hover,
+.note-item-edit-button:focus-visible,
+.note-item-delete-button:hover,
+.note-item-delete-button:focus-visible {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--brand-primary);
+  outline: none;
+}
+
+.note-item-delete-button:hover,
+.note-item-delete-button:focus-visible {
+  color: var(--color-danger);
+}
+
+.note-item-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.meta-icon.locked {
+  color: var(--color-danger, #c0392b);
+}
+
+.meta-icon.protected {
+  color: var(--brand-primary);
+}
+
+/* PopoverContent is teleported outside this component, so its root must not
+   rely on Vue's scoped attribute to receive the opaque surface styles. */
+:global(.note-edit-popover) {
+  z-index: 1302;
+  display: grid;
+  gap: 12px;
+  width: min(340px, calc(100vw - 28px));
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background-color: var(--bg-sidebar);
+  opacity: 1;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.note-edit-form {
+  display: grid;
+  gap: 7px;
+}
+
+.note-edit-form label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note-edit-form input {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.note-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.note-edit-error {
+  margin: 0;
+  color: var(--color-danger, #c0392b);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.note-edit-actions button {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.note-edit-actions .save-note-button {
+  border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: white;
+}
+</style>

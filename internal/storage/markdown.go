@@ -2,17 +2,37 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"sync"
+	"time"
 )
 
 var safeIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type MarkdownStore struct {
-	rootDir string
+	rootDir     string
+	protectorMu sync.RWMutex
+	protector   ContentProtector
+}
+
+// ContentProtector is an optional boundary around the canonical Markdown
+// bytes. It deliberately lives in storage so the lock implementation can
+// protect files without making the storage package depend on application
+// policy or the database.
+type ContentProtector interface {
+	Encode(context.Context, string, []byte) ([]byte, error)
+	Decode(context.Context, string, []byte) ([]byte, error)
+}
+
+type ManagedFile struct {
+	ModTime time.Time
 }
 
 func NewMarkdownStore(rootDir string) (*MarkdownStore, error) {
@@ -22,6 +42,15 @@ func NewMarkdownStore(rootDir string) (*MarkdownStore, error) {
 	}
 
 	return &MarkdownStore{rootDir: rootDir}, nil
+}
+
+// SetContentProtector installs the in-process content protection boundary.
+// It is configured once during application initialization before note service
+// methods become available.
+func (s *MarkdownStore) SetContentProtector(protector ContentProtector) {
+	s.protectorMu.Lock()
+	s.protector = protector
+	s.protectorMu.Unlock()
 }
 
 func (s *MarkdownStore) ContentPath(id string) (string, error) {
@@ -37,38 +66,87 @@ func (s *MarkdownStore) Read(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 
-	path, err := s.fullPath(id)
+	content, err := s.ReadRaw(ctx, id)
 	if err != nil {
 		return "", err
 	}
-
-	content, err := os.ReadFile(path)
+	decoded, err := s.decode(ctx, id, content)
 	if err != nil {
-		return "", fmt.Errorf("read markdown content: %w", err)
+		return "", fmt.Errorf("decode markdown content: %w", err)
 	}
-
-	return string(content), nil
+	return string(decoded), nil
 }
 
-func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, content string) error {
+func (s *MarkdownStore) WriteTemp(ctx context.Context, id string, operationID string, content string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	encoded, err := s.encode(ctx, id, []byte(content))
+	if err != nil {
+		return fmt.Errorf("encode markdown content: %w", err)
+	}
+	return s.WriteTempRaw(ctx, id, operationID, encoded)
+}
+
+// ReadRaw reads the stored bytes without content transformation. It is only
+// used by the lock transaction and opaque recovery paths; regular note code
+// must use Read.
+func (s *MarkdownStore) ReadRaw(ctx context.Context, id string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := s.fullPath(id)
+	if err != nil {
+		return nil, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read markdown content: %w", err)
+	}
+	return content, nil
+}
+
+// WriteTempRaw stages already encoded canonical bytes. Callers are responsible
+// for using it only where the encoding lifecycle is explicitly controlled.
+func (s *MarkdownStore) WriteTempRaw(ctx context.Context, id string, operationID string, content []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	path, err := s.fullPath(id)
+	// 既存ファイルを直接上書きすると、OSのクラッシュやプロセス強制終了が発生した際に
+	// ファイルサイズが0になったり、内容が中途半端に上書きされてデータが破損するリスクがある。
+	// そのため、一時ファイル（.tmp）に書き込んでから確実にクローズし、その後リネーム（OSレベルのアトミック操作）で上書きする。
+	tempPath, err := s.tempPath(id, operationID)
 	if err != nil {
 		return err
 	}
 
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, []byte(content), 0o600); err != nil {
+	file, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return fmt.Errorf("write markdown temp content: %w", err)
 	}
+	written := false
+	defer func() {
+		if !written {
+			_ = file.Close()
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := file.Write(content); err != nil {
+		return fmt.Errorf("write markdown temp content: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("sync markdown temp content: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close markdown temp content: %w", err)
+	}
+	written = true
 
 	return nil
 }
 
-func (s *MarkdownStore) CommitTemp(ctx context.Context, id string) error {
+func (s *MarkdownStore) CommitTemp(ctx context.Context, id string, operationID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -78,7 +156,10 @@ func (s *MarkdownStore) CommitTemp(ctx context.Context, id string) error {
 		return err
 	}
 
-	tempPath := path + ".tmp"
+	tempPath, err := s.tempPath(id, operationID)
+	if err != nil {
+		return err
+	}
 	if err := os.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("commit markdown temp content: %w", err)
 	}
@@ -86,17 +167,16 @@ func (s *MarkdownStore) CommitTemp(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *MarkdownStore) RollbackTemp(ctx context.Context, id string) error {
+func (s *MarkdownStore) RollbackTemp(ctx context.Context, id string, operationID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	path, err := s.fullPath(id)
+	tempPath, err := s.tempPath(id, operationID)
 	if err != nil {
 		return err
 	}
 
-	tempPath := path + ".tmp"
 	if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("rollback markdown temp content: %w", err)
 	}
@@ -105,16 +185,276 @@ func (s *MarkdownStore) RollbackTemp(ctx context.Context, id string) error {
 }
 
 func (s *MarkdownStore) Write(ctx context.Context, id string, content string) error {
-	if err := s.WriteTemp(ctx, id, content); err != nil {
+	const operationID = "direct"
+	if err := s.WriteTemp(ctx, id, operationID, content); err != nil {
 		return err
 	}
-	
-	if err := s.CommitTemp(ctx, id); err != nil {
-		_ = s.RollbackTemp(context.Background(), id)
+
+	if err := s.CommitTemp(ctx, id, operationID); err != nil {
+		_ = s.RollbackTemp(context.Background(), id, operationID)
 		return err
 	}
 
 	return nil
+}
+
+func (s *MarkdownStore) Exists(ctx context.Context, id string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat markdown content: %w", err)
+}
+
+func (s *MarkdownStore) ModTime(ctx context.Context, id string) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stat markdown content: %w", err)
+	}
+	return info.ModTime(), nil
+}
+
+// ListManagedFiles returns a snapshot of managed Markdown and journal file
+// names. Recovery uses this directory snapshot instead of issuing one Stat
+// call per note.
+func (s *MarkdownStore) ListManagedFiles(ctx context.Context) (map[string]ManagedFile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	directory, err := os.Open(s.rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("list managed markdown files: %w", err)
+	}
+	defer directory.Close()
+	entries, err := directory.Readdir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("read managed markdown files: %w", err)
+	}
+
+	files := make(map[string]ManagedFile, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !isManagedFile(entry.Name()) {
+			continue
+		}
+		files[entry.Name()] = ManagedFile{ModTime: entry.ModTime()}
+	}
+
+	return files, nil
+}
+
+func (s *MarkdownStore) TempExists(ctx context.Context, id string, operationID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	path, err := s.tempPath(id, operationID)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat markdown temp content: %w", err)
+}
+
+func (s *MarkdownStore) ContentMatches(ctx context.Context, id string, expectedHash string) (bool, error) {
+	content, err := s.Read(ctx, id)
+	if err != nil {
+		return false, err
+	}
+
+	return HashContent(content) == expectedHash, nil
+}
+
+func (s *MarkdownStore) TempContentMatches(ctx context.Context, id string, operationID string, expectedHash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	path, err := s.tempPath(id, operationID)
+	if err != nil {
+		return false, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read markdown temp content: %w", err)
+	}
+	decoded, err := s.decode(ctx, id, content)
+	if err != nil {
+		return false, fmt.Errorf("decode markdown temp content: %w", err)
+	}
+	return HashContent(string(decoded)) == expectedHash, nil
+}
+
+// RawContentMatches and RawTempContentMatches are for opaque encrypted sync
+// recovery. They never attempt to decrypt and therefore never expose content.
+func (s *MarkdownStore) RawContentMatches(ctx context.Context, id string, expectedHash string) (bool, error) {
+	content, err := s.ReadRaw(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return HashContent(string(content)) == expectedHash, nil
+}
+
+func (s *MarkdownStore) RawTempContentMatches(ctx context.Context, id string, operationID string, expectedHash string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	path, err := s.tempPath(id, operationID)
+	if err != nil {
+		return false, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read markdown temp content: %w", err)
+	}
+	return HashContent(string(content)) == expectedHash, nil
+}
+
+func (s *MarkdownStore) StageDelete(ctx context.Context, id string, operationID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return err
+	}
+	stagedPath, err := s.deletePath(id, operationID)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Rename(path, stagedPath); err != nil {
+		return fmt.Errorf("stage markdown delete: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) RestoreDelete(ctx context.Context, id string, operationID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	path, err := s.fullPath(id)
+	if err != nil {
+		return err
+	}
+	stagedPath, err := s.deletePath(id, operationID)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Rename(stagedPath, path); err != nil {
+		return fmt.Errorf("restore staged markdown delete: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) CommitDelete(ctx context.Context, id string, operationID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	stagedPath, err := s.deletePath(id, operationID)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(stagedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("commit staged markdown delete: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MarkdownStore) DeleteStagedExists(ctx context.Context, id string, operationID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	path, err := s.deletePath(id, operationID)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat staged markdown delete: %w", err)
+}
+
+func (s *MarkdownStore) QuarantineOrphans(ctx context.Context, expected map[string]struct{}) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// DBに記録されていないMarkdownファイル（孤児ファイル）が見つかった場合、
+	// アプリ側のバグや予期せぬ不整合の可能性がある。
+	// ここで即座に削除（Delete）してしまうと、ユーザーの大切なメモが完全に失われる危険があるため、
+	// 念のための安全策として 'recovery' ディレクトリに退避（Quarantine）させるに留める。
+	entries, err := os.ReadDir(s.rootDir)
+	if err != nil {
+		return fmt.Errorf("list markdown directory: %w", err)
+	}
+
+	recoveryDir := filepath.Join(s.rootDir, "recovery")
+	for _, entry := range entries {
+		if entry.IsDir() || !isManagedFile(entry.Name()) {
+			continue
+		}
+		if _, ok := expected[entry.Name()]; ok {
+			continue
+		}
+
+		if err := os.MkdirAll(recoveryDir, 0o700); err != nil {
+			return fmt.Errorf("create markdown recovery directory: %w", err)
+		}
+		source := filepath.Join(s.rootDir, entry.Name())
+		target := filepath.Join(recoveryDir, fmt.Sprintf("%s.%d", entry.Name(), time.Now().UnixNano()))
+		if err := os.Rename(source, target); err != nil {
+			return fmt.Errorf("quarantine orphan markdown file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func HashContent(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *MarkdownStore) Delete(ctx context.Context, id string) error {
@@ -141,6 +481,54 @@ func (s *MarkdownStore) fullPath(id string) (string, error) {
 	}
 
 	return filepath.Join(s.rootDir, contentPath), nil
+}
+
+func (s *MarkdownStore) encode(ctx context.Context, id string, content []byte) ([]byte, error) {
+	s.protectorMu.RLock()
+	protector := s.protector
+	s.protectorMu.RUnlock()
+	if protector == nil {
+		return content, nil
+	}
+	return protector.Encode(ctx, id, content)
+}
+
+func (s *MarkdownStore) decode(ctx context.Context, id string, content []byte) ([]byte, error) {
+	s.protectorMu.RLock()
+	protector := s.protector
+	s.protectorMu.RUnlock()
+	if protector == nil {
+		return content, nil
+	}
+	return protector.Decode(ctx, id, content)
+}
+
+func (s *MarkdownStore) tempPath(id string, operationID string) (string, error) {
+	if err := validateID(operationID); err != nil {
+		return "", fmt.Errorf("invalid operation id: %w", err)
+	}
+	path, err := s.fullPath(id)
+	if err != nil {
+		return "", err
+	}
+
+	return path + "." + operationID + ".tmp", nil
+}
+
+func (s *MarkdownStore) deletePath(id string, operationID string) (string, error) {
+	if err := validateID(operationID); err != nil {
+		return "", fmt.Errorf("invalid operation id: %w", err)
+	}
+	path, err := s.fullPath(id)
+	if err != nil {
+		return "", err
+	}
+
+	return path + "." + operationID + ".delete", nil
+}
+
+func isManagedFile(name string) bool {
+	return strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".delete")
 }
 
 func validateID(id string) error {

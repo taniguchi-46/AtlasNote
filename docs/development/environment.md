@@ -2,7 +2,7 @@
 
 Atlas Note の開発環境方針をまとめる。
 
-現時点ではアプリ本体の `package.json`、`go.mod`、Wails 設定ファイルは未配置のため、具体的なコマンドやバージョンは実装開始後に確定する。
+アプリ本体の `package.json`、`go.mod`、Wails設定ファイルは配置済みです。具体的なセットアップ手順と確認済みバージョンは `docs/development/setup.md` を参照してください。
 
 ## 基本方針
 
@@ -25,7 +25,7 @@ Atlas Note の開発環境方針をまとめる。
 | UI | Reka UI |
 | State | Composables + Pinia |
 | Database | SQLite |
-| Editor | Tiptap + CodeMirror |
+| Editor | Markdown textarea + Tiptap |
 | Storage | Markdown |
 | Data Access | Repository + Squirrel |
 
@@ -35,7 +35,7 @@ Atlas Note の開発環境方針をまとめる。
 
 主な理由は、Wails が OS の WebView、ファイルシステム、将来的な Keychain 連携などのネイティブ機能に依存するため。Docker 内だけで GUI アプリの起動確認まで完結させると、環境構築が複雑になりやすい。
 
-実装開始後に確認する項目:
+環境更新時に確認する項目:
 
 - Go のバージョン
 - Node.js のバージョン
@@ -44,7 +44,7 @@ Atlas Note の開発環境方針をまとめる。
 - SQLite 関連ライブラリ
 - Lint / Format / Typecheck / Test のコマンド
 
-2026-07-03 時点の確認結果:
+2026-07-13 時点の確認結果:
 
 | 項目 | 状態 |
 | --- | --- |
@@ -52,7 +52,7 @@ Atlas Note の開発環境方針をまとめる。
 | npm | `10.8.2` |
 | Go | `go1.26.4 windows/amd64` |
 | Wails CLI | `v2.10.1` |
-| Frontend build | `npm run build` 成功 |
+| Frontend build | `npm run frontend:build` 成功 |
 | npm audit | 脆弱性 0 件 |
 | Go test | `go test ./...` 成功 |
 | Wails doctor | 成功 |
@@ -68,16 +68,33 @@ npm -v
 wails version
 ```
 
-実装開始後に確定する想定コマンド:
+現在の主要コマンド:
 
 ```bash
 wails dev
 wails build
-npm run build
-npm run typecheck
-npm run lint
+npm run frontend:build
+npm run frontend:typecheck
+npm run frontend:lint
 go test ./...
+npm --prefix frontend run test:storage-spaces
+npm --prefix frontend run test:auto-save
+npm --prefix frontend run test:note-operation-queue
+npm --prefix frontend run test:note-batch
+npm --prefix frontend run test:note-selection
+npm --prefix frontend run test:note-delete
+npm --prefix frontend run test:notebook-hierarchy
+npm --prefix frontend run test:serializer
+npm --prefix frontend run test:notifications
+npm --prefix frontend run test:tags
+npm --prefix frontend run test:operation-logger
+npm --prefix frontend run test:note-links
+npm --prefix frontend run test:note-list-view
+npm --prefix frontend run test:table-copy
+npm --prefix frontend run test:markdown-safety
 ```
+
+Frontendの`lint`は`vue-tsc --noEmit`を実行する。CIで実行するテストの全一覧は [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) を参照する。専用formatter scriptは追加せず、Go変更時は`gofmt`、Markdown変更時は`git diff --check`を確認する。
 
 ## Docker の扱い
 
@@ -96,7 +113,7 @@ Docker は採用候補とする。ただし、初期段階では Wails GUI 開�
 - OS 固有の WebView / Keychain / ファイルアクセスまで Docker 前提で設計すること
 - まだ未確定の構成に対して複雑な Dockerfile を先に作ること
 
-実装開始後の最小構成案:
+必要になった場合の最小構成案:
 
 - `Dockerfile.dev`
   - Go と Node.js の検証用
@@ -138,9 +155,7 @@ Wasm は初期段階では採用しない。
 - 主要依存パッケージ
 - 確認コマンド
 
-具体的な管理方法は実装開始時に確定する。
-
-候補:
+管理方法:
 
 - README または `docs/development/environment.md` に明記する
 - `.node-version` または `.nvmrc` を置く
@@ -159,26 +174,23 @@ Wasm は初期段階では採用しない。
 - WebDAV 認証情報
 - AI API 認証情報
 
-必要に応じて `.env.example` を作成し、キー名だけを記載する。
+`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。この値は個別の保存空間ではなくAtlas Noteの管理ルートを指定し、既存ルートを「メイン」、追加空間を管理ルート内の`spaces/<内部ID>/`として扱う。`ATLAS_NOTE_DATA_DIR` が設定されている場合は物理保存場所のUI変更を無効にする。未設定時の保存領域・バックアップ保存領域はOSユーザー設定領域の`storage-locations.json`で管理し、詳細は `docs/development/storage-locations.md` を参照する。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
+
+キー名だけを記載した `.env.example` を使用する。
 
 例:
 
 ```bash
-AI_PROVIDER=
-AI_API_KEY=
-AI_MODEL=
 WEBDAV_ENDPOINT=
 WEBDAV_USERNAME=
 WEBDAV_PASSWORD=
 ATLAS_NOTE_DATA_DIR=
 ```
 
-実値はローカル環境または OS の安全な保存先で管理する。AI API Key の保存方法は、将来的に OS Keychain の利用可否を確認して決める。
+AI設定はアプリの設定画面で管理する。AI API KeyはWebDAVとは分離したAI用OS CredentialStoreへ保存し、利用できない場合だけsession-onlyとする。実キーを`.env`、環境変数、SQLite、Markdown、`localStorage`へ保存しない。
 
 ## 今後決めること
 
-- npm / pnpm / yarn の選定
-- Lint / Format / Typecheck / Test の正式コマンド
-- SQLite ファイルと Markdown 保存先
 - Dockerfile を作るタイミング
 - Wasm を再検討する条件の詳細
+- デスクトップアプリの配布対象OSとビルド手順
