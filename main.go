@@ -15,15 +15,16 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "Atlas Note",
-		Width:     1280,
-		Height:    800,
-		MinWidth:  900,
-		MinHeight: 600,
+		Title:            "Atlas Note",
+		Width:            1280,
+		Height:           800,
+		MinWidth:         900,
+		MinHeight:        600,
+		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 248, G: 250, B: 252, A: 1},
+		BackgroundColour: &options.RGBA{R: 13, G: 17, B: 23, A: 255},
 		OnStartup:        app.startup,
 		// OnBeforeCloseをフックすることで、ユーザーが「×」ボタンでウィンドウを閉じようとした際に、
 		// 未保存の入力データをDBやファイルに保存し終わるまでアプリの終了を待機させる。

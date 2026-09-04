@@ -13,7 +13,7 @@ export type MissingNoteDiagnostic = {
 }
 
 export type StartupStatus = {
-  phase?: 'initializing' | 'setup-required' | 'ready' | 'locked' | 'error' | string
+  phase?: 'initializing' | 'setup-required' | 'storage-recovery' | 'ready' | 'locked' | 'error' | string
   setupRequired?: boolean
   ready: boolean
   locked?: boolean
@@ -25,6 +25,10 @@ export type StartupStatus = {
   backupRestoreSafetyBackupId?: string
   activeStorageSpace?: StorageSpace
   storageLocations?: StorageLocationStatus
+  storageLocationError?: {
+    code: string
+    message: string
+  }
 }
 
 export function getStartupStatus(): Promise<StartupStatus> {

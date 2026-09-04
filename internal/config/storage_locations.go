@@ -30,6 +30,7 @@ const (
 	LocationSourceEnvironment LocationSource = "environment"
 	LocationSourceSaved       LocationSource = "saved"
 	LocationSourceDefault     LocationSource = "default"
+	LocationSourceLegacy      LocationSource = "legacy"
 )
 
 // StorageLocations is the small, versioned bootstrap file used before the
@@ -65,6 +66,49 @@ type RootProbe struct {
 	Writable     bool     `json:"writable"`
 }
 
+// RootErrorCode identifies the safe, user-actionable reason why a folder was
+// rejected. The underlying error is still ErrRootInvalid so existing callers
+// can keep using errors.Is.
+type RootErrorCode string
+
+const (
+	RootErrorInvalidPath      RootErrorCode = "INVALID_PATH"
+	RootErrorNotDirectory     RootErrorCode = "NOT_DIRECTORY"
+	RootErrorNotWritable      RootErrorCode = "UNWRITABLE"
+	RootErrorUnsafeLink       RootErrorCode = "UNSAFE_LINK"
+	RootErrorReadFailed       RootErrorCode = "READ_FAILED"
+	RootErrorUnrelatedContent RootErrorCode = "UNRELATED_CONTENT"
+	RootErrorMissingData      RootErrorCode = "MISSING_ATLAS_DATA"
+)
+
+// RootValidationError reports a classified root validation failure while
+// preserving ErrRootInvalid for callers that only need the legacy contract.
+type RootValidationError struct {
+	Code  RootErrorCode
+	Cause error
+}
+
+func (e *RootValidationError) Error() string {
+	if e.Cause == nil {
+		return string(e.Code)
+	}
+	return fmt.Sprintf("%s: %v", e.Code, e.Cause)
+}
+
+func (e *RootValidationError) Unwrap() error {
+	return e.Cause
+}
+
+// RootErrorCodeOf returns a stable reason code when a root validation error
+// was classified, or an empty value for an unrelated error.
+func RootErrorCodeOf(err error) RootErrorCode {
+	var validationErr *RootValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.Code
+	}
+	return ""
+}
+
 var (
 	ErrLocationsInvalid = errors.New("storage locations are invalid")
 	ErrRootInvalid      = errors.New("storage root is invalid")
@@ -74,6 +118,10 @@ func DefaultDataRoot() (string, error) {
 	if override := strings.TrimSpace(os.Getenv(defaultDataRootEnv)); override != "" {
 		return normalizeAbsolutePath(override)
 	}
+	return defaultDataRootFromPlatform()
+}
+
+func legacyDataRoot() (string, error) {
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -85,11 +133,11 @@ func StorageLocationsPath() (string, error) {
 	if override := strings.TrimSpace(os.Getenv(storageLocationsPathEnv)); override != "" {
 		return normalizeAbsolutePath(override)
 	}
-	root, err := DefaultDataRoot()
+	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, storageLocationsFile), nil
+	return filepath.Join(userConfigDir, "AtlasNote", storageLocationsFile), nil
 }
 
 func LoadStorageLocations() (StorageLocations, error) {
@@ -101,6 +149,21 @@ func LoadStorageLocations() (StorageLocations, error) {
 }
 
 func LoadStorageLocationsFrom(filePath string) (StorageLocations, error) {
+	return loadStorageLocationsFrom(filePath, true)
+}
+
+// LoadStorageLocationsForRecovery reads a valid bootstrap file without
+// probing its roots. It is used only to show a recovery screen when the
+// previously selected root is no longer available.
+func LoadStorageLocationsForRecovery() (StorageLocations, error) {
+	path, err := StorageLocationsPath()
+	if err != nil {
+		return StorageLocations{}, err
+	}
+	return loadStorageLocationsFrom(path, false)
+}
+
+func loadStorageLocationsFrom(filePath string, probeRoots bool) (StorageLocations, error) {
 	filePath, err := normalizeAbsolutePath(filePath)
 	if err != nil {
 		return StorageLocations{}, err
@@ -126,7 +189,13 @@ func LoadStorageLocationsFrom(filePath string) (StorageLocations, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return StorageLocations{}, ErrLocationsInvalid
 	}
-	if err := validateStorageLocations(locations); err != nil {
+	var validationErr error
+	if probeRoots {
+		validationErr = validateStorageLocations(locations)
+	} else {
+		validationErr = validateStorageLocationPaths(locations)
+	}
+	if err := validationErr; err != nil {
 		return StorageLocations{}, err
 	}
 	return locations, nil
@@ -201,6 +270,21 @@ func ResolveStorageLocations() (LocationResolution, error) {
 	if err != nil {
 		return LocationResolution{}, err
 	}
+
+	// Before the Documents default was introduced, Atlas Note stored data in
+	// the user config directory. Preserve an existing Atlas root there without
+	// moving or deleting it.
+	legacyRoot, legacyErr := legacyDataRoot()
+	if legacyErr == nil && filepath.Clean(legacyRoot) != filepath.Clean(defaultRoot) {
+		legacyProbe, probeErr := ProbeDataRoot(legacyRoot)
+		if probeErr == nil && legacyProbe.Kind == RootExisting && legacyProbe.HasAtlasData {
+			return LocationResolution{
+				Locations: StorageLocations{Version: storageLocationsVersion, DataRoot: legacyRoot, BackupRoot: legacyRoot},
+				Source:    LocationSourceLegacy,
+			}, nil
+		}
+	}
+
 	probe, probeErr := ProbeDataRoot(defaultRoot)
 	if probeErr != nil {
 		return LocationResolution{}, probeErr
@@ -223,7 +307,7 @@ func ProbeBackupRoot(root string) (RootProbe, error) {
 func probeRoot(root string, backup bool) (RootProbe, error) {
 	absolute, err := normalizeAbsolutePath(root)
 	if err != nil {
-		return RootProbe{}, err
+		return RootProbe{}, &RootValidationError{Code: RootErrorInvalidPath, Cause: err}
 	}
 	probe := RootProbe{Path: absolute}
 	info, err := os.Lstat(absolute)
@@ -237,24 +321,34 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		return probe, nil
 	}
 	if err != nil {
-		return RootProbe{}, fmt.Errorf("inspect storage root: %w", err)
+		return RootProbe{}, &RootValidationError{
+			Code:  RootErrorReadFailed,
+			Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
+		}
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return RootProbe{}, ErrRootInvalid
+		if info.Mode()&os.ModeSymlink != 0 {
+			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
+		}
+		return RootProbe{}, rootValidationError(RootErrorNotDirectory)
 	}
 	probe.Exists = true
 	probe.Writable = writableDirectory(absolute)
 	if !probe.Writable {
-		return RootProbe{}, ErrRootInvalid
+		return RootProbe{}, rootValidationError(RootErrorNotWritable)
 	}
 	entries, err := os.ReadDir(absolute)
 	if err != nil {
-		return RootProbe{}, fmt.Errorf("read storage root: %w", err)
+		return RootProbe{}, &RootValidationError{
+			Code:  RootErrorReadFailed,
+			Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
+		}
 	}
 	hasRecognized := false
+	effectiveEntries := 0
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
-			return RootProbe{}, ErrRootInvalid
+			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
 		}
 		name := entry.Name()
 		if !backup && name == storageLocationsFile {
@@ -262,9 +356,10 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 			// itself evidence that a database has been initialized.
 			continue
 		}
+		effectiveEntries++
 		if backup && name == ".atlasnote-backups" {
 			if !entry.IsDir() {
-				return RootProbe{}, ErrRootInvalid
+				return RootProbe{}, rootValidationError(RootErrorNotDirectory)
 			}
 			probe.HasBackups = true
 			hasRecognized = true
@@ -277,21 +372,41 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 			}
 		}
 	}
-	if len(entries) == 0 {
+	if effectiveEntries == 0 {
 		probe.Kind = RootEmpty
 		return probe, nil
 	}
 	if !hasRecognized {
-		return RootProbe{}, ErrRootInvalid
+		return RootProbe{}, rootValidationError(RootErrorUnrelatedContent)
 	}
 	if !backup && !probe.HasAtlasData {
-		return RootProbe{}, ErrRootInvalid
+		return RootProbe{}, rootValidationError(RootErrorMissingData)
 	}
 	probe.Kind = RootExisting
 	return probe, nil
 }
 
 func validateStorageLocations(locations StorageLocations) error {
+	if err := validateStorageLocationPaths(locations); err != nil {
+		return err
+	}
+	dataRoot, _ := normalizeAbsolutePath(locations.DataRoot)
+	backupRoot := dataRoot
+	if strings.TrimSpace(locations.BackupRoot) != "" {
+		backupRoot, _ = normalizeAbsolutePath(locations.BackupRoot)
+	}
+	if _, err := ProbeDataRoot(dataRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if backupRoot != dataRoot {
+		if _, err := ProbeBackupRoot(backupRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateStorageLocationPaths(locations StorageLocations) error {
 	if locations.Version != storageLocationsVersion || strings.TrimSpace(locations.DataRoot) == "" {
 		return ErrLocationsInvalid
 	}
@@ -311,15 +426,11 @@ func validateStorageLocations(locations StorageLocations) error {
 	if backupRoot != dataRoot && (isWithinOrEqual(dataRoot, backupRoot) || isWithinOrEqual(backupRoot, dataRoot)) {
 		return ErrLocationsInvalid
 	}
-	if _, err := ProbeDataRoot(dataRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if backupRoot != dataRoot {
-		if _, err := ProbeBackupRoot(backupRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
 	return nil
+}
+
+func rootValidationError(code RootErrorCode) error {
+	return &RootValidationError{Code: code, Cause: ErrRootInvalid}
 }
 
 func normalizeAbsolutePath(value string) (string, error) {
@@ -350,13 +461,22 @@ func writableExistingParent(path string) (string, error) {
 	for {
 		info, err := os.Lstat(current)
 		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !writableDirectory(current) {
-				return "", ErrRootInvalid
+			if info.Mode()&os.ModeSymlink != 0 {
+				return "", rootValidationError(RootErrorUnsafeLink)
+			}
+			if !info.IsDir() {
+				return "", rootValidationError(RootErrorNotDirectory)
+			}
+			if !writableDirectory(current) {
+				return "", rootValidationError(RootErrorNotWritable)
 			}
 			return current, nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return "", err
+			return "", &RootValidationError{
+				Code:  RootErrorReadFailed,
+				Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
+			}
 		}
 		parent := filepath.Dir(current)
 		if parent == current {

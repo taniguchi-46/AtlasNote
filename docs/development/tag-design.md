@@ -187,7 +187,7 @@ DB障害、予期しないI/O障害、内部エラーはGo errorとして返す�
 
 ## 既存データへの影響
 
-ワークスペース内には実行時SQLite DBが存在しない。実データは`ATLAS_NOTE_DATA_DIR`、未指定時は`os.UserConfigDir()/AtlasNote`配下に置かれるため、実利用データの件数とバックアップ有無は未確認である。
+ワークスペース内には実行時SQLite DBが存在しない。実データは`ATLAS_NOTE_DATA_DIR`、未指定時はWindowsではLocal Documents配下、それ以外のOSでは`os.UserConfigDir()/AtlasNote`配下に置かれるため、実利用データの件数とバックアップ有無は未確認である。
 
 空テーブル追加だけであり、既存ノート・Markdown本文・ノートブック・検索索引にデータ変換は発生しない。`TestOpenMigratesVersionFiveDatabaseWithoutChangingExistingNote`でversion 5 DBをfixtureにし、既存レコードが不変であることを検証している。
 

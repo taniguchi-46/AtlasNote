@@ -11,6 +11,7 @@ export type StorageLocationStatus = {
   source?: string
   environmentOverride: boolean
   setupRequired: boolean
+  recoveryRequired: boolean
   pendingRestart: boolean
   pendingDataRoot?: string
   pendingBackupRoot?: string

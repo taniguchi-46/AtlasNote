@@ -48,6 +48,7 @@ type App struct {
 	dataDir                     string
 	notesDir                    string
 	startupErr                  error
+	startupStorageError         *StorageLocationError
 	startupPhase                StartupPhase
 	startupLocked               bool
 	recoveryReport              note.RecoveryReport
@@ -97,16 +98,18 @@ type StartupStatus struct {
 	BackupRestoreSafetyBackupID string                  `json:"backupRestoreSafetyBackupId,omitempty"`
 	ActiveStorageSpace          *notespace.Space        `json:"activeStorageSpace,omitempty"`
 	StorageLocations            *StorageLocationStatus  `json:"storageLocations,omitempty"`
+	StorageLocationError        *StorageLocationError   `json:"storageLocationError,omitempty"`
 }
 
 type StartupPhase string
 
 const (
-	StartupPhaseInitializing  StartupPhase = "initializing"
-	StartupPhaseSetupRequired StartupPhase = "setup-required"
-	StartupPhaseReady         StartupPhase = "ready"
-	StartupPhaseLocked        StartupPhase = "locked"
-	StartupPhaseError         StartupPhase = "error"
+	StartupPhaseInitializing    StartupPhase = "initializing"
+	StartupPhaseSetupRequired   StartupPhase = "setup-required"
+	StartupPhaseStorageRecovery StartupPhase = "storage-recovery"
+	StartupPhaseReady           StartupPhase = "ready"
+	StartupPhaseLocked          StartupPhase = "locked"
+	StartupPhaseError           StartupPhase = "error"
 )
 
 type MissingNoteDiagnostic struct {
@@ -1468,6 +1471,18 @@ func (a *App) GetStartupStatus() StartupStatus {
 			StorageLocations:            locationStatusPtr,
 		}
 	}
+	if a.startupStorageError != nil || phase == StartupPhaseStorageRecovery {
+		return StartupStatus{
+			Phase:                StartupPhaseStorageRecovery,
+			Ready:                false,
+			Message:              "保存場所を確認してからAtlas Noteを開始してください。",
+			DataDir:              a.dataDir,
+			MissingNotes:         []MissingNoteDiagnostic{},
+			ActiveStorageSpace:   activeStorageSpace,
+			StorageLocations:     locationStatusPtr,
+			StorageLocationError: a.startupStorageError,
+		}
+	}
 	if phase == StartupPhaseSetupRequired || a.locationResolution.SetupRequired {
 		return StartupStatus{
 			Phase:                       StartupPhaseSetupRequired,
@@ -1528,6 +1543,9 @@ func (a *App) initialize(ctx context.Context) {
 	}
 	resolution, err := config.ResolveStorageLocations()
 	if err != nil {
+		if a.enterStorageLocationRecovery(err) {
+			return
+		}
 		a.statusMu.Lock()
 		a.startupErr = err
 		a.startupPhase = StartupPhaseError
@@ -1695,6 +1713,36 @@ func (a *App) initialize(ctx context.Context) {
 	a.statusMu.Lock()
 	a.startupPhase = StartupPhaseReady
 	a.statusMu.Unlock()
+}
+
+func (a *App) enterStorageLocationRecovery(cause error) bool {
+	locations, err := config.LoadStorageLocationsForRecovery()
+	source := config.LocationSourceSaved
+	if err != nil {
+		defaultRoot, defaultErr := config.DefaultDataRoot()
+		if defaultErr != nil {
+			return false
+		}
+		locations = config.StorageLocations{Version: 1, DataRoot: defaultRoot, BackupRoot: defaultRoot}
+		source = config.LocationSourceDefault
+	}
+	if strings.TrimSpace(locations.DataRoot) == "" {
+		return false
+	}
+	a.locationResolution = config.LocationResolution{Locations: locations, Source: source}
+	a.managementRoot = locations.DataRoot
+	a.archiveRoot = locations.BackupRoot
+	if a.archiveRoot == "" {
+		a.archiveRoot = a.managementRoot
+	}
+	a.dataDir = a.managementRoot
+	a.startupErr = nil
+	storageErr := storageLocationError(cause)
+	a.statusMu.Lock()
+	a.startupStorageError = storageErr
+	a.startupPhase = StartupPhaseStorageRecovery
+	a.statusMu.Unlock()
+	return storageErr != nil
 }
 
 func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage.MarkdownStore, paths config.Paths) error {

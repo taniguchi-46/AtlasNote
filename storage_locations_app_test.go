@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -73,6 +74,96 @@ func TestStorageLocationSelectionUsesNativeDirectoryDialogAndPersistsSetup(t *te
 	}
 	if locations.DataRoot != filepath.Clean(dataRoot) || locations.BackupRoot != filepath.Clean(backupRoot) {
 		t.Fatalf("persisted locations = %#v", locations)
+	}
+}
+
+func TestDefaultStorageLocationSetupRestartsAndCreatesNotebook(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "default")
+	configFile := filepath.Join(defaultRoot, "storage-locations.json")
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", defaultRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	app := NewApp()
+	app.startup(t.Context())
+	if status := app.GetStartupStatus(); status.Phase != StartupPhaseSetupRequired || status.Ready {
+		t.Fatalf("initial setup status = %#v", status)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply default locations = %#v", applied)
+	}
+	app.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	t.Cleanup(func() { restarted.shutdown(t.Context()) })
+	status := restarted.GetStartupStatus()
+	if !status.Ready || status.Phase != StartupPhaseReady {
+		t.Fatalf("restarted status = %#v", status)
+	}
+	created, err := restarted.CreateNotebook(note.NotebookCreateInput{Name: "初回ノートブック"})
+	if err != nil {
+		t.Fatalf("create notebook after default setup: %v", err)
+	}
+	if created.Name != "初回ノートブック" {
+		t.Fatalf("created notebook = %#v", created)
+	}
+}
+
+func TestInvalidSavedStorageLocationEntersRecoveryWithoutChangingOldRoot(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	oldRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(oldRoot, "keep.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write old root marker: %v", err)
+	}
+	newRoot := filepath.Join(t.TempDir(), "new-root")
+	locations := config.StorageLocations{Version: 1, DataRoot: oldRoot, BackupRoot: oldRoot}
+	encoded, err := json.Marshal(locations)
+	if err != nil {
+		t.Fatalf("marshal invalid locations: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(configFile), 0o700); err != nil {
+		t.Fatalf("create bootstrap directory: %v", err)
+	}
+	if err := os.WriteFile(configFile, encoded, 0o600); err != nil {
+		t.Fatalf("write invalid locations: %v", err)
+	}
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	status := app.GetStartupStatus()
+	if status.Ready || status.Phase != StartupPhaseStorageRecovery || status.StorageLocationError == nil {
+		t.Fatalf("recovery status = %#v", status)
+	}
+	if status.StorageLocationError.Code != "STORAGE_LOCATION_UNRELATED_CONTENT" {
+		t.Fatalf("recovery error = %#v", status.StorageLocationError)
+	}
+	if _, err := app.CreateNotebook(note.NotebookCreateInput{Name: "作成不可"}); err == nil {
+		t.Fatal("notebook creation succeeded before storage recovery")
+	}
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return newRoot, nil
+	}
+	selected := app.SelectStorageLocation(string(StorageLocationDataRoot))
+	if selected.Error != nil || selected.Path != filepath.Clean(newRoot) {
+		t.Fatalf("select recovery root = %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply recovery root = %#v", applied)
+	}
+	if _, err := os.Stat(filepath.Join(oldRoot, "keep.txt")); err != nil {
+		t.Fatalf("old root changed: %v", err)
+	}
+	app.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	t.Cleanup(func() { restarted.shutdown(t.Context()) })
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(newRoot) {
+		t.Fatalf("recovered startup status = %#v", status)
 	}
 }
 

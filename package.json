@@ -7,7 +7,8 @@
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "frontend:typecheck": "npm --prefix frontend run typecheck",
-    "frontend:lint": "npm --prefix frontend run lint"
+    "frontend:lint": "npm --prefix frontend run lint",
+    "windows:installer": "wails build -clean -platform windows/amd64 -nsis"
   },
   "packageManager": "npm@10.8.2"
 }

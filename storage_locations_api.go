@@ -26,6 +26,7 @@ type StorageLocationStatus struct {
 	Source                string `json:"source,omitempty"`
 	EnvironmentOverride   bool   `json:"environmentOverride"`
 	SetupRequired         bool   `json:"setupRequired"`
+	RecoveryRequired      bool   `json:"recoveryRequired"`
 	PendingRestart        bool   `json:"pendingRestart"`
 	PendingDataRoot       string `json:"pendingDataRoot,omitempty"`
 	PendingBackupRoot     string `json:"pendingBackupRoot,omitempty"`
@@ -71,6 +72,26 @@ func storageLocationError(err error) *StorageLocationError {
 	}
 	code := storageLocationErrorUnavailable
 	message := "保存場所を利用できませんでした。現在のデータは変更していません。"
+	if rootCode := config.RootErrorCodeOf(err); rootCode != "" {
+		code = "STORAGE_LOCATION_" + string(rootCode)
+		switch rootCode {
+		case config.RootErrorNotWritable:
+			message = "選択したフォルダへ書き込めません。権限、OneDriveの同期状態、またはWindows Securityの設定を確認してください。"
+		case config.RootErrorUnsafeLink:
+			message = "symlinkまたはreparse pointを含むフォルダは保存場所にできません。通常のローカルフォルダを選択してください。"
+		case config.RootErrorUnrelatedContent:
+			message = "選択したフォルダにはAtlas Note以外のファイルがあります。空のフォルダを選択してください。"
+		case config.RootErrorMissingData:
+			message = "Atlas Noteのデータが揃っていない保存場所です。既存データか空のフォルダを選択してください。"
+		case config.RootErrorNotDirectory:
+			message = "選択したパスはフォルダではありません。通常のフォルダを選択してください。"
+		case config.RootErrorReadFailed:
+			message = "保存場所を読み取れません。権限、OneDriveの同期状態、またはWindows Securityの設定を確認してください。"
+		case config.RootErrorInvalidPath:
+			message = "保存場所のパスが正しくありません。別のフォルダを選択してください。"
+		}
+		return &StorageLocationError{Code: code, Message: message}
+	}
 	switch {
 	case errors.Is(err, config.ErrRootInvalid), errors.Is(err, config.ErrLocationsInvalid):
 		code = storageLocationErrorValidation
@@ -187,7 +208,7 @@ func (a *App) isCurrentDataRoot(path string) bool {
 }
 
 func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
-	if a.startupPhase != StartupPhaseSetupRequired && a.startupPhase != StartupPhaseReady {
+	if a.startupPhase != StartupPhaseSetupRequired && a.startupPhase != StartupPhaseStorageRecovery && a.startupPhase != StartupPhaseReady {
 		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationUnavailable)}
 	}
 	if a.locationResolution.Environment || strings.TrimSpace(os.Getenv("ATLAS_NOTE_DATA_DIR")) != "" {
@@ -206,6 +227,9 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 	dataRoot := a.pendingDataRoot
 	backupRoot := a.pendingBackupRoot
 	a.locationMu.Unlock()
+	if a.startupPhase == StartupPhaseStorageRecovery && strings.TrimSpace(dataRoot) == "" {
+		return StorageLocationMutationResult{Error: storageLocationError(config.ErrRootInvalid)}
+	}
 	if dataRoot == "" {
 		dataRoot = a.managementRoot
 	}
@@ -232,7 +256,7 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}
 	}
 
-	if a.startupPhase == StartupPhaseSetupRequired {
+	if a.startupPhase == StartupPhaseSetupRequired || a.startupPhase == StartupPhaseStorageRecovery {
 		if err := config.SaveStorageLocations(config.StorageLocations{Version: 1, DataRoot: dataRoot, BackupRoot: backupRoot}); err != nil {
 			return StorageLocationMutationResult{Error: storageLocationError(err)}
 		}
@@ -339,6 +363,7 @@ func (a *App) storageLocationStatus() (StorageLocationStatus, error) {
 		Source:                string(a.locationResolution.Source),
 		EnvironmentOverride:   environmentOverride,
 		SetupRequired:         a.startupPhase == StartupPhaseSetupRequired || a.locationResolution.SetupRequired,
+		RecoveryRequired:      a.startupPhase == StartupPhaseStorageRecovery,
 		DataRootChangeAllowed: !environmentOverride,
 		PendingDataRoot:       a.pendingDataRoot, PendingBackupRoot: a.pendingBackupRoot,
 	}

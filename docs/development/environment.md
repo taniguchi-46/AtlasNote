@@ -174,7 +174,7 @@ Wasm は初期段階では採用しない。
 - WebDAV 認証情報
 - AI API 認証情報
 
-`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。この値は個別の保存空間ではなくAtlas Noteの管理ルートを指定し、既存ルートを「メイン」、追加空間を管理ルート内の`spaces/<内部ID>/`として扱う。`ATLAS_NOTE_DATA_DIR` が設定されている場合は物理保存場所のUI変更を無効にする。未設定時の保存領域・バックアップ保存領域はOSユーザー設定領域の`storage-locations.json`で管理し、詳細は `docs/development/storage-locations.md` を参照する。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
+`.env.example` の `WEBDAV_ENDPOINT`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD` は設定名の候補を示すだけで、現在の実行時設定としては読み込まれていない。現時点の設定コードが環境変数から読むのは `ATLAS_NOTE_DATA_DIR` である。この値は個別の保存空間ではなくAtlas Noteの管理ルートを指定し、既存ルートを「メイン」、追加空間を管理ルート内の`spaces/<内部ID>/`として扱う。`ATLAS_NOTE_DATA_DIR` が設定されている場合は物理保存場所のUI変更を無効にする。未設定時の保存領域・バックアップ保存領域はOSユーザー設定領域の`AtlasNote/storage-locations.json`で管理し、Windowsの既定データルートはLocal Documents配下である。詳細は `docs/development/storage-locations.md` を参照する。Phase 3の同期契約は `docs/development/webdav-sync.md` の確定設計を正とし、実装ではこれらの値を平文設定へ永続保存せず、CredentialStoreへ分離する。Phase 4のAI APIキー、プロバイダー、モデルも`.env`や環境変数では設定せず、アプリ設定とAI用OS CredentialStoreで管理する。
 
 キー名だけを記載した `.env.example` を使用する。
 

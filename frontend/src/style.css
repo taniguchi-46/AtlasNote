@@ -26,7 +26,7 @@
   /* Text */
   --text-primary: #e6edf3;
   --text-secondary: #8b949e;
-  --text-muted: #484f58;
+  --text-muted: #8b949e;
   --text-active: #63b1ff;
 
   /* Brand */
@@ -58,7 +58,7 @@
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #475569;
   --text-active: #2563eb;
 
   --brand-primary: #2563eb;
@@ -200,6 +200,56 @@ body.is-pane-resizing * {
   font-family: 'SFMono-Regular', Consolas, monospace;
   font-size: 11px;
   opacity: 0.7;
+}
+
+.startup-error-screen {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  overflow: auto;
+  padding: 32px;
+  background: var(--bg-app);
+}
+
+.startup-error-card {
+  width: min(680px, 100%);
+  padding: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+}
+
+.startup-error-eyebrow {
+  margin-bottom: 8px;
+  color: var(--text-active);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.startup-error-card h1 {
+  margin-bottom: 14px;
+  font-size: 1.5rem;
+}
+
+.startup-error-card p {
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.startup-error-card code {
+  display: block;
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.startup-error-card .startup-error-note {
+  margin-top: 18px;
+  font-size: 0.85rem;
 }
 
 /* ─────────────────────────────────────────

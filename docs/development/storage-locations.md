@@ -31,15 +31,17 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
    └─ pending.json
 ```
 
-保存場所の設定ファイルは、既定のOSユーザー設定領域にある`storage-locations.json`へ原子的に保存する。既存の保存空間台帳やバックアップ世代へ設定ファイルを混在させない。
+保存場所の設定ファイルは、既定のOSユーザー設定領域にある`AtlasNote/storage-locations.json`へ原子的に保存する。設定ファイルをデータルートの判定対象から分離することで、初回設定後の再起動時に設定ファイルだけを理由として保存場所を拒否しない。既存の保存空間台帳やバックアップ世代へ設定ファイルを混在させない。
 
 ## 初回起動
 
 1. `ATLAS_NOTE_DATA_DIR`が設定されていれば、その値を環境上書きとして使用する。環境上書き中は保存場所をUIから変更できない。
 2. 保存済みの`storage-locations.json`があれば、そのデータルートとアーカイブルートを検証して使用する。
-3. どちらもなければ既定のデータルートを検査する。空、またはまだ存在しない場合は`setup-required`で停止し、SQLite・保存空間台帳・ロックを作成しない。
+3. どちらもなければ既定のデータルートを検査する。Windowsでは`FOLDERID_LocalDocuments\AtlasNote`（通常は`C:\Users\<ユーザー>\Documents\AtlasNote`）を既定とし、旧版の`%AppData%\AtlasNote`に既存データがあれば先に引き継ぐ。空、またはまだ存在しない場合は`setup-required`で停止し、SQLite・保存空間台帳・ロックを作成しない。
 4. 初回画面ではOSのフォルダ選択ダイアログから保存領域とバックアップ保存領域を選ぶ。空のフォルダ、または既存のAtlas Note保存場所を選べる。無関係な既存ファイル、symlink、書き込み不能な場所は拒否する。
 5. 「この設定で開始」で設定を保存し、アプリを再起動してから通常の初期化を行う。
+
+保存済みルートが読めない、書き込めない、無関係なファイルだけがある、またはOneDrive・Windows Securityなどでアクセスできない場合は`storage-recovery`で停止する。この画面では元のルートを削除・移動せず、別の空フォルダまたは既存のAtlas Noteルートを選択して設定を保存できる。検証エラーは`STORAGE_LOCATION_*`コードとして表示する。
 
 既存のAtlas Note保存場所を既定ルートで検出した場合は、既存データを移動せずそのまま開く。既定ルート以外の保存場所を指定した場合も、既存データを勝手に削除しない。
 
@@ -75,6 +77,7 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
 ```text
 go test ./internal/config ./internal/backup . -count=1
 npm --prefix frontend run typecheck
+npm --prefix frontend run test:storage-location-setup
 npm --prefix frontend run test:storage-spaces
 npm --prefix frontend run test:backups
 npm --prefix frontend run build

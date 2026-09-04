@@ -33,8 +33,12 @@ func TestProbeDataRootRejectsUnrelatedNonEmptyDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("write unrelated file: %v", err)
 	}
-	if _, err := ProbeDataRoot(root); !errors.Is(err, ErrRootInvalid) {
+	_, err := ProbeDataRoot(root)
+	if !errors.Is(err, ErrRootInvalid) {
 		t.Fatalf("probe error = %v, want ErrRootInvalid", err)
+	}
+	if got := RootErrorCodeOf(err); got != RootErrorUnrelatedContent {
+		t.Fatalf("probe error code = %q, want %q", got, RootErrorUnrelatedContent)
 	}
 }
 
@@ -51,6 +55,44 @@ func TestProbeDataRootAcceptsExistingAtlasRootAndEmptyTarget(t *testing.T) {
 	probe, err = ProbeDataRoot(empty)
 	if err != nil || probe.Kind != RootEmpty || probe.Exists {
 		t.Fatalf("empty probe = %#v, %v", probe, err)
+	}
+}
+
+func TestProbeDataRootIgnoresBootstrapFileWhenCheckingForEmptyRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, storageLocationsFile), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatalf("write bootstrap file: %v", err)
+	}
+	probe, err := ProbeDataRoot(root)
+	if err != nil || probe.Kind != RootEmpty || !probe.Exists {
+		t.Fatalf("bootstrap-only probe = %#v, %v", probe, err)
+	}
+}
+
+func TestLoadStorageLocationsForRecoverySkipsRootProbe(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), storageLocationsFile)
+	root := filepath.Dir(configFile)
+	locations := StorageLocations{Version: storageLocationsVersion, DataRoot: filepath.Join(root, "missing-data"), BackupRoot: filepath.Join(root, "missing-backup")}
+	if err := SaveStorageLocationsTo(configFile, locations); err != nil {
+		t.Fatalf("save locations: %v", err)
+	}
+	t.Setenv(storageLocationsPathEnv, configFile)
+	loaded, err := LoadStorageLocationsForRecovery()
+	if err != nil || loaded != locations {
+		t.Fatalf("recovery locations = %#v, %v", loaded, err)
+	}
+}
+
+func TestStorageLocationsPathIsIndependentFromDefaultDataRoot(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "documents", "AtlasNote")
+	t.Setenv(defaultDataRootEnv, defaultRoot)
+	t.Setenv(storageLocationsPathEnv, "")
+	path, err := StorageLocationsPath()
+	if err != nil {
+		t.Fatalf("storage locations path: %v", err)
+	}
+	if filepath.Clean(filepath.Dir(path)) == filepath.Clean(defaultRoot) {
+		t.Fatalf("storage locations path = %q, unexpectedly inside data root %q", path, defaultRoot)
 	}
 }
 

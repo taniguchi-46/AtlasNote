@@ -6,6 +6,14 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "version": "2",
+  "info": {
+    "companyName": "Atlas Note",
+    "productName": "Atlas Note",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 Atlas Note",
+    "comments": "Local-first notes for Windows"
+  },
   "author": {
     "name": "",
     "email": ""

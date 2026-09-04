@@ -16,6 +16,7 @@
     "test:notifications": "node scripts/test-notification-store.mjs",
     "test:sync": "node scripts/test-sync-store.mjs",
     "test:storage-spaces": "node scripts/test-storage-spaces.mjs",
+    "test:storage-location-setup": "node scripts/test-storage-location-setup.mjs",
     "test:backups": "node scripts/test-backups.mjs",
     "test:note-import": "node scripts/test-note-import.mjs",
     "test:note-export": "node scripts/test-note-export.mjs",

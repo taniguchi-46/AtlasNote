@@ -7,10 +7,30 @@
       @unlocked="handleStorageSpaceUnlocked"
     />
     <StorageLocationSetupScreen
+      v-else-if="startupStatus?.phase === 'storage-recovery'"
+      mode="recovery"
+      :initial-status="startupStatus?.storageLocations"
+      :initial-error="startupStatus?.storageLocationError"
+      @completed="handleStorageLocationCompleted"
+    />
+    <StorageLocationSetupScreen
       v-else-if="startupStatus?.setupRequired || startupStatus?.phase === 'setup-required'"
       :initial-status="startupStatus?.storageLocations"
       @completed="handleStorageLocationCompleted"
     />
+    <main
+      v-else-if="startupStatus && !startupStatus.ready"
+      class="startup-error-screen"
+      aria-labelledby="startup-error-title"
+    >
+      <section class="startup-error-card">
+        <p class="startup-error-eyebrow">Atlas Note</p>
+        <h1 id="startup-error-title">Atlas Noteを起動できませんでした</h1>
+        <p>{{ startupStatus.message || '起動に必要なデータを読み込めませんでした。' }}</p>
+        <code v-if="startupStatus.dataDir">{{ startupStatus.dataDir }}</code>
+        <p class="startup-error-note">データは変更されていません。アプリを再起動して再試行してください。</p>
+      </section>
+    </main>
     <template v-else>
     <AppTopBar
       ref="appTopBarRef"
@@ -803,7 +823,12 @@ onMounted(async () => {
     ])
   }
 
-  if (startupStatus.value?.ready !== true && !startupStatus.value?.setupRequired) await storageSpaceStore.initialize()
+  if (
+    startupStatus.value?.ready !== true
+    && !startupStatus.value?.setupRequired
+    && startupStatus.value?.phase !== 'storage-recovery'
+    && startupStatus.value?.phase !== 'error'
+  ) await storageSpaceStore.initialize()
 
   // Apply initial always-on-top status
   try {
