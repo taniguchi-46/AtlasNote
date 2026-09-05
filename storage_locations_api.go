@@ -124,10 +124,11 @@ var (
 
 func (a *App) GetStorageLocationStatus() StorageLocationStatusResult {
 	status, err := a.storageLocationStatus()
+	result := StorageLocationStatusResult{Status: &status}
 	if err != nil {
-		return StorageLocationStatusResult{Error: storageLocationError(err)}
+		result.Error = storageLocationError(err)
 	}
-	return StorageLocationStatusResult{Status: &status}
+	return result
 }
 
 func (a *App) SelectStorageLocation(kind string) StorageLocationSelectionResult {
@@ -275,15 +276,8 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 	}
 
 	if a.startupPhase == StartupPhaseStorageRecovery {
-		pending, pendingErr := config.LoadPendingStorageLocationMigration()
-		if pendingErr == nil {
-			currentDataRoot = pending.SourceDataRoot
-			currentBackupRoot = pending.SourceBackupRoot
-		} else if !errors.Is(pendingErr, os.ErrNotExist) {
-			return StorageLocationMutationResult{Error: storageLocationError(pendingErr)}
-		}
 		migration := config.PendingStorageLocationMigration{
-			Version: 1, ID: strconv.FormatInt(time.Now().UnixNano(), 10),
+			Version: config.PendingStorageMigrationVersion, ID: strconv.FormatInt(time.Now().UnixNano(), 10),
 			Action:         config.PendingStorageMigrationActionSwitch,
 			SourceDataRoot: currentDataRoot, TargetDataRoot: dataRoot,
 			SourceBackupRoot: currentBackupRoot, TargetBackupRoot: backupRoot,
@@ -357,14 +351,22 @@ func (a *App) CancelPendingStorageLocationMigration() StorageLocationMutationRes
 	if a.locationResolution.Environment || strings.TrimSpace(os.Getenv("ATLAS_NOTE_DATA_DIR")) != "" {
 		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationEnvironment)}
 	}
-	migration, err := config.LoadPendingStorageLocationMigration()
+	migration, err := config.LoadPendingStorageLocationMigrationForRecovery()
 	if err != nil {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}
 	}
 	migration.Action = config.PendingStorageMigrationActionCancel
+	if err := config.ValidatePendingStorageLocationMigration(migration); err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
 	if err := config.SavePendingStorageLocationMigration(migration); err != nil {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}
 	}
+	a.locationMu.Lock()
+	a.pendingDataRoot, a.pendingBackupRoot = "", ""
+	a.pendingBackupFollowsData = false
+	a.pendingStorageSelection = false
+	a.locationMu.Unlock()
 	status, statusErr := a.storageLocationStatus()
 	if statusErr != nil {
 		return StorageLocationMutationResult{Error: storageLocationError(statusErr)}
@@ -385,6 +387,15 @@ func (a *App) RetryPendingStorageLocationMigration() StorageLocationMutationResu
 	}
 	if migration.Action == config.PendingStorageMigrationActionCancel {
 		migration.Action = config.PendingStorageMigrationActionMigrate
+	}
+	if migration.Version != config.PendingStorageMigrationVersion ||
+		(migration.Action == config.PendingStorageMigrationActionMigrate &&
+			(migration.DataPlan == "" || migration.BackupPlan == "" || migration.Phase == "")) {
+		prepared, prepareErr := config.PreparePendingStorageLocationMigrationForRetry(migration)
+		if prepareErr != nil {
+			return StorageLocationMutationResult{Error: storageLocationError(prepareErr)}
+		}
+		migration = prepared
 	}
 	if err := config.ValidateStorageLocations(config.StorageLocations{
 		Version: 1, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
@@ -462,17 +473,29 @@ func (a *App) storageLocationStatus() (StorageLocationStatus, error) {
 		PendingSelection: a.pendingStorageSelection,
 	}
 	status.PendingRestart = status.PendingDataRoot != "" || status.PendingBackupRoot != ""
-	if pending, err := config.LoadPendingStorageLocationMigration(); err == nil {
+	if pending, err := config.LoadPendingStorageLocationMigrationForRecovery(); err == nil {
 		status.PendingRestart = true
 		status.PendingMigration = true
 		status.PendingMigrationAction = pending.Action
-		if status.PendingDataRoot == "" {
-			status.PendingDataRoot = pending.TargetDataRoot
+		if validationErr := config.ValidatePendingStorageLocationMigration(pending); validationErr != nil {
+			return status, validationErr
 		}
-		if status.PendingBackupRoot == "" {
-			status.PendingBackupRoot = pending.TargetBackupRoot
+		if pending.Action != config.PendingStorageMigrationActionCancel {
+			if status.PendingDataRoot == "" {
+				status.PendingDataRoot = pending.TargetDataRoot
+			}
+			if status.PendingBackupRoot == "" {
+				status.PendingBackupRoot = pending.TargetBackupRoot
+			}
+		} else {
+			// A cancel intent executes only against the source roots. Do not
+			// expose stale or untrusted target fields from the old marker.
+			status.PendingDataRoot = ""
+			status.PendingBackupRoot = ""
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
+		status.PendingRestart = true
+		status.PendingMigration = true
 		return status, err
 	}
 	return status, nil

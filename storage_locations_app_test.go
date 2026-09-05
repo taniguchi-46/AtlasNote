@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"atlasnote/internal/config"
+	"atlasnote/internal/database"
 	"atlasnote/internal/note"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -195,6 +197,10 @@ func TestStorageLocationMigrationCopiesCurrentRootOnNextStartup(t *testing.T) {
 	if applied.Error != nil || !applied.RestartRequired {
 		t.Fatalf("apply migration: %#v", applied)
 	}
+	pending, err := config.LoadPendingStorageLocationMigration()
+	if err != nil || pending.Version != config.PendingStorageMigrationVersion || pending.DataPlan != config.PendingStorageMigrationPlanCopyRequired || pending.BackupPlan != config.PendingStorageMigrationPlanUnchanged || pending.Phase != config.PendingStorageMigrationPhasePrepared {
+		t.Fatalf("persisted migration plan = %#v, %v", pending, err)
+	}
 	app.shutdown(t.Context())
 
 	moved := NewApp()
@@ -261,6 +267,8 @@ func TestFailedStorageLocationMigrationCanReturnToOriginalRoot(t *testing.T) {
 
 	if result := failed.CancelPendingStorageLocationMigration(); result.Error != nil || !result.RestartRequired {
 		t.Fatalf("cancel pending migration: %#v", result)
+	} else if result.Status == nil || result.Status.PendingDataRoot != "" || result.Status.PendingBackupRoot != "" {
+		t.Fatalf("cancel status exposed stale target: %#v", result.Status)
 	}
 	failed.shutdown(t.Context())
 
@@ -406,6 +414,182 @@ func TestFailedStorageLocationMigrationCanRetryAfterTargetRecovers(t *testing.T)
 	got, err := restarted.GetNote(created.ID)
 	if err != nil || got.Content != "再試行本文" {
 		t.Fatalf("retried note = %#v, %v", got, err)
+	}
+}
+
+func TestInvalidLegacyMigrationKeepsRecoveryStatusAndAllowsExplicitSwitch(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceData := filepath.Join(t.TempDir(), "source-data")
+	sourceBackup := filepath.Join(t.TempDir(), "source-backup")
+	newData := filepath.Join(t.TempDir(), "new-data")
+	defaultRoot := filepath.Join(t.TempDir(), "default")
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", defaultRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+	if err := config.SaveStorageLocationsTo(configFile, config.StorageLocations{Version: 1, DataRoot: sourceData, BackupRoot: sourceBackup}); err != nil {
+		t.Fatalf("save bootstrap locations: %v", err)
+	}
+	legacy := config.PendingStorageLocationMigration{
+		Version: 1, ID: "legacy-invalid-overlap",
+		SourceDataRoot: sourceData, TargetDataRoot: filepath.Join(sourceData, "nested-target"),
+		SourceBackupRoot: sourceBackup, TargetBackupRoot: sourceBackup,
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy migration: %v", err)
+	}
+	markerPath, err := config.PendingStorageLocationMigrationPath()
+	if err != nil {
+		t.Fatalf("pending marker path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("create marker directory: %v", err)
+	}
+	if err := os.WriteFile(markerPath, encoded, 0o600); err != nil {
+		t.Fatalf("write legacy migration: %v", err)
+	}
+
+	app := NewApp()
+	app.startup(t.Context())
+	defer app.shutdown(t.Context())
+	status := app.GetStartupStatus()
+	if status.Ready || status.Phase != StartupPhaseStorageRecovery || status.StorageLocationError == nil {
+		t.Fatalf("legacy recovery status = %#v", status)
+	}
+	if status.StorageLocations == nil || !status.StorageLocations.PendingMigration {
+		t.Fatalf("legacy pending status = %#v", status.StorageLocations)
+	}
+	statusResult := app.GetStorageLocationStatus()
+	if statusResult.Status == nil || statusResult.Error == nil {
+		t.Fatalf("status result lost status or error: %#v", statusResult)
+	}
+	if statusResult.Status.PendingDataRoot != "" || statusResult.Status.PendingBackupRoot != "" {
+		t.Fatalf("unsafe legacy targets were exposed as pending choices: %#v", statusResult.Status)
+	}
+
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return newData, nil
+	}
+	if selected := app.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select explicit recovery root: %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("save explicit recovery switch: %#v", applied)
+	}
+	if got, err := os.ReadFile(markerPath); err != nil || !strings.Contains(string(got), `"action": "switch"`) {
+		t.Fatalf("replacement switch intent = %q, %v", string(got), err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceData, "nested-target")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid legacy target was touched: %v", err)
+	}
+	app.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	defer restarted.shutdown(t.Context())
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(newData) {
+		t.Fatalf("explicit switch startup status = %#v", status)
+	}
+	if _, err := config.LoadPendingStorageLocationMigration(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("switch marker remains after restart: %v", err)
+	}
+	locations, err := config.LoadStorageLocations()
+	if err != nil || locations.DataRoot != filepath.Clean(newData) {
+		t.Fatalf("switched bootstrap locations = %#v, %v", locations, err)
+	}
+}
+
+func TestCorruptMigrationMarkerCanBeReplacedWithoutUsingItsContents(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceData := filepath.Join(t.TempDir(), "source-data")
+	sourceBackup := filepath.Join(t.TempDir(), "source-backup")
+	newData := filepath.Join(t.TempDir(), "new-data")
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+	if err := config.SaveStorageLocationsTo(configFile, config.StorageLocations{Version: 1, DataRoot: sourceData, BackupRoot: sourceBackup}); err != nil {
+		t.Fatalf("save bootstrap locations: %v", err)
+	}
+	markerPath, err := config.PendingStorageLocationMigrationPath()
+	if err != nil {
+		t.Fatalf("pending marker path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("create marker directory: %v", err)
+	}
+	if err := os.WriteFile(markerPath, []byte(`{"version":2,"action":"migrate","sourceDataRoot":"C:\\untrusted`), 0o600); err != nil {
+		t.Fatalf("write corrupt migration marker: %v", err)
+	}
+
+	app := NewApp()
+	app.startup(t.Context())
+	defer app.shutdown(t.Context())
+	if status := app.GetStartupStatus(); status.Phase != StartupPhaseStorageRecovery || status.StorageLocations == nil || !status.StorageLocations.PendingMigration {
+		t.Fatalf("corrupt marker recovery status = %#v", status)
+	}
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return newData, nil
+	}
+	if selected := app.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select root after corrupt marker: %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("replace corrupt marker: %#v", applied)
+	}
+	app.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	defer restarted.shutdown(t.Context())
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(newData) {
+		t.Fatalf("corrupt marker switch startup status = %#v", status)
+	}
+}
+
+func TestEnvironmentOverrideRemainsAuthoritativeWithInvalidPendingMarker(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	envRoot := t.TempDir()
+	db, err := database.Open(t.Context(), filepath.Join(envRoot, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("create environment database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close environment database: %v", err)
+	}
+	t.Setenv("ATLAS_NOTE_DATA_DIR", envRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+	markerPath, err := config.PendingStorageLocationMigrationPath()
+	if err != nil {
+		t.Fatalf("pending marker path: %v", err)
+	}
+	legacy := config.PendingStorageLocationMigration{
+		Version: 1, ID: "environment-invalid-marker",
+		SourceDataRoot: envRoot, TargetDataRoot: filepath.Join(envRoot, "nested-target"),
+		SourceBackupRoot: envRoot, TargetBackupRoot: envRoot,
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal pending migration: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("create marker directory: %v", err)
+	}
+	if err := os.WriteFile(markerPath, encoded, 0o600); err != nil {
+		t.Fatalf("write pending migration: %v", err)
+	}
+
+	app := NewApp()
+	app.startup(t.Context())
+	defer app.shutdown(t.Context())
+	status := app.GetStartupStatus()
+	if !status.Ready || status.Phase != StartupPhaseReady || status.StorageLocations == nil || !status.StorageLocations.EnvironmentOverride {
+		t.Fatalf("environment override startup status = %#v", status)
+	}
+	statusResult := app.GetStorageLocationStatus()
+	if statusResult.Status == nil || statusResult.Error == nil {
+		t.Fatalf("invalid pending marker status = %#v", statusResult)
+	}
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("environment override removed pending marker: %v", err)
 	}
 }
 

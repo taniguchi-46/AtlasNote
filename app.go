@@ -1454,8 +1454,12 @@ func (a *App) prepareStorageSpace(ctx context.Context, dataDir string) (returnEr
 func (a *App) GetStartupStatus() StartupStatus {
 	a.statusMu.RLock()
 	defer a.statusMu.RUnlock()
-	locationStatus, _ := a.storageLocationStatus()
+	locationStatus, locationStatusErr := a.storageLocationStatus()
 	locationStatusPtr := &locationStatus
+	startupStorageError := a.startupStorageError
+	if startupStorageError == nil && locationStatusErr != nil && !locationStatus.EnvironmentOverride {
+		startupStorageError = storageLocationError(locationStatusErr)
+	}
 	phase := a.startupPhase
 	if phase == "" {
 		phase = StartupPhaseReady
@@ -1479,7 +1483,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 			StorageLocations:            locationStatusPtr,
 		}
 	}
-	if a.startupStorageError != nil || phase == StartupPhaseStorageRecovery {
+	if startupStorageError != nil || phase == StartupPhaseStorageRecovery {
 		return StartupStatus{
 			Phase:                StartupPhaseStorageRecovery,
 			Ready:                false,
@@ -1488,7 +1492,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 			MissingNotes:         []MissingNoteDiagnostic{},
 			ActiveStorageSpace:   activeStorageSpace,
 			StorageLocations:     locationStatusPtr,
-			StorageLocationError: a.startupStorageError,
+			StorageLocationError: startupStorageError,
 		}
 	}
 	if phase == StartupPhaseSetupRequired || a.locationResolution.SetupRequired {
@@ -1729,15 +1733,25 @@ func (a *App) initialize(ctx context.Context) {
 func (a *App) enterStorageLocationRecovery(cause error) bool {
 	locations, err := config.LoadStorageLocationsForRecovery()
 	source := config.LocationSourceSaved
-	var pending *config.PendingStorageLocationMigration
-	if migration, migrationErr := config.LoadPendingStorageLocationMigration(); migrationErr == nil {
-		pending = &migration
-		locations = config.StorageLocations{
-			Version: 1, DataRoot: migration.SourceDataRoot, BackupRoot: migration.SourceBackupRoot,
+	pending, pendingErr := config.LoadPendingStorageLocationMigrationForRecovery()
+	pendingUsable := pendingErr == nil && config.ValidatePendingStorageLocationMigration(pending) == nil
+	if err != nil && pendingUsable {
+		switch pending.Action {
+		case config.PendingStorageMigrationActionMigrate, config.PendingStorageMigrationActionCancel:
+			locations = config.StorageLocations{
+				Version: 1, DataRoot: pending.SourceDataRoot, BackupRoot: pending.SourceBackupRoot,
+			}
+			err = nil
+			source = config.LocationSourceSaved
+		case config.PendingStorageMigrationActionSwitch:
+			locations = config.StorageLocations{
+				Version: 1, DataRoot: pending.TargetDataRoot, BackupRoot: pending.TargetBackupRoot,
+			}
+			err = nil
+			source = config.LocationSourceSaved
 		}
-		source = config.LocationSourceSaved
 	}
-	if err != nil && pending == nil {
+	if err != nil && !pendingUsable {
 		defaultRoot, defaultErr := config.DefaultDataRoot()
 		if defaultErr != nil {
 			return false
@@ -1757,7 +1771,7 @@ func (a *App) enterStorageLocationRecovery(cause error) bool {
 	a.dataDir = a.managementRoot
 	a.locationMu.Lock()
 	a.pendingStorageSelection = false
-	if pending != nil {
+	if pendingUsable && pending.Action != config.PendingStorageMigrationActionCancel {
 		a.pendingDataRoot = pending.TargetDataRoot
 		a.pendingBackupRoot = pending.TargetBackupRoot
 		a.pendingBackupFollowsData = filepath.Clean(pending.TargetDataRoot) == filepath.Clean(pending.TargetBackupRoot)

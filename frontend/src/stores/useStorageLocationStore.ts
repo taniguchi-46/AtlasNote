@@ -43,11 +43,11 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     error.value = null
     try {
       const result = await getStorageLocationStatus()
+      if (result.status) status.value = result.status
       if (result.error || !result.status) {
         error.value = result.error ?? unavailableError
         return false
       }
-      status.value = result.status
       return true
     } catch {
       error.value = unavailableError

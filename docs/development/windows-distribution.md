@@ -9,7 +9,7 @@ npm ci --prefix frontend
 wails build -clean -platform windows/amd64 -nsis
 ```
 
-`-nsis`にはNSISの`makensis`が必要で、未導入の環境ではWailsがEXEだけを生成してインストーラを作成せず警告を表示する。リリース環境ではNSIS導入後にinstallerの存在を確認する。
+`-nsis`にはNSISの`makensis`が必要で、未導入の環境ではWailsがEXEだけを生成してインストーラを作成せず警告を表示する。この検証環境ではNSIS 3.12の`makensis`によるプロジェクトコンパイルまで確認済みで、リリース環境ではinstallerの存在を確認する。
 
 生成物は通常 `build/bin/AtlasNote-amd64-installer.exe` となる。配布時は、バージョンを含む名前へコピーしたインストーラとSHA-256チェックサムだけを公開する。
 

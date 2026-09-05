@@ -519,7 +519,13 @@ func writableExistingParent(path string) (string, error) {
 
 func writeAtomic(filePath string, contents []byte) error {
 	temporaryDir := filepath.Dir(filePath)
+	if err := validateAtomicDirectoryPath(temporaryDir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(temporaryDir, 0o700); err != nil {
+		return err
+	}
+	if err := validateAtomicDirectoryPath(temporaryDir); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(filePath); err == nil {
@@ -555,4 +561,25 @@ func writeAtomic(filePath string, contents []byte) error {
 	}
 	committed = true
 	return nil
+}
+
+func validateAtomicDirectoryPath(path string) error {
+	current := filepath.Clean(path)
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if isUnsafeStoragePath(current, info) || !info.IsDir() {
+				return ErrLocationsInvalid
+			}
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ErrLocationsInvalid
+		}
+		current = parent
+	}
 }
