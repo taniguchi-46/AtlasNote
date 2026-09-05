@@ -1,7 +1,9 @@
 import {
   ApplyStorageLocations,
   CancelStorageLocationSelection,
+  CancelPendingStorageLocationMigration,
   GetStorageLocationStatus,
+  RetryPendingStorageLocationMigration,
   SelectStorageLocation,
 } from '../../wailsjs/go/main/App'
 
@@ -15,6 +17,9 @@ export type StorageLocationStatus = {
   pendingRestart: boolean
   pendingDataRoot?: string
   pendingBackupRoot?: string
+  pendingMigration: boolean
+  pendingMigrationAction?: string
+  pendingSelection: boolean
   dataRootChangeAllowed: boolean
 }
 
@@ -64,4 +69,12 @@ export function applyStorageLocations(): Promise<StorageLocationMutationResult> 
 
 export function cancelStorageLocationSelection(): Promise<StorageLocationStatusResult> {
   return CancelStorageLocationSelection()
+}
+
+export function cancelPendingStorageLocationMigration(): Promise<StorageLocationMutationResult> {
+  return CancelPendingStorageLocationMigration()
+}
+
+export function retryPendingStorageLocationMigration(): Promise<StorageLocationMutationResult> {
+  return RetryPendingStorageLocationMigration()
 }

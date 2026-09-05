@@ -213,6 +213,202 @@ func TestStorageLocationMigrationCopiesCurrentRootOnNextStartup(t *testing.T) {
 	}
 }
 
+func TestFailedStorageLocationMigrationCanReturnToOriginalRoot(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	targetRoot := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", sourceRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	setup := NewApp()
+	setup.startup(t.Context())
+	if applied := setup.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply initial setup: %#v", applied)
+	}
+	setup.shutdown(t.Context())
+
+	app := NewApp()
+	app.startup(t.Context())
+	created, err := app.CreateNote(note.CreateInput{Title: "元データ", Content: "保持する本文"})
+	if err != nil {
+		t.Fatalf("create source note: %v", err)
+	}
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return targetRoot, nil
+	}
+	if selected := app.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select migration target: %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("save migration: %#v", applied)
+	}
+	app.shutdown(t.Context())
+
+	if err := os.WriteFile(filepath.Join(targetRoot, "unrelated.txt"), []byte("changed after selection"), 0o600); err != nil {
+		t.Fatalf("invalidate target after selection: %v", err)
+	}
+	failed := NewApp()
+	failed.startup(t.Context())
+	status := failed.GetStartupStatus()
+	t.Cleanup(func() { failed.shutdown(t.Context()) })
+	if status.Ready || status.Phase != StartupPhaseStorageRecovery || status.StorageLocationError == nil {
+		t.Fatalf("failed migration status = %#v", status)
+	}
+	if !status.StorageLocations.PendingMigration || status.StorageLocations.PendingDataRoot != filepath.Clean(targetRoot) {
+		t.Fatalf("pending migration status = %#v", status.StorageLocations)
+	}
+
+	if result := failed.CancelPendingStorageLocationMigration(); result.Error != nil || !result.RestartRequired {
+		t.Fatalf("cancel pending migration: %#v", result)
+	}
+	failed.shutdown(t.Context())
+
+	restored := NewApp()
+	restored.startup(t.Context())
+	t.Cleanup(func() { restored.shutdown(t.Context()) })
+	if status := restored.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(sourceRoot) {
+		t.Fatalf("restored startup status = %#v", status)
+	}
+	got, err := restored.GetNote(created.ID)
+	if err != nil || got.Content != "保持する本文" {
+		t.Fatalf("restored note = %#v, %v", got, err)
+	}
+	if _, err := config.LoadPendingStorageLocationMigration(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled migration remains: %v", err)
+	}
+}
+
+func TestFailedStorageLocationMigrationCanStartInAnotherEmptyRootWithoutCopying(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	failedTarget := t.TempDir()
+	newRoot := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", sourceRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	setup := NewApp()
+	setup.startup(t.Context())
+	if applied := setup.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply initial setup: %#v", applied)
+	}
+	setup.shutdown(t.Context())
+
+	app := NewApp()
+	app.startup(t.Context())
+	created, err := app.CreateNote(note.CreateInput{Title: "元データ", Content: "自動移行しない本文"})
+	if err != nil {
+		t.Fatalf("create source note: %v", err)
+	}
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return failedTarget, nil
+	}
+	if selected := app.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select failed target: %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("save migration: %#v", applied)
+	}
+	app.shutdown(t.Context())
+	if err := os.WriteFile(filepath.Join(failedTarget, "unrelated.txt"), []byte("invalid"), 0o600); err != nil {
+		t.Fatalf("invalidate target: %v", err)
+	}
+
+	failed := NewApp()
+	failed.startup(t.Context())
+	t.Cleanup(func() { failed.shutdown(t.Context()) })
+	if status := failed.GetStartupStatus(); status.Phase != StartupPhaseStorageRecovery {
+		t.Fatalf("recovery status = %#v", status)
+	}
+	failed.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return newRoot, nil
+	}
+	if selected := failed.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select new root: %#v", selected)
+	}
+	if applied := failed.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("switch to new root: %#v", applied)
+	}
+	failed.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	t.Cleanup(func() { restarted.shutdown(t.Context()) })
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(newRoot) {
+		t.Fatalf("new root startup status = %#v", status)
+	}
+	if _, err := restarted.GetNote(created.ID); err == nil {
+		t.Fatal("source note was copied into a newly selected empty root")
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, "notes", created.ID+".md")); err != nil {
+		t.Fatalf("source note disappeared: %v", err)
+	}
+	if _, err := config.LoadPendingStorageLocationMigration(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replaced migration remains: %v", err)
+	}
+}
+
+func TestFailedStorageLocationMigrationCanRetryAfterTargetRecovers(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	targetRoot := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", sourceRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	setup := NewApp()
+	setup.startup(t.Context())
+	if applied := setup.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply initial setup: %#v", applied)
+	}
+	setup.shutdown(t.Context())
+
+	app := NewApp()
+	app.startup(t.Context())
+	created, err := app.CreateNote(note.CreateInput{Title: "再試行", Content: "再試行本文"})
+	if err != nil {
+		t.Fatalf("create source note: %v", err)
+	}
+	app.openDirectory = func(_ context.Context, _ runtime.OpenDialogOptions) (string, error) {
+		return targetRoot, nil
+	}
+	if selected := app.SelectStorageLocation(string(StorageLocationDataRoot)); selected.Error != nil {
+		t.Fatalf("select target: %#v", selected)
+	}
+	if applied := app.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("save migration: %#v", applied)
+	}
+	app.shutdown(t.Context())
+	marker := filepath.Join(targetRoot, "unrelated.txt")
+	if err := os.WriteFile(marker, []byte("temporary failure"), 0o600); err != nil {
+		t.Fatalf("invalidate target: %v", err)
+	}
+	failed := NewApp()
+	failed.startup(t.Context())
+	if status := failed.GetStartupStatus(); status.Phase != StartupPhaseStorageRecovery {
+		t.Fatalf("recovery status = %#v", status)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("repair target: %v", err)
+	}
+	if result := failed.RetryPendingStorageLocationMigration(); result.Error != nil || !result.RestartRequired {
+		t.Fatalf("retry pending migration: %#v", result)
+	}
+	failed.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	t.Cleanup(func() { restarted.shutdown(t.Context()) })
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(targetRoot) {
+		t.Fatalf("retried startup status = %#v", status)
+	}
+	got, err := restarted.GetNote(created.ID)
+	if err != nil || got.Content != "再試行本文" {
+		t.Fatalf("retried note = %#v, %v", got, err)
+	}
+}
+
 func TestAppUsesConfiguredSeparateBackupRoot(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
 	dataRoot := filepath.Join(t.TempDir(), "data")

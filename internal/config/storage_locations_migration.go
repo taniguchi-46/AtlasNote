@@ -14,11 +14,21 @@ import (
 const (
 	pendingStorageMigrationVersion = 1
 	pendingStorageMigrationFile    = "storage-location-migration.json"
+	pendingStorageMigrationMigrate = "migrate"
+	pendingStorageMigrationSwitch  = "switch"
+	pendingStorageMigrationCancel  = "cancel"
+)
+
+const (
+	PendingStorageMigrationActionMigrate = pendingStorageMigrationMigrate
+	PendingStorageMigrationActionSwitch  = pendingStorageMigrationSwitch
+	PendingStorageMigrationActionCancel  = pendingStorageMigrationCancel
 )
 
 type PendingStorageLocationMigration struct {
 	Version          int    `json:"version"`
 	ID               string `json:"id"`
+	Action           string `json:"action,omitempty"`
 	SourceDataRoot   string `json:"sourceDataRoot"`
 	TargetDataRoot   string `json:"targetDataRoot"`
 	SourceBackupRoot string `json:"sourceBackupRoot"`
@@ -34,6 +44,7 @@ func PendingStorageLocationMigrationPath() (string, error) {
 }
 
 func SavePendingStorageLocationMigration(migration PendingStorageLocationMigration) error {
+	normalizePendingMigration(&migration)
 	if err := validatePendingMigration(migration); err != nil {
 		return err
 	}
@@ -62,7 +73,7 @@ func loadPendingStorageLocationMigrationFrom(path string) (PendingStorageLocatio
 	if err != nil {
 		return PendingStorageLocationMigration{}, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+	if isUnsafeStoragePath(path, info) || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return PendingStorageLocationMigration{}, ErrLocationsInvalid
 	}
 	encoded, err := os.ReadFile(path)
@@ -75,6 +86,7 @@ func loadPendingStorageLocationMigrationFrom(path string) (PendingStorageLocatio
 	if err := decoder.Decode(&migration); err != nil {
 		return PendingStorageLocationMigration{}, fmt.Errorf("%w: %v", ErrLocationsInvalid, err)
 	}
+	normalizePendingMigration(&migration)
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return PendingStorageLocationMigration{}, ErrLocationsInvalid
@@ -101,33 +113,76 @@ func ApplyPendingStorageLocationMigration(ctx context.Context) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	switch migration.Action {
+	case pendingStorageMigrationCancel:
+		if err := SaveStorageLocations(StorageLocations{
+			Version: storageLocationsVersion, DataRoot: migration.SourceDataRoot, BackupRoot: migration.SourceBackupRoot,
+		}); err != nil {
+			return false, err
+		}
+		return true, removePendingStorageLocationMigration()
+	case pendingStorageMigrationSwitch:
+		if err := SaveStorageLocations(StorageLocations{
+			Version: storageLocationsVersion, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
+		}); err != nil {
+			return false, err
+		}
+		return true, removePendingStorageLocationMigration()
+	case pendingStorageMigrationMigrate:
+		// Continue with the version 1 copy-on-restart migration below.
+	default:
+		return false, ErrLocationsInvalid
+	}
+	if err := ValidateStorageLocations(StorageLocations{
+		Version: storageLocationsVersion, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
+	}); err != nil {
+		return false, err
+	}
+	backupTargetWasExisting := existingMigrationTarget(migration.TargetBackupRoot)
 	if err := applyRootMigration(ctx, migration.SourceDataRoot, migration.TargetDataRoot, false, migration.ID, filepath.Clean(migration.TargetDataRoot) != filepath.Clean(migration.TargetBackupRoot)); err != nil {
 		return false, err
 	}
-	if err := applyRootMigration(ctx, migration.SourceBackupRoot, migration.TargetBackupRoot, true, migration.ID, false); err != nil {
-		return false, err
+	if !backupTargetWasExisting {
+		if err := applyRootMigration(ctx, migration.SourceBackupRoot, migration.TargetBackupRoot, true, migration.ID, false); err != nil {
+			return false, err
+		}
 	}
 	if err := SaveStorageLocations(StorageLocations{
 		Version: storageLocationsVersion, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
 	}); err != nil {
 		return false, err
 	}
+	return true, removePendingStorageLocationMigration()
+}
+
+func removePendingStorageLocationMigration() error {
 	path, err := PendingStorageLocationMigrationPath()
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
+		return err
 	}
-	return true, nil
+	return nil
+}
+
+func normalizePendingMigration(migration *PendingStorageLocationMigration) {
+	if migration.Action == "" {
+		migration.Action = pendingStorageMigrationMigrate
+	}
 }
 
 func validatePendingMigration(migration PendingStorageLocationMigration) error {
+	normalizePendingMigration(&migration)
 	if migration.Version != pendingStorageMigrationVersion || !validMigrationID(migration.ID) {
 		return ErrLocationsInvalid
 	}
+	if migration.Action != pendingStorageMigrationMigrate && migration.Action != pendingStorageMigrationSwitch && migration.Action != pendingStorageMigrationCancel {
+		return ErrLocationsInvalid
+	}
 	for _, path := range []string{migration.SourceDataRoot, migration.TargetDataRoot, migration.SourceBackupRoot, migration.TargetBackupRoot} {
-		if _, err := normalizeAbsolutePath(path); err != nil {
+		normalized, err := normalizeAbsolutePath(path)
+		if err != nil || normalized != filepath.Clean(path) {
 			return ErrLocationsInvalid
 		}
 	}
@@ -135,6 +190,12 @@ func validatePendingMigration(migration PendingStorageLocationMigration) error {
 		return ErrLocationsInvalid
 	}
 	if rootsOverlap(migration.SourceDataRoot, migration.SourceBackupRoot) || rootsOverlap(migration.TargetDataRoot, migration.TargetBackupRoot) {
+		return ErrLocationsInvalid
+	}
+	if filepath.Clean(migration.SourceDataRoot) != filepath.Clean(migration.TargetDataRoot) && pathsOverlapOrEqual(migration.SourceDataRoot, migration.TargetDataRoot) {
+		return ErrLocationsInvalid
+	}
+	if filepath.Clean(migration.SourceBackupRoot) != filepath.Clean(migration.TargetBackupRoot) && pathsOverlapOrEqual(migration.SourceBackupRoot, migration.TargetBackupRoot) {
 		return ErrLocationsInvalid
 	}
 	if filepath.Clean(migration.TargetDataRoot) != filepath.Clean(migration.SourceDataRoot) && pathsOverlapOrEqual(migration.TargetDataRoot, migration.SourceBackupRoot) {
@@ -156,6 +217,16 @@ func pathsOverlapOrEqual(first string, second string) bool {
 	first = filepath.Clean(first)
 	second = filepath.Clean(second)
 	return isWithinOrEqual(first, second) || isWithinOrEqual(second, first)
+}
+
+func existingMigrationTarget(path string) bool {
+	if probe, err := ProbeBackupRoot(path); err == nil && probe.Kind == RootExisting {
+		return true
+	}
+	if probe, err := ProbeDataRoot(path); err == nil && probe.Kind == RootExisting {
+		return true
+	}
+	return false
 }
 
 func validMigrationID(value string) bool {
@@ -230,6 +301,9 @@ func copyDataRoot(ctx context.Context, source string, target string, operationID
 		return ErrRootInvalid
 	}
 	stage := target + ".atlasnote-migration-" + operationID
+	if pathsOverlapOrEqual(source, stage) {
+		return ErrLocationsInvalid
+	}
 	if err := prepareMigrationStage(stage); err != nil {
 		return err
 	}
@@ -264,10 +338,13 @@ func copyBackupArchive(ctx context.Context, source string, target string, operat
 			return nil
 		}
 		return err
-	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	} else if isUnsafeStoragePath(sourceArchive, info) || !info.IsDir() {
 		return ErrRootInvalid
 	}
 	stage := filepath.Join(target, ".atlasnote-backups.atlasnote-migration-"+operationID)
+	if pathsOverlapOrEqual(sourceArchive, stage) {
+		return ErrLocationsInvalid
+	}
 	if err := prepareMigrationStage(stage); err != nil {
 		return err
 	}
@@ -288,7 +365,7 @@ func copyBackupArchive(ctx context.Context, source string, target string, operat
 
 func copyDirectory(ctx context.Context, source string, target string, skip func(string, os.DirEntry) bool) error {
 	info, err := os.Lstat(source)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if err != nil || isUnsafeStoragePath(source, info) || !info.IsDir() {
 		if errors.Is(err, os.ErrNotExist) {
 			return ErrRootInvalid
 		}
@@ -311,20 +388,24 @@ func copyDirectory(ctx context.Context, source string, target string, skip func(
 		if relative == "." {
 			return nil
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if isUnsafeStoragePath(sourcePath, entryInfo) {
 			return ErrRootInvalid
 		}
 		if skip != nil && skip(filepath.ToSlash(relative), entry) {
-			if entry.IsDir() {
+			if entryInfo.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		destination := filepath.Join(target, relative)
-		if entry.IsDir() {
+		if entryInfo.IsDir() {
 			return os.MkdirAll(destination, 0o700)
 		}
-		if !entry.Type().IsRegular() {
+		if !entryInfo.Mode().IsRegular() {
 			return ErrRootInvalid
 		}
 		return copyFileForMigration(ctx, sourcePath, destination)
@@ -397,7 +478,7 @@ func removeEmptyMigrationTarget(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if isUnsafeStoragePath(path, info) || !info.IsDir() {
 		return ErrRootInvalid
 	}
 	entries, err := os.ReadDir(path)
@@ -429,7 +510,7 @@ func prepareMigrationStage(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if isUnsafeStoragePath(path, info) || !info.IsDir() {
 		return ErrRootInvalid
 	}
 	return os.RemoveAll(path)

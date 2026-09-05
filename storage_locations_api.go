@@ -21,16 +21,19 @@ const (
 )
 
 type StorageLocationStatus struct {
-	DataRoot              string `json:"dataRoot,omitempty"`
-	BackupRoot            string `json:"backupRoot,omitempty"`
-	Source                string `json:"source,omitempty"`
-	EnvironmentOverride   bool   `json:"environmentOverride"`
-	SetupRequired         bool   `json:"setupRequired"`
-	RecoveryRequired      bool   `json:"recoveryRequired"`
-	PendingRestart        bool   `json:"pendingRestart"`
-	PendingDataRoot       string `json:"pendingDataRoot,omitempty"`
-	PendingBackupRoot     string `json:"pendingBackupRoot,omitempty"`
-	DataRootChangeAllowed bool   `json:"dataRootChangeAllowed"`
+	DataRoot               string `json:"dataRoot,omitempty"`
+	BackupRoot             string `json:"backupRoot,omitempty"`
+	Source                 string `json:"source,omitempty"`
+	EnvironmentOverride    bool   `json:"environmentOverride"`
+	SetupRequired          bool   `json:"setupRequired"`
+	RecoveryRequired       bool   `json:"recoveryRequired"`
+	PendingRestart         bool   `json:"pendingRestart"`
+	PendingDataRoot        string `json:"pendingDataRoot,omitempty"`
+	PendingBackupRoot      string `json:"pendingBackupRoot,omitempty"`
+	PendingMigration       bool   `json:"pendingMigration"`
+	PendingMigrationAction string `json:"pendingMigrationAction,omitempty"`
+	PendingSelection       bool   `json:"pendingSelection"`
+	DataRootChangeAllowed  bool   `json:"dataRootChangeAllowed"`
 }
 
 type StorageLocationError struct {
@@ -96,6 +99,9 @@ func storageLocationError(err error) *StorageLocationError {
 	case errors.Is(err, config.ErrRootInvalid), errors.Is(err, config.ErrLocationsInvalid):
 		code = storageLocationErrorValidation
 		message = "選択したフォルダを保存場所として利用できません。空のフォルダ、またはAtlas Noteの保存場所を選択してください。"
+	case errors.Is(err, os.ErrPermission):
+		code = "STORAGE_LOCATION_UNWRITABLE"
+		message = "保存場所へアクセスできません。権限、OneDriveの同期状態、またはWindows Securityの設定を確認してください。"
 	case errors.Is(err, errStorageLocationEnvironment):
 		code = storageLocationErrorEnvironment
 		message = "ATLAS_NOTE_DATA_DIR が設定されているため、保存場所は変更できません。"
@@ -188,6 +194,7 @@ func (a *App) SelectStorageLocation(kind string) StorageLocationSelectionResult 
 		a.pendingBackupRoot = path
 		a.pendingBackupFollowsData = false
 	}
+	a.pendingStorageSelection = true
 	a.locationMu.Unlock()
 	status, _ := a.storageLocationStatus()
 	return StorageLocationSelectionResult{Kind: string(locationKind), Path: path, Probe: &probe, Status: &status}
@@ -255,8 +262,45 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 	if err := config.ValidateStorageLocations(config.StorageLocations{Version: 1, DataRoot: dataRoot, BackupRoot: backupRoot}); err != nil {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}
 	}
+	currentDataRoot := filepath.Clean(a.managementRoot)
+	currentBackupRoot := filepath.Clean(a.archiveRoot)
+	if currentDataRoot == "." || currentDataRoot == "" {
+		currentDataRoot = filepath.Clean(a.locationResolution.Locations.DataRoot)
+	}
+	if currentBackupRoot == "." || currentBackupRoot == "" {
+		currentBackupRoot = filepath.Clean(a.locationResolution.Locations.BackupRoot)
+	}
+	if currentBackupRoot == "." || currentBackupRoot == "" {
+		currentBackupRoot = currentDataRoot
+	}
 
-	if a.startupPhase == StartupPhaseSetupRequired || a.startupPhase == StartupPhaseStorageRecovery {
+	if a.startupPhase == StartupPhaseStorageRecovery {
+		pending, pendingErr := config.LoadPendingStorageLocationMigration()
+		if pendingErr == nil {
+			currentDataRoot = pending.SourceDataRoot
+			currentBackupRoot = pending.SourceBackupRoot
+		} else if !errors.Is(pendingErr, os.ErrNotExist) {
+			return StorageLocationMutationResult{Error: storageLocationError(pendingErr)}
+		}
+		migration := config.PendingStorageLocationMigration{
+			Version: 1, ID: strconv.FormatInt(time.Now().UnixNano(), 10),
+			Action:         config.PendingStorageMigrationActionSwitch,
+			SourceDataRoot: currentDataRoot, TargetDataRoot: dataRoot,
+			SourceBackupRoot: currentBackupRoot, TargetBackupRoot: backupRoot,
+		}
+		if err := config.SavePendingStorageLocationMigration(migration); err != nil {
+			return StorageLocationMutationResult{Error: storageLocationError(err)}
+		}
+		a.locationMu.Lock()
+		a.pendingDataRoot, a.pendingBackupRoot = dataRoot, backupRoot
+		a.pendingBackupFollowsData = filepath.Clean(dataRoot) == filepath.Clean(backupRoot)
+		a.pendingStorageSelection = false
+		a.locationMu.Unlock()
+		status, _ := a.storageLocationStatus()
+		return StorageLocationMutationResult{Status: &status, RestartRequired: true}
+	}
+
+	if a.startupPhase == StartupPhaseSetupRequired {
 		if err := config.SaveStorageLocations(config.StorageLocations{Version: 1, DataRoot: dataRoot, BackupRoot: backupRoot}); err != nil {
 			return StorageLocationMutationResult{Error: storageLocationError(err)}
 		}
@@ -268,27 +312,23 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 		a.locationMu.Lock()
 		a.pendingDataRoot, a.pendingBackupRoot = "", ""
 		a.pendingBackupFollowsData = false
+		a.pendingStorageSelection = false
 		a.locationMu.Unlock()
 		status, _ := a.storageLocationStatus()
 		return StorageLocationMutationResult{Status: &status, RestartRequired: true}
 	}
 
-	if pending, err := config.LoadPendingStorageLocationMigration(); err == nil {
-		_ = pending
+	if _, err := config.LoadPendingStorageLocationMigration(); err == nil {
 		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationMigration)}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}
 	}
 
-	currentDataRoot := filepath.Clean(a.managementRoot)
-	currentBackupRoot := filepath.Clean(a.archiveRoot)
-	if currentBackupRoot == "." || currentBackupRoot == "" {
-		currentBackupRoot = currentDataRoot
-	}
 	if dataRoot == currentDataRoot && backupRoot == currentBackupRoot {
 		a.locationMu.Lock()
 		a.pendingDataRoot, a.pendingBackupRoot = "", ""
 		a.pendingBackupFollowsData = false
+		a.pendingStorageSelection = false
 		a.locationMu.Unlock()
 		status, _ := a.storageLocationStatus()
 		return StorageLocationMutationResult{Status: &status}
@@ -304,8 +344,60 @@ func (a *App) ApplyStorageLocations() StorageLocationMutationResult {
 	a.locationMu.Lock()
 	a.pendingDataRoot, a.pendingBackupRoot = dataRoot, backupRoot
 	a.pendingBackupFollowsData = false
+	a.pendingStorageSelection = false
 	a.locationMu.Unlock()
 	status, _ := a.storageLocationStatus()
+	return StorageLocationMutationResult{Status: &status, RestartRequired: true}
+}
+
+func (a *App) CancelPendingStorageLocationMigration() StorageLocationMutationResult {
+	if a.startupPhase != StartupPhaseStorageRecovery {
+		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationUnavailable)}
+	}
+	if a.locationResolution.Environment || strings.TrimSpace(os.Getenv("ATLAS_NOTE_DATA_DIR")) != "" {
+		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationEnvironment)}
+	}
+	migration, err := config.LoadPendingStorageLocationMigration()
+	if err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
+	migration.Action = config.PendingStorageMigrationActionCancel
+	if err := config.SavePendingStorageLocationMigration(migration); err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
+	status, statusErr := a.storageLocationStatus()
+	if statusErr != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(statusErr)}
+	}
+	return StorageLocationMutationResult{Status: &status, RestartRequired: true}
+}
+
+func (a *App) RetryPendingStorageLocationMigration() StorageLocationMutationResult {
+	if a.startupPhase != StartupPhaseStorageRecovery {
+		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationUnavailable)}
+	}
+	if a.locationResolution.Environment || strings.TrimSpace(os.Getenv("ATLAS_NOTE_DATA_DIR")) != "" {
+		return StorageLocationMutationResult{Error: storageLocationError(errStorageLocationEnvironment)}
+	}
+	migration, err := config.LoadPendingStorageLocationMigration()
+	if err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
+	if migration.Action == config.PendingStorageMigrationActionCancel {
+		migration.Action = config.PendingStorageMigrationActionMigrate
+	}
+	if err := config.ValidateStorageLocations(config.StorageLocations{
+		Version: 1, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
+	}); err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
+	if err := config.SavePendingStorageLocationMigration(migration); err != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(err)}
+	}
+	status, statusErr := a.storageLocationStatus()
+	if statusErr != nil {
+		return StorageLocationMutationResult{Error: storageLocationError(statusErr)}
+	}
 	return StorageLocationMutationResult{Status: &status, RestartRequired: true}
 }
 
@@ -313,6 +405,7 @@ func (a *App) CancelStorageLocationSelection() StorageLocationStatusResult {
 	a.locationMu.Lock()
 	a.pendingDataRoot, a.pendingBackupRoot = "", ""
 	a.pendingBackupFollowsData = false
+	a.pendingStorageSelection = false
 	a.locationMu.Unlock()
 	status, err := a.storageLocationStatus()
 	if err != nil {
@@ -366,10 +459,19 @@ func (a *App) storageLocationStatus() (StorageLocationStatus, error) {
 		RecoveryRequired:      a.startupPhase == StartupPhaseStorageRecovery,
 		DataRootChangeAllowed: !environmentOverride,
 		PendingDataRoot:       a.pendingDataRoot, PendingBackupRoot: a.pendingBackupRoot,
+		PendingSelection: a.pendingStorageSelection,
 	}
 	status.PendingRestart = status.PendingDataRoot != "" || status.PendingBackupRoot != ""
-	if _, err := config.LoadPendingStorageLocationMigration(); err == nil {
+	if pending, err := config.LoadPendingStorageLocationMigration(); err == nil {
 		status.PendingRestart = true
+		status.PendingMigration = true
+		status.PendingMigrationAction = pending.Action
+		if status.PendingDataRoot == "" {
+			status.PendingDataRoot = pending.TargetDataRoot
+		}
+		if status.PendingBackupRoot == "" {
+			status.PendingBackupRoot = pending.TargetBackupRoot
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return status, err
 	}

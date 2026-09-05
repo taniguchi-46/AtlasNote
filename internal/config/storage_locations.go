@@ -172,7 +172,7 @@ func loadStorageLocationsFrom(filePath string, probeRoots bool) (StorageLocation
 	if err != nil {
 		return StorageLocations{}, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+	if isUnsafeStoragePath(filePath, info) || !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return StorageLocations{}, ErrLocationsInvalid
 	}
 	encoded, err := os.ReadFile(filePath)
@@ -326,8 +326,8 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 			Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
 		}
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		if info.Mode()&os.ModeSymlink != 0 {
+	if isUnsafeStoragePath(absolute, info) || !info.IsDir() {
+		if isUnsafeStoragePath(absolute, info) {
 			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
 		}
 		return RootProbe{}, rootValidationError(RootErrorNotDirectory)
@@ -347,7 +347,15 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 	hasRecognized := false
 	effectiveEntries := 0
 	for _, entry := range entries {
-		if entry.Type()&os.ModeSymlink != 0 {
+		entryPath := filepath.Join(absolute, entry.Name())
+		entryInfo, entryErr := entry.Info()
+		if entryErr != nil {
+			return RootProbe{}, &RootValidationError{
+				Code:  RootErrorReadFailed,
+				Cause: fmt.Errorf("%w: %w", ErrRootInvalid, entryErr),
+			}
+		}
+		if isUnsafeStoragePath(entryPath, entryInfo) {
 			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
 		}
 		name := entry.Name()
@@ -358,7 +366,7 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		}
 		effectiveEntries++
 		if backup && name == ".atlasnote-backups" {
-			if !entry.IsDir() {
+			if !entryInfo.IsDir() {
 				return RootProbe{}, rootValidationError(RootErrorNotDirectory)
 			}
 			probe.HasBackups = true
@@ -451,8 +459,31 @@ func writableDirectory(path string) bool {
 		return false
 	}
 	temporaryPath := temporary.Name()
-	_ = temporary.Close()
-	_ = os.Remove(temporaryPath)
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
+		return false
+	}
+	renamedFilePath := temporaryPath + ".renamed"
+	if err := os.Rename(temporaryPath, renamedFilePath); err != nil {
+		_ = os.Remove(temporaryPath)
+		return false
+	}
+	if err := os.Remove(renamedFilePath); err != nil {
+		return false
+	}
+
+	temporaryDirectory, err := os.MkdirTemp(path, ".atlasnote-directory-test-"+time.Now().UTC().Format("20060102150405.000000000"))
+	if err != nil {
+		return false
+	}
+	renamedDirectoryPath := temporaryDirectory + ".renamed"
+	if err := os.Rename(temporaryDirectory, renamedDirectoryPath); err != nil {
+		_ = os.Remove(temporaryDirectory)
+		return false
+	}
+	if err := os.Remove(renamedDirectoryPath); err != nil {
+		return false
+	}
 	return true
 }
 
@@ -461,7 +492,7 @@ func writableExistingParent(path string) (string, error) {
 	for {
 		info, err := os.Lstat(current)
 		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
+			if isUnsafeStoragePath(current, info) {
 				return "", rootValidationError(RootErrorUnsafeLink)
 			}
 			if !info.IsDir() {
@@ -492,7 +523,7 @@ func writeAtomic(filePath string, contents []byte) error {
 		return err
 	}
 	if info, err := os.Lstat(filePath); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		if isUnsafeStoragePath(filePath, info) || !info.Mode().IsRegular() {
 			return ErrLocationsInvalid
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {

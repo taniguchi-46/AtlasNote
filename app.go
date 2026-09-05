@@ -70,6 +70,7 @@ type App struct {
 	pendingDataRoot             string
 	pendingBackupRoot           string
 	pendingBackupFollowsData    bool
+	pendingStorageSelection     bool
 }
 
 var (
@@ -199,6 +200,13 @@ func (a *App) CompleteClose() {
 	if a.ctx != nil {
 		runtime.Quit(a.ctx)
 	}
+}
+
+func (a *App) OpenInstalledApps() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.BrowserOpenURL(a.ctx, "ms-settings:appsfeatures")
 }
 
 func (a *App) RestartApp() error {
@@ -1535,6 +1543,9 @@ func (a *App) initialize(ctx context.Context) {
 	a.startupPhase = StartupPhaseInitializing
 	a.statusMu.Unlock()
 	if _, err := config.ApplyPendingStorageLocationMigration(ctx); err != nil {
+		if a.enterStorageLocationRecovery(err) {
+			return
+		}
 		a.statusMu.Lock()
 		a.startupErr = err
 		a.startupPhase = StartupPhaseError
@@ -1718,7 +1729,15 @@ func (a *App) initialize(ctx context.Context) {
 func (a *App) enterStorageLocationRecovery(cause error) bool {
 	locations, err := config.LoadStorageLocationsForRecovery()
 	source := config.LocationSourceSaved
-	if err != nil {
+	var pending *config.PendingStorageLocationMigration
+	if migration, migrationErr := config.LoadPendingStorageLocationMigration(); migrationErr == nil {
+		pending = &migration
+		locations = config.StorageLocations{
+			Version: 1, DataRoot: migration.SourceDataRoot, BackupRoot: migration.SourceBackupRoot,
+		}
+		source = config.LocationSourceSaved
+	}
+	if err != nil && pending == nil {
 		defaultRoot, defaultErr := config.DefaultDataRoot()
 		if defaultErr != nil {
 			return false
@@ -1736,6 +1755,18 @@ func (a *App) enterStorageLocationRecovery(cause error) bool {
 		a.archiveRoot = a.managementRoot
 	}
 	a.dataDir = a.managementRoot
+	a.locationMu.Lock()
+	a.pendingStorageSelection = false
+	if pending != nil {
+		a.pendingDataRoot = pending.TargetDataRoot
+		a.pendingBackupRoot = pending.TargetBackupRoot
+		a.pendingBackupFollowsData = filepath.Clean(pending.TargetDataRoot) == filepath.Clean(pending.TargetBackupRoot)
+	} else {
+		a.pendingDataRoot = ""
+		a.pendingBackupRoot = ""
+		a.pendingBackupFollowsData = false
+	}
+	a.locationMu.Unlock()
 	a.startupErr = nil
 	storageErr := storageLocationError(cause)
 	a.statusMu.Lock()

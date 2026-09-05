@@ -34,18 +34,34 @@
       <p v-if="message" class="storage-location-message" :class="{ error: hasError }" role="alert" aria-live="polite">{{ message }}</p>
       <div class="storage-location-actions">
         <button type="button" class="primary" :disabled="isBusy" @click="apply">
-          {{ isBusy ? '確認中…' : isRecovery ? '保存場所を変更して再起動' : 'この設定で開始' }}
+          {{ isBusy ? '確認中…' : isRecovery ? '別の保存場所で開始' : 'この設定で開始' }}
         </button>
       </div>
       <p class="storage-location-note">
-        {{ isRecovery ? '元の保存場所とデータは削除・移動されません。' : 'フォルダの移動中に元のデータは削除されません。' }}
+        {{ isRecovery ? '元の保存場所とデータは削除・移動されません。別の空フォルダで開始する場合、元データは自動移行されません。' : 'フォルダの移動中に元のデータは削除されません。' }}
       </p>
+      <div v-if="isRecovery" class="storage-location-recovery-actions">
+        <button type="button" :disabled="isBusy || !hasPendingMigration" @click="cancelPendingMigration">
+          元の保存場所に戻す
+        </button>
+        <button type="button" :disabled="isBusy || !hasPendingMigration" @click="retryPendingMigration">
+          同じ移行を再試行する
+        </button>
+      </div>
+      <p v-if="isRecovery" class="storage-location-recovery-help">
+        「別の保存場所で開始」は、選択した既存のAtlas Noteデータを開くか、空のフォルダで新しく開始します。
+      </p>
+      <div class="storage-location-exit-actions">
+        <button type="button" :disabled="isBusy" @click="openInstalledApps">Windowsの「インストールされているアプリ」を開く</button>
+        <button type="button" :disabled="isBusy" @click="exitApplication">終了</button>
+      </div>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { exitApplication, openInstalledApps } from '../api/startup'
 import type { StorageLocationError, StorageLocationStatus } from '../api/storageLocations'
 import { useStorageLocationStore } from '../stores/useStorageLocationStore'
 
@@ -64,6 +80,7 @@ const localMessage = ref('')
 const initialErrorCleared = ref(false)
 const message = computed(() => localMessage.value || locationStore.error?.message || (!initialErrorCleared.value ? props.initialError?.message : '') || '')
 const hasError = computed(() => Boolean(locationStore.error || (!initialErrorCleared.value && props.initialError)))
+const hasPendingMigration = computed(() => Boolean(status.value?.pendingMigration))
 
 const dataRoot = computed(() => status.value?.pendingDataRoot || status.value?.dataRoot || '')
 const backupRoot = computed(() => status.value?.pendingBackupRoot || status.value?.backupRoot || '')
@@ -88,6 +105,20 @@ async function apply() {
     initialErrorCleared.value = true
     emit('completed')
   }
+}
+
+async function cancelPendingMigration() {
+  if (isBusy.value) return
+  localMessage.value = ''
+  const completed = await locationStore.cancelPendingMigration()
+  if (completed) localMessage.value = '元の保存場所へ戻す設定を保存しました。'
+}
+
+async function retryPendingMigration() {
+  if (isBusy.value) return
+  localMessage.value = ''
+  const completed = await locationStore.retryPendingMigration()
+  if (completed) localMessage.value = '同じ移行を再試行する設定を保存しました。'
 }
 
 onMounted(() => {
@@ -143,6 +174,9 @@ button.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .storage-location-message { margin: 16px 0 0; color: var(--color-success); font-size: 0.9rem; }
 .storage-location-message.error { color: var(--color-danger); }
 .storage-location-note { margin: 18px 0 0; color: var(--text-secondary); font-size: 0.8rem; }
+.storage-location-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.storage-location-recovery-help { margin: 12px 0 0; color: var(--text-secondary); font-size: 0.84rem; line-height: 1.6; }
+.storage-location-exit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 @media (max-width: 600px) {
   .storage-location-setup { padding: 16px; }
   .storage-location-card { padding: 24px; }

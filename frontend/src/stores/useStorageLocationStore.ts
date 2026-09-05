@@ -2,7 +2,9 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   applyStorageLocations,
+  cancelPendingStorageLocationMigration,
   getStorageLocationStatus,
+  retryPendingStorageLocationMigration,
   selectStorageLocation,
   type StorageLocationError,
   type StorageLocationStatus,
@@ -109,6 +111,46 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     }
   }
 
+  async function runPendingMigrationAction(action: () => Promise<{
+    status?: StorageLocationStatus
+    restartRequired: boolean
+    error?: StorageLocationError
+  }>) {
+    if (isBusy.value) return false
+    isOperating.value = true
+    error.value = null
+    try {
+      const result = await action()
+      if (result.error) {
+        error.value = result.error
+        return false
+      }
+      if (result.status) status.value = result.status
+      if (result.restartRequired && restartApplication) {
+        try {
+          await restartApplication()
+        } catch (cause) {
+          error.value = { code: 'STORAGE_LOCATION_RESTART_FAILED', message: restartFailureMessage(cause) }
+          return false
+        }
+      }
+      return true
+    } catch {
+      error.value = unavailableError
+      return false
+    } finally {
+      isOperating.value = false
+    }
+  }
+
+  function cancelPendingMigration() {
+    return runPendingMigrationAction(cancelPendingStorageLocationMigration)
+  }
+
+  function retryPendingMigration() {
+    return runPendingMigrationAction(retryPendingStorageLocationMigration)
+  }
+
   function setLifecycle(prepare: PrepareChange, restart: RestartApplication) {
     prepareChange = prepare
     restartApplication = restart
@@ -132,6 +174,8 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     initialize,
     choose,
     apply,
+    cancelPendingMigration,
+    retryPendingMigration,
     setLifecycle,
     clearLifecycle,
     clearError,

@@ -89,6 +89,9 @@ jobs:
       - name: Run storage space tests
         run: npm --prefix frontend run test:storage-spaces
 
+      - name: Run storage location recovery tests
+        run: npm --prefix frontend run test:storage-location-setup
+
       - name: Run backup and restore tests
         run: npm --prefix frontend run test:backups
 

@@ -1,6 +1,8 @@
 import {
+  CompleteClose,
   DeleteMissingNote,
   GetStartupStatus,
+  OpenInstalledApps,
   ReinspectRecovery,
 } from '../../wailsjs/go/main/App'
 import type { StorageSpace } from './storageSpaces'
@@ -41,4 +43,12 @@ export function reinspectRecovery(): Promise<StartupStatus> {
 
 export function deleteMissingNote(id: string): Promise<StartupStatus> {
   return DeleteMissingNote(id)
+}
+
+export function exitApplication(): Promise<void> {
+  return CompleteClose()
+}
+
+export function openInstalledApps(): Promise<void> {
+  return OpenInstalledApps()
 }
