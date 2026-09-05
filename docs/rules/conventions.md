@@ -32,6 +32,7 @@
 - SQLite 操作は Repository に閉じ込め、UI やサービス層に SQL 詳細を漏らさない。
 - Markdown Storage は本文保存の責務を持ち、メタデータ管理は SQLite 側に寄せる。
 - AI API Key は平文ログや例外メッセージに出さない。
+- Mermaidの生成SVGは表示専用の一時データとし、保存・同期・エクスポートのデータモデルへ追加しない。外部リソースを伴う記法は許可しない。
 - WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを [`docs/development/webdav-sync.md`](../development/webdav-sync.md) に従って実装する。
 
 ## UI

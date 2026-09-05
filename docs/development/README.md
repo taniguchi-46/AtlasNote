@@ -21,6 +21,7 @@
 | [ノートエクスポート](note-export.md) | 単一ノートのHTML・PDF出力、revision・lock・原子的保存契約 |
 | [バックアップ・復元](backup-restore.md) | 自動バックアップ、完全性検証、再起動時の安全な復元・rollback |
 | [キーボードショートカット](keyboard-shortcuts.md) | アプリ内グローバル操作、キーバインド設定、Markdown／RichのUndo／Redo契約 |
+| [Mermaid対応](mermaid.md) | MermaidコードフェンスのRich表示、安全性、保存・エクスポート境界 |
 | [WebDAV同期](webdav-sync.md) | Phase 3の同期契約、競合、復旧 |
 | [検索索引](search-index.md) | Markdown全文検索の索引方式 |
 | [検索API](search-api.md) | 検索API、入力検証、エラー契約 |

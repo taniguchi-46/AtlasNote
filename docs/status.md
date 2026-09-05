@@ -30,6 +30,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
 - Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
 - Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
+- MermaidコードフェンスのRich表示を実装した。既存の`codeBlock`とMarkdown serializerを維持し、`language: "mermaid"`だけをNodeViewで編集可能なソースと図の併記として表示する。Mermaidは遅延読込・固定安全設定・入力上限・SVG専用サニタイズ・外部リソース拒否を適用し、生成物を保存しない。AI回答プレビューとHTML／PDFエクスポートの図化は対象外。詳細は`docs/development/mermaid.md`を正とする（2026-09-05、手動UI受け入れ未完了）
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -164,6 +165,7 @@ npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
+npm --prefix frontend run test:mermaid
 npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger

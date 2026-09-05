@@ -142,6 +142,13 @@ Go Backend
 - AIプレビューで許可する要素は見出し、段落、改行、リスト、引用、強調、コード、区切り線、リンクに限定する。`script`、`style`、イベント属性、外部リソース要素、画像、SVG、フォーム、`javascript:`・`data:`・`file:` URLは許可しない。
 - AIの保存済み回答は原文を保持し、表示時に毎回サニタイズする。プロンプトのMarkdown出力規則はユーザビリティ向けであり、セキュリティ境界は表示時サニタイズとする。
 
+### Mermaid図のRich表示
+
+- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。
+- MarkdownモードとエクスポートはMermaidのコードソースを扱い、AI回答プレビューは対象外とする。raw HTML、raw SVG、`div.mermaid`はMermaid入力として扱わない。
+- Mermaidは固定した安全設定と入力上限で描画し、init／frontmatter設定、click／callback、外部画像・アイコン・URLを拒否する。生成SVGは専用サニタイズ後にBlob URLの`img`として表示し、外部参照・イベント・`foreignObject`を許可しない。
+- 描画は非同期結果の世代管理とアンマウント時のBlob URL破棄を行い、ノート切替・ロック・テーマ変更時に古い図が残らないようにする。詳細は `docs/development/mermaid.md` を正とする。
+
 ### 外部ノートインポート
 
 - md・txt・HTMLのインポートはGo側のOSネイティブファイルダイアログで選択し、フロントエンドからファイルパスを受け取らない。フロントエンドはAPIクライアントとPinia Storeを経由して保存先、タイトル決定方式、構造化結果だけを扱う。

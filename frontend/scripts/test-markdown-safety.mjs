@@ -61,6 +61,13 @@ try {
   const codeFence = markdown.render('```html\n<button onclick="alert(1)">unsafe</button>\n```')
   assert.match(codeFence, /&lt;button onclick=&quot;alert\(1\)&quot;&gt;/)
   assert.equal(containsExecutableHtml(codeFence), false)
+
+  const mermaidFence = markdown.render('```mermaid\nflowchart TD\n  A --> B\n```')
+  assert.match(mermaidFence, /language-mermaid/)
+  assert.equal(containsExecutableHtml(mermaidFence), false)
+
+  const rawMermaidContainer = markdown.render('<div class="mermaid">flowchart TD</div>')
+  assert.doesNotMatch(rawMermaidContainer, /<svg\b|class="mermaid"/i)
 } finally {
   await rm(outDir, { recursive: true, force: true })
 }

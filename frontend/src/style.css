@@ -1034,6 +1034,46 @@ body.is-pane-resizing * {
   border-radius: 0;
 }
 
+.ProseMirror pre.code-block-node-view {
+  white-space: normal;
+}
+
+.ProseMirror pre.code-block-node-view > [data-node-view-content] {
+  display: block;
+  white-space: pre-wrap !important;
+}
+
+.ProseMirror .mermaid-code-block-preview {
+  box-sizing: border-box;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--editor-font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.ProseMirror .mermaid-code-block-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 4px;
+  background: var(--bg-editor);
+}
+
+.ProseMirror .mermaid-code-block-status,
+.ProseMirror .mermaid-code-block-error {
+  margin: 0;
+}
+
+.ProseMirror .mermaid-code-block-error {
+  color: var(--color-danger);
+}
+
 /* Inline Code */
 .ProseMirror p code {
   color: var(--text-active);
