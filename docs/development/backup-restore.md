@@ -53,6 +53,8 @@
 
 同期復旧の`pending.json`と同時に適用せず、どちらかが待機中の場合はもう一方を開始しない。復元後はSQLiteを再度検証し、問題がなければマーカーと一時領域を削除する。
 
+App統合では、同一アーカイブルートと分離アーカイブルートのどちらでも、自動バックアップの復元を再起動時に適用した後、復元されたノートのrevisionを基準にtrashでrevisionを進め、そのrevisionを使って完全削除できることを確認する。復元対象以外のノート、自動バックアップ、復元前の安全用バックアップは削除後も保持し、復元保留マーカーは適用完了時に残さない（`backup_restore_app_test.go`）。
+
 ## セキュリティと入力境界
 
 - バックアップID、マニフェストの相対パス、サイズ、ハッシュ、schema versionを検証する。
@@ -65,7 +67,7 @@
 - Go実装: `internal/backup/`、SQLiteスナップショット: `internal/database/backup.go`
 - Wails API: `app.go`
 - フロントエンド: `frontend/src/api/backups.ts`、`frontend/src/stores/useBackupStore.ts`、`frontend/src/components/BackupSettingsPanel.vue`
-- 自動テスト: `internal/backup/*_test.go`、`internal/database/backup_test.go`、`frontend/scripts/test-backups.mjs`
+- 自動テスト: `backup_restore_app_test.go`、`internal/backup/*_test.go`、`internal/database/backup_test.go`、`frontend/scripts/test-backups.mjs`、`frontend/scripts/test-note-delete.mjs`
 
 関連確認コマンドは次のとおり。
 

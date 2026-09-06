@@ -464,7 +464,7 @@ func TestV2MigrationResumesOwnedBackupStageAndCopiesAllGenerations(t *testing.T)
 			t.Fatalf("copied backup %s = %q, %v", relative, string(got), readErr)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(targetBackup, "space")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(targetBackup, ".atlasnote-backups", "space", "generations", "partial", "payload.db")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("partial stage content leaked beside archive: %v", err)
 	}
 	if _, err := os.Stat(stage); !errors.Is(err, os.ErrNotExist) {

@@ -4,6 +4,8 @@
 
 保存場所の再起動時移行失敗を`storage-recovery`へ接続し、元へ戻す／別の空フォルダへ切り替える／同じ移行を再試行する保留操作、候補の再検証、v2移行進捗の永続化、Windowsインストーラーの日本語化・安全なアンインストールを実装済み。Go・フロントエンドのテスト、既存のWails生成EXEを入力としたNSIS 3.12のスクリプトコンパイル、専用一時フォルダ／HKCUだけを使うアンインストール回帰ハーネスは確認済み。今回の環境ではWails CLIがPATHにないためclean buildの再実行は未完了で、実際のインストール／アンインストール操作、Windowsの「インストールされているアプリ」経由の確認も未実施（2026-09-06）。
 
+2026-09-06のPriority 1回帰確認では、`go test ./... -count=1`、Frontendのtypecheck／lint、note delete・保存場所setup・backupのFrontendテスト、Windows実共有ハンドルを使う保存場所移行テスト、復元後のtrash→revision付きdeleteを通すApp統合テストが成功した。Windowsのstage linkサブテストはシンボリックリンク作成権限不足でskipされ、Frontend production buildは既存`node_modules`の`esbuild`欠落により未完了である。
+
 ## 現在のフェーズ
 
 MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機能は実装済みです。Phase 2のCI受け入れは [GitHub ActionsのCI run #29383600495](https://github.com/taniguchi-46/AtlasNote/actions/runs/29383600495) で成功しています。残課題とPhase 3への持ち越し条件は下記に分けて記録します。関連メモはPhase 4 v2へ完全移管しています。
@@ -32,6 +34,8 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
 - Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
 - Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
+- 2026-09-06に、保存場所移行のデータstage・分離バックアップstage・同一targetルートのバックアップstage・source読み取り拒否をWindowsの実共有ハンドルで検証した。共有中はowned marker・stage・保留マーカーを保持し、ハンドル解放後に再試行して完了すること、誤ったバックアップ残骸検査パスを修正したことを確認した。marker不一致、look-alike sibling、marker linkも変更なしで拒否する。
+- 2026-09-06に、同一／分離アーカイブルートのApp統合テストで、自動バックアップからの復元を再起動で適用し、復元されたノートのrevisionを基準にtrash後のrevisionで完全削除できること、他ノート・自動バックアップ・復元安全用バックアップ・保留マーカーが保持されることを確認した。Frontendの実Pinia Storeテストでは、trash後のstale lock応答がrevisionを巻き戻さず、最新のlock応答だけを反映することも確認した。
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト

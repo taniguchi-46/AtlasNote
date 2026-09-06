@@ -129,6 +129,7 @@ export const useNoteStore = defineStore('notes', () => {
     isSaving.value = count > 0
   })
   const noteListRequests = createLatestRequestGuard()
+  const noteLockStatusRequests = createLatestRequestGuard()
 
   watch(error, (message) => {
     if (!message) {
@@ -266,6 +267,7 @@ export const useNoteStore = defineStore('notes', () => {
     // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
     // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
     const isLatestRequest = noteSelectionRequests.begin()
+    noteLockStatusRequests.begin()
     const targetLabel = summaries.value.find((note) => note.id === id)?.title ?? 'ノート'
     const accessAllowed = await useContentLockStore().requestAccess({ type: 'note', id }, targetLabel)
     if (!isLatestRequest() || !accessAllowed) return false
@@ -361,16 +363,27 @@ export const useNoteStore = defineStore('notes', () => {
   // Lock configuration changes preserve an active editor's local draft, while
   // this refresh keeps its protected/locked badges in sync with the server.
   async function refreshActiveNoteLockStatus() {
+    const isLatestRequest = noteLockStatusRequests.begin()
     const current = activeNote.value
     if (!current) return false
     const status = await useContentLockStore().refreshTarget({ type: 'note', id: current.id })
-    if (!status || activeNote.value?.id !== current.id) return false
+    const latest = activeNote.value
+    // Lock responses may finish after trash/autosave changed the persisted snapshot.
+    // Never let an older response roll the active note back to its old revision.
+    if (
+      !status
+      || !isLatestRequest()
+      || !latest
+      || latest.id !== current.id
+      || latest.revision !== current.revision
+      || latest !== current
+    ) return false
     if (status.locked) {
       clearActiveNote()
       return true
     }
     activeNote.value = {
-      ...current,
+      ...latest,
       protected: status.protected,
       locked: status.locked,
       lockSource: status.source,
@@ -380,6 +393,7 @@ export const useNoteStore = defineStore('notes', () => {
 
   function clearActiveNote() {
     noteSelectionRequests.begin()
+    noteLockStatusRequests.begin()
     autoTitleNoteId.value = null
     activeNote.value = null
     clearAgentEditorHighlight()
