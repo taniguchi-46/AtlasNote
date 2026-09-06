@@ -397,7 +397,11 @@ func (a *App) RetryPendingStorageLocationMigration() StorageLocationMutationResu
 		}
 		migration = prepared
 	}
-	if err := config.ValidateStorageLocations(config.StorageLocations{
+	if migration.Action == config.PendingStorageMigrationActionMigrate {
+		if err := config.ValidatePendingStorageLocationMigrationForRetry(migration); err != nil {
+			return StorageLocationMutationResult{Error: storageLocationError(err)}
+		}
+	} else if err := config.ValidateStorageLocations(config.StorageLocations{
 		Version: 1, DataRoot: migration.TargetDataRoot, BackupRoot: migration.TargetBackupRoot,
 	}); err != nil {
 		return StorageLocationMutationResult{Error: storageLocationError(err)}

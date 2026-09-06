@@ -23,7 +23,15 @@ Get-FileHash .\build\bin\AtlasNote-amd64-installer.exe -Algorithm SHA256
 
 Wails標準NSISインストーラを使用し、Program Files、Start Menu、デスクトップショートカット、Windowsのアンインストール登録を生成する。インストーラはWebView2 Runtimeが必要な場合に標準の導入処理を行う。
 
-アンインストールではアプリ本体と登録情報だけを削除し、`%AppData%\AtlasNote` の設定ファイル、Documents配下のノート、バックアップは削除しない。データ削除は別途明示確認付きの機能として設計する。
+アンインストールでは、まずアプリ本体の削除可否を確認し、ショートカット、関連付け、実行中のuninstallerのバックアップ、uninstall.exe、64-bit viewのアンインストール登録を順に処理する。途中で失敗した場合は、元の名前のuninstall.exeと登録情報を可能な範囲で復元し、復元不能なら再インストールが必要であることを表示する。`%AppData%\AtlasNote` の設定ファイル、Documents配下のノート、バックアップ、ユーザーが追加したインストール先の内容は削除しない。データ削除は別途明示確認付きの機能として設計する。
+
+アンインストールの回帰ハーネスは、実際のDesktop／Program Files／HKLMを使わず、一時フォルダと専用HKCUキーだけで、アプリまたはuninstallerのロック、ユーザーファイル保持、カスタムインストール先、登録削除拒否、uninstaller復元失敗、再インストール復旧を確認する。
+
+```powershell
+powershell -NoProfile -File .\build\windows\installer\tests\test-uninstall.ps1
+```
+
+このハーネスはインストール済みWindowsアプリの実環境や「インストールされているアプリ」画面経由の操作を代替しない。リリース前には実機での確認も行う。
 
 ## リリース前確認
 

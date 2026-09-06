@@ -13,6 +13,10 @@ build/windows/*
 !build/windows/installer/
 build/windows/installer/*
 !build/windows/installer/project.nsi
+!build/windows/installer/uninstall.nsh
+!build/windows/installer/tests/
+!build/windows/installer/tests/uninstall-harness.nsi
+!build/windows/installer/tests/test-uninstall.ps1
 dist/
 frontend/dist/
 bin/

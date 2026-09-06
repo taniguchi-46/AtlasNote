@@ -153,6 +153,25 @@ func ValidatePendingStorageLocationMigration(migration PendingStorageLocationMig
 	return validatePendingMigration(migration)
 }
 
+// ValidatePendingStorageLocationMigrationForRetry validates a v2 migration at
+// the point where it is safe to retry. Unlike ValidateStorageLocations, this
+// understands the operation-owned staging directories used by copy-required
+// plans. It is deliberately read-only with respect to the migration itself:
+// no stage is cleaned, copied, or committed here.
+func ValidatePendingStorageLocationMigrationForRetry(migration PendingStorageLocationMigration) error {
+	normalizePendingMigration(&migration)
+	if err := validatePendingMigration(migration); err != nil {
+		return err
+	}
+	if migration.Action != pendingStorageMigrationMigrate {
+		return nil
+	}
+	if migration.Version != pendingStorageMigrationVersion {
+		return ErrLocationsInvalid
+	}
+	return validatePendingMigrationExecution(migration)
+}
+
 // PreparePendingStorageLocationMigrationForRetry upgrades a legacy marker only
 // when its target roots are still empty or missing. It deliberately does not
 // reinterpret an existing target as an old completion state.
@@ -221,6 +240,11 @@ func ApplyPendingStorageLocationMigration(ctx context.Context) (bool, error) {
 			return false, err
 		}
 		if err := SavePendingStorageLocationMigration(migration); err != nil {
+			return false, err
+		}
+	}
+	if migration.Action == pendingStorageMigrationMigrate {
+		if err := ValidatePendingStorageLocationMigrationForRetry(migration); err != nil {
 			return false, err
 		}
 	}
@@ -520,6 +544,377 @@ func pathsOverlapOrEqual(first string, second string) bool {
 	return isWithinOrEqual(first, second) || isWithinOrEqual(second, first)
 }
 
+func validatePendingMigrationExecution(migration PendingStorageLocationMigration) error {
+	if migration.DataPlan == PendingStorageMigrationPlanOpenExisting {
+		if err := requireExistingMigrationTarget(migration.TargetDataRoot, false); err != nil {
+			return err
+		}
+	}
+
+	switch migration.Phase {
+	case PendingStorageMigrationPhasePrepared:
+		dataPlaced := migration.DataPlan != PendingStorageMigrationPlanCopyRequired
+		if migration.DataPlan == PendingStorageMigrationPlanCopyRequired {
+			dataMarker := migrationStageMarkerForData(migration)
+			if _, err := validateMigrationStageCandidate(migrationStagePathForData(migration), dataMarker); err != nil {
+				return err
+			}
+			placed, err := migrationStageMarkerMatches(migration.TargetDataRoot, dataMarker)
+			if err != nil {
+				return err
+			}
+			if placed {
+				dataPlaced = true
+			} else if err := requireEmptyOrMissingMigrationTarget(migration.TargetDataRoot, false); err != nil {
+				return err
+			} else if probe, probeErr := ProbeDataRoot(migration.SourceDataRoot); probeErr != nil || probe.Kind != RootExisting {
+				if probeErr != nil {
+					return probeErr
+				}
+				return ErrRootInvalid
+			}
+		}
+		if migration.BackupPlan == PendingStorageMigrationPlanCopyRequired {
+			stageOwned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), migrationStageMarkerForBackup(migration))
+			if err != nil {
+				return err
+			}
+			if stageOwned {
+				// The backup copy is only started after the data-placed
+				// checkpoint. A stage at prepared is therefore inconsistent.
+				return ErrRootInvalid
+			}
+			if dataPlaced && filepath.Clean(migration.TargetBackupRoot) == filepath.Clean(migration.TargetDataRoot) {
+				if err := validateBackupMigrationPendingState(migration); err != nil {
+					return err
+				}
+			} else if filepath.Clean(migration.TargetBackupRoot) == filepath.Clean(migration.TargetDataRoot) {
+				if err := requireEmptyOrMissingMigrationTarget(migration.TargetDataRoot, false); err != nil {
+					return err
+				}
+			} else if _, err := requireEmptyMigrationTargetWithOwnedStage(migration.TargetBackupRoot, migrationStagePathForBackup(migration), migrationStageMarkerForBackup(migration)); err != nil {
+				return err
+			}
+		}
+	case PendingStorageMigrationPhaseDataPlaced:
+		if err := validateDataMigrationPlacementState(migration); err != nil {
+			return err
+		}
+		if err := validateBackupMigrationPendingState(migration); err != nil {
+			return err
+		}
+	case PendingStorageMigrationPhaseBackupPlaced:
+		if err := validateDataMigrationPlacementState(migration); err != nil {
+			return err
+		}
+		if err := validateBackupMigrationPlacementState(migration); err != nil {
+			return err
+		}
+	case PendingStorageMigrationPhaseConfigCommitted:
+		if err := validateCommittedMigrationCleanupState(migration); err != nil {
+			return err
+		}
+	default:
+		return ErrLocationsInvalid
+	}
+
+	if migration.BackupPlan == PendingStorageMigrationPlanOpenExisting {
+		if filepath.Clean(migration.TargetBackupRoot) == filepath.Clean(migration.TargetDataRoot) {
+			return requireExistingMigrationTarget(migration.TargetBackupRoot, false)
+		}
+		return requireExistingMigrationTarget(migration.TargetBackupRoot, true)
+	}
+	return nil
+}
+
+func requireExistingMigrationTarget(path string, backup bool) error {
+	probe, err := probeForMigration(path, backup)
+	if err != nil {
+		return err
+	}
+	if probe.Kind != RootExisting {
+		return ErrRootInvalid
+	}
+	return nil
+}
+
+func validateDataMigrationPlacementState(migration PendingStorageLocationMigration) error {
+	if migration.DataPlan != PendingStorageMigrationPlanCopyRequired {
+		return nil
+	}
+	stageOwned, err := validateMigrationStageCandidate(migrationStagePathForData(migration), migrationStageMarkerForData(migration))
+	if err != nil {
+		return err
+	}
+	if stageOwned {
+		return ErrRootInvalid
+	}
+	matched, err := migrationStageMarkerMatches(migration.TargetDataRoot, migrationStageMarkerForData(migration))
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return ErrRootInvalid
+	}
+	return nil
+}
+
+func validateBackupMigrationPendingState(migration PendingStorageLocationMigration) error {
+	if migration.BackupPlan != PendingStorageMigrationPlanCopyRequired {
+		return nil
+	}
+	marker := migrationStageMarkerForBackup(migration)
+	stageOwned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), marker)
+	if err != nil {
+		return err
+	}
+	placed, err := migrationStageMarkerMatches(marker.TargetPath, marker)
+	if err != nil {
+		return err
+	}
+	if placed {
+		if stageOwned {
+			return ErrRootInvalid
+		}
+		return nil
+	}
+	if stageOwned {
+		available, err := readableBackupArchive(migration.SourceBackupRoot)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return ErrRootInvalid
+		}
+	}
+	if filepath.Clean(migration.TargetBackupRoot) == filepath.Clean(migration.TargetDataRoot) {
+		return requireMissingMigrationTarget(marker.TargetPath)
+	}
+	_, err = requireEmptyMigrationTargetWithOwnedStage(migration.TargetBackupRoot, migrationStagePathForBackup(migration), marker)
+	return err
+}
+
+func validateBackupMigrationPlacementState(migration PendingStorageLocationMigration) error {
+	if migration.BackupPlan != PendingStorageMigrationPlanCopyRequired {
+		return nil
+	}
+	marker := migrationStageMarkerForBackup(migration)
+	stageOwned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), marker)
+	if err != nil {
+		return err
+	}
+	if stageOwned {
+		return ErrRootInvalid
+	}
+	placed, err := migrationStageMarkerMatches(marker.TargetPath, marker)
+	if err != nil {
+		return err
+	}
+	if placed {
+		return nil
+	}
+	available, err := readableBackupArchive(migration.SourceBackupRoot)
+	if err != nil {
+		return err
+	}
+	if !available {
+		// A copy-required backup plan may legitimately represent an empty
+		// source archive. There is no destination marker in that case.
+		return nil
+	}
+	return ErrRootInvalid
+}
+
+func validateCommittedMigrationCleanupState(migration PendingStorageLocationMigration) error {
+	if migration.DataPlan == PendingStorageMigrationPlanCopyRequired {
+		if owned, err := validateMigrationStageCandidate(migrationStagePathForData(migration), migrationStageMarkerForData(migration)); err != nil {
+			return err
+		} else if owned {
+			return ErrRootInvalid
+		}
+		if _, err := migrationStageMarkerMatches(migration.TargetDataRoot, migrationStageMarkerForData(migration)); err != nil {
+			return err
+		}
+	}
+	if migration.BackupPlan == PendingStorageMigrationPlanCopyRequired {
+		if owned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), migrationStageMarkerForBackup(migration)); err != nil {
+			return err
+		} else if owned {
+			return ErrRootInvalid
+		}
+		if _, err := migrationStageMarkerMatches(migrationStageMarkerForBackup(migration).TargetPath, migrationStageMarkerForBackup(migration)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrationStagePathForData(migration PendingStorageLocationMigration) string {
+	return filepath.Clean(migration.TargetDataRoot) + ".atlasnote-migration-" + migration.ID
+}
+
+func migrationStagePathForBackup(migration PendingStorageLocationMigration) string {
+	return filepath.Join(filepath.Clean(migration.TargetBackupRoot), ".atlasnote-backups.atlasnote-migration-"+migration.ID)
+}
+
+func validateMigrationStageCandidate(stage string, expected migrationStageMarker) (bool, error) {
+	stage = filepath.Clean(stage)
+	parent := filepath.Dir(stage)
+	parentInfo, err := os.Lstat(parent)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if isUnsafeStoragePath(parent, parentInfo) || !parentInfo.IsDir() {
+		return false, ErrRootInvalid
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return false, err
+	}
+	prefix := strings.TrimSuffix(filepath.Base(stage), expected.OperationID)
+	owned := false
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		candidate := filepath.Join(parent, entry.Name())
+		if filepath.Clean(candidate) != stage {
+			// A different operation or a user-created look-alike must not be
+			// guessed away by a prefix-only recovery rule.
+			return false, ErrRootInvalid
+		}
+		matched, matchErr := ownedMigrationStageMatches(stage, expected)
+		if matchErr != nil {
+			return false, matchErr
+		}
+		owned = matched
+	}
+	return owned, nil
+}
+
+func ownedMigrationStageMatches(stage string, expected migrationStageMarker) (bool, error) {
+	info, err := os.Lstat(stage)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if isUnsafeStoragePath(stage, info) || !info.IsDir() {
+		return false, ErrRootInvalid
+	}
+	markerPath := filepath.Join(stage, migrationStageMarkerFile)
+	markerInfo, err := os.Lstat(markerPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, ErrRootInvalid
+	}
+	if err != nil {
+		return false, err
+	}
+	if isUnsafeStoragePath(markerPath, markerInfo) || !markerInfo.Mode().IsRegular() {
+		return false, ErrLocationsInvalid
+	}
+	matched, err := migrationStageMarkerMatches(stage, expected)
+	if err != nil {
+		return false, err
+	}
+	if !matched {
+		return false, ErrRootInvalid
+	}
+	if err := validateMigrationStageContents(stage); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func validateMigrationStageContents(stage string) error {
+	return filepath.WalkDir(stage, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == stage {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if isUnsafeStoragePath(path, info) || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return ErrRootInvalid
+		}
+		return nil
+	})
+}
+
+func requireEmptyMigrationTargetWithOwnedStage(path string, stage string, expected migrationStageMarker) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if isUnsafeStoragePath(path, info) || !info.IsDir() {
+		return false, ErrRootInvalid
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	owned := false
+	for _, entry := range entries {
+		entryPath := filepath.Join(path, entry.Name())
+		if filepath.Clean(entryPath) == filepath.Clean(stage) {
+			matched, matchErr := ownedMigrationStageMatches(stage, expected)
+			if matchErr != nil {
+				return false, matchErr
+			}
+			if !matched {
+				return false, ErrRootInvalid
+			}
+			owned = true
+			continue
+		}
+		return false, ErrRootInvalid
+	}
+	return owned, nil
+}
+
+func requireMissingMigrationTarget(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if isUnsafeStoragePath(path, info) || !info.IsDir() {
+		return ErrRootInvalid
+	}
+	return ErrRootInvalid
+}
+
+func readableBackupArchive(root string) (bool, error) {
+	archive := filepath.Join(filepath.Clean(root), ".atlasnote-backups")
+	info, err := os.Lstat(archive)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if isUnsafeStoragePath(archive, info) || !info.IsDir() {
+		return false, ErrRootInvalid
+	}
+	if _, err := os.ReadDir(archive); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func applyMigratePendingStorageLocation(ctx context.Context, migration PendingStorageLocationMigration) (bool, error) {
 	if migration.Phase == PendingStorageMigrationPhaseConfigCommitted {
 		return finishCommittedMigration(migration)
@@ -591,25 +986,32 @@ func verifyBackupMigrationPlacement(migration PendingStorageLocationMigration) e
 	if migration.BackupPlan != PendingStorageMigrationPlanCopyRequired {
 		return nil
 	}
-	sourceArchive := filepath.Join(filepath.Clean(migration.SourceBackupRoot), ".atlasnote-backups")
-	info, err := os.Lstat(sourceArchive)
-	if errors.Is(err, os.ErrNotExist) {
+	marker := migrationStageMarkerForBackup(migration)
+	stageOwned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), marker)
+	if err != nil {
+		return err
+	}
+	if stageOwned {
+		return ErrRootInvalid
+	}
+	matched, err := migrationStageMarkerMatches(marker.TargetPath, marker)
+	if err != nil {
+		return err
+	}
+	if matched {
 		return nil
 	}
+	available, err := readableBackupArchive(migration.SourceBackupRoot)
 	if err != nil {
 		return err
 	}
-	if isUnsafeStoragePath(sourceArchive, info) || !info.IsDir() {
-		return ErrRootInvalid
+	if !available {
+		// No source archive is a valid no-op for a copy-required plan. An
+		// owned partial stage is handled above and is never treated as this
+		// no-op case.
+		return nil
 	}
-	matched, err := migrationStageMarkerMatches(filepath.Join(filepath.Clean(migration.TargetBackupRoot), ".atlasnote-backups"), migrationStageMarkerForBackup(migration))
-	if err != nil {
-		return err
-	}
-	if !matched {
-		return ErrRootInvalid
-	}
-	return nil
+	return ErrRootInvalid
 }
 
 func applyDataMigrationPlan(ctx context.Context, migration PendingStorageLocationMigration) error {
@@ -618,6 +1020,9 @@ func applyDataMigrationPlan(ctx context.Context, migration PendingStorageLocatio
 		return nil
 	case PendingStorageMigrationPlanCopyRequired:
 		marker := migrationStageMarkerForData(migration)
+		if _, err := validateMigrationStageCandidate(migrationStagePathForData(migration), marker); err != nil {
+			return err
+		}
 		placed, err := migrationStageMarkerMatches(migration.TargetDataRoot, marker)
 		if err != nil {
 			return err
@@ -642,20 +1047,36 @@ func applyBackupMigrationPlan(ctx context.Context, migration PendingStorageLocat
 		return nil
 	case PendingStorageMigrationPlanCopyRequired:
 		marker := migrationStageMarkerForBackup(migration)
+		stageOwned, err := validateMigrationStageCandidate(migrationStagePathForBackup(migration), marker)
+		if err != nil {
+			return err
+		}
 		placed, err := migrationStageMarkerMatches(marker.TargetPath, marker)
 		if err != nil {
 			return err
 		}
 		if placed {
+			if stageOwned {
+				return ErrRootInvalid
+			}
 			return nil
+		}
+		if stageOwned {
+			available, sourceErr := readableBackupArchive(migration.SourceBackupRoot)
+			if sourceErr != nil {
+				return sourceErr
+			}
+			if !available {
+				return ErrRootInvalid
+			}
 		}
 		if filepath.Clean(migration.TargetBackupRoot) == filepath.Clean(migration.TargetDataRoot) && migration.DataPlan == PendingStorageMigrationPlanCopyRequired {
 			// The data-root copy owns the rest of this directory. Only the
 			// archive child must still be empty before it is placed.
-			if err := requireEmptyOrMissingMigrationTarget(marker.TargetPath, true); err != nil {
+			if err := requireMissingMigrationTarget(marker.TargetPath); err != nil {
 				return err
 			}
-		} else if err := requireEmptyOrMissingMigrationTarget(migration.TargetBackupRoot, true); err != nil {
+		} else if _, err := requireEmptyMigrationTargetWithOwnedStage(migration.TargetBackupRoot, migrationStagePathForBackup(migration), marker); err != nil {
 			return err
 		}
 		return applyRootMigration(ctx, migration.SourceBackupRoot, migration.TargetBackupRoot, true, migration.ID, false)
@@ -880,11 +1301,9 @@ func copyDataRoot(ctx context.Context, source string, target string, operationID
 		}
 		return false
 	}); err != nil {
-		_ = removeOwnedMigrationStage(stage, marker)
 		return err
 	}
 	if err := commitCopiedDataRoot(stage, target); err != nil {
-		_ = removeOwnedMigrationStage(stage, marker)
 		return err
 	}
 	probe, err := ProbeDataRoot(target)
@@ -920,15 +1339,12 @@ func copyBackupArchive(ctx context.Context, source string, target string, operat
 		return err
 	}
 	if err := copyDirectory(ctx, sourceArchive, stage, nil); err != nil {
-		_ = removeOwnedMigrationStage(stage, marker)
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(targetArchive), 0o700); err != nil {
-		_ = removeOwnedMigrationStage(stage, marker)
 		return err
 	}
 	if err := commitCopiedDirectory(stage, targetArchive); err != nil {
-		_ = removeOwnedMigrationStage(stage, marker)
 		return err
 	}
 	return nil
@@ -1096,7 +1512,26 @@ func prepareMigrationStage(path string, expected migrationStageMarker) error {
 		// or to the user. Never remove it as a guessed recovery.
 		return ErrRootInvalid
 	}
-	return os.RemoveAll(path)
+	if err := validateMigrationStageContents(path); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == migrationStageMarkerFile {
+			continue
+		}
+		entryPath := filepath.Join(path, entry.Name())
+		if err := os.RemoveAll(entryPath); err != nil {
+			// The owner marker remains available even when a partial cleanup
+			// cannot finish. The next retry can safely report the same owner
+			// and try again after the underlying failure is fixed.
+			return err
+		}
+	}
+	return nil
 }
 
 func writeMigrationStageMarker(stage string, marker migrationStageMarker) error {
@@ -1106,14 +1541,6 @@ func writeMigrationStageMarker(stage string, marker migrationStageMarker) error 
 	}
 	encoded = append(encoded, '\n')
 	return writeAtomic(filepath.Join(stage, migrationStageMarkerFile), encoded)
-}
-
-func removeOwnedMigrationStage(stage string, expected migrationStageMarker) error {
-	matched, err := migrationStageMarkerMatches(stage, expected)
-	if err != nil || !matched {
-		return err
-	}
-	return os.RemoveAll(stage)
 }
 
 func isWithinOrEqual(parent string, child string) bool {

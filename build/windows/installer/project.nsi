@@ -5,6 +5,7 @@
 ## wails_tools.nsh は wails build --nsis で生成されるため、直接編集しません。
 ####
 !include "wails_tools.nsh"
+!include "uninstall.nsh"
 
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
@@ -57,123 +58,12 @@ Section "インストール"
     !insertmacro wails.writeUninstaller
 SectionEnd
 
-Var UninstallCleanupFailed
-Var UninstallerBackupPath
-Var UninstallerBackupReady
-
-!macro DeleteAndTrack path
-    ClearErrors
-    Delete "${path}"
-    IfErrors 0 +2
-        StrCpy $UninstallCleanupFailed 1
-!macroend
-
-!macro RemoveDirectoryAndTrack path
-    ClearErrors
-    RMDir "${path}"
-    IfErrors 0 +2
-        StrCpy $UninstallCleanupFailed 1
-!macroend
+Function un.AtlasNoteUnassociate
+    !insertmacro wails.unassociateFiles
+    !insertmacro wails.unassociateCustomProtocols
+FunctionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
-    StrCpy $UninstallCleanupFailed 0
-    StrCpy $UninstallerBackupReady 0
-
-    # 本体を最初に削除する。ロック中なら、再実行に必要な登録と
-    # uninstall.exeを一切触らず、その場で中断する。
-    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" uninstallMainPresent uninstallMainDeleted
-    uninstallMainPresent:
-        ClearErrors
-        Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
-        IfErrors 0 uninstallMainDeleted
-        Goto uninstallFailure
-    uninstallMainDeleted:
-    !insertmacro DeleteAndTrack "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
-    !insertmacro DeleteAndTrack "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
-
-    ClearErrors
-    !insertmacro wails.unassociateFiles
-    IfErrors 0 +2
-        StrCpy $UninstallCleanupFailed 1
-    ClearErrors
-    !insertmacro wails.unassociateCustomProtocols
-    IfErrors 0 +2
-        StrCpy $UninstallCleanupFailed 1
-
-    ${If} $UninstallCleanupFailed != 0
-        Goto uninstallFailure
-    ${EndIf}
-
-    # インストーラー自身の作業ディレクトリを製品フォルダの外へ移す。
-    SetOutPath "$TEMP"
-
-    # 後段のフォルダ削除や登録削除に失敗しても、再実行手段を復元できる
-    # よう、実行中のuninstall.exeをNSIS専用一時領域へ退避する。
-    InitPluginsDir
-    StrCpy $UninstallerBackupPath "$PLUGINSDIR\AtlasNote-uninstall-backup.exe"
-    ClearErrors
-    CopyFiles /SILENT "$INSTDIR\uninstall.exe" "$PLUGINSDIR"
-    IfErrors 0 uninstallBackupCopied
-    Goto uninstallFailure
-    uninstallBackupCopied:
-        ClearErrors
-        Rename "$PLUGINSDIR\uninstall.exe" "$UninstallerBackupPath"
-        IfErrors 0 uninstallBackupReady
-        Goto uninstallFailure
-    uninstallBackupReady:
-        StrCpy $UninstallerBackupReady 1
-
-    ClearErrors
-    Delete "$INSTDIR\uninstall.exe"
-    IfErrors 0 uninstallBinaryDeleted
-    Goto uninstallFailure
-    uninstallBinaryDeleted:
-
-    ClearErrors
-    RMDir "$INSTDIR"
-    IfErrors 0 uninstallInstallDirDeleted
-    Goto uninstallFailure
-    uninstallInstallDirDeleted:
-    ClearErrors
-    RMDir "$PROGRAMFILES64\${INFO_COMPANYNAME}"
-    IfErrors 0 uninstallProductDirDeleted
-    Goto uninstallFailure
-    uninstallProductDirDeleted:
-
-    SetRegView 64
-    ClearErrors
-    DeleteRegKey HKLM "${UNINST_KEY}"
-    IfErrors 0 +2
-        StrCpy $UninstallCleanupFailed 1
-
-    ${If} $UninstallCleanupFailed != 0
-        Goto uninstallFailure
-    ${EndIf}
-    Delete "$UninstallerBackupPath"
-    Goto uninstallFinished
-
-    uninstallFailure:
-        # 本体削除後の失敗では、退避したアンインストーラーだけを戻す。
-        # アプリ本体やユーザーデータは復元・削除しない。
-        ${If} $UninstallerBackupReady == 1
-            CreateDirectory "$INSTDIR"
-            ClearErrors
-            CopyFiles /SILENT "$UninstallerBackupPath" "$INSTDIR"
-            IfErrors 0 uninstallBackupRestoreCopied
-            Goto uninstallFailureDone
-        uninstallBackupRestoreCopied:
-            ClearErrors
-            Rename "$INSTDIR\AtlasNote-uninstall-backup.exe" "$INSTDIR\uninstall.exe"
-            IfErrors 0 uninstallFailureDone
-        ${EndIf}
-    uninstallFailureDone:
-        SetErrorLevel 1
-        IfSilent uninstallFailureSilent uninstallFailureInteractive
-    uninstallFailureInteractive:
-        MessageBox MB_ICONEXCLAMATION|MB_OK "一部のアプリファイルまたは登録を削除できませんでした。Atlas Noteを終了してから再度実行してください。"
-    uninstallFailureSilent:
-        Quit
-
-    uninstallFinished:
+    !insertmacro AtlasNoteUninstall "$INSTDIR\${PRODUCT_EXECUTABLE}" "$INSTDIR\uninstall.exe" "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$DESKTOP\${INFO_PRODUCTNAME}.lnk" HKLM 0x80000002 "${UNINST_KEY}" "$INSTDIR" "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}" "$PROGRAMFILES64\${INFO_COMPANYNAME}" un.AtlasNoteUnassociate
 SectionEnd

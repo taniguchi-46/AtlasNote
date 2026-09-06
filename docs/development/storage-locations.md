@@ -1,6 +1,6 @@
 # 物理保存場所
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 ## 目的
 
@@ -56,6 +56,8 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
 - 移行先に有効なAtlas Noteデータがある場合は、それを既存データとして開き、上書き・マージしない。
 - バックアップ保存領域を変更する場合は`.atlasnote-backups`だけを移行対象とする。データルートが別のアーカイブルートを指定しているとき、データコピーへバックアップ世代を重複させない。
 - 中断した移行は操作ID付きのstage markerと保留マーカーから安全に再試行し、設定のコミットと補助markerの削除が完了するまで保留状態を残す。移行元は常に保持する。
+- `copy-required`のstageは、データでは`<target>.atlasnote-migration-<operationID>`、バックアップでは`<target>/.atlasnote-backups.atlasnote-migration-<operationID>`に作成する。stage内の`.atlasnote-migration-stage.json`が操作ID、種別、source、targetの全てと一致する場合だけ、部分コピーを再利用して残りを続行する。別操作のstage、同名の偽装、symlink／reparse point、不正なmarkerや内容は削除・上書きせず失敗として残す。
+- UIの移行再試行APIは、上記の所有markerと現在のフェーズを読み取り専用で検証してから再起動を要求する。再試行API自身はコピー、stage cleanup、設定コミットを行わない。バックアップstageがある場合は、sourceの`.atlasnote-backups`が読めることを確認し、sourceがない状態を「バックアップなし」の正常系として扱わない。
 
 保存場所の変更は「設定 > 保存場所」から行う。パス文字列を自由入力するAPIは提供せず、選択した場所の検証結果と安全なエラーだけをUIへ返す。
 

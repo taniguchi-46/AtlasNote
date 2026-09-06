@@ -15,6 +15,17 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+func writeTestMigrationFileForAppTest(t *testing.T, root string, relative string, contents string) {
+	t.Helper()
+	path := filepath.Join(root, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create migration test directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write migration test file: %v", err)
+	}
+}
+
 func TestNewAppRequiresSetupBeforeCreatingDefaultData(t *testing.T) {
 	defaultRoot := filepath.Join(t.TempDir(), "default")
 	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
@@ -414,6 +425,97 @@ func TestFailedStorageLocationMigrationCanRetryAfterTargetRecovers(t *testing.T)
 	got, err := restarted.GetNote(created.ID)
 	if err != nil || got.Content != "再試行本文" {
 		t.Fatalf("retried note = %#v, %v", got, err)
+	}
+}
+
+func TestRetryPendingStorageLocationMigrationPreservesOwnedBackupStageUntilRestart(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	sourceData := t.TempDir()
+	sourceBackup := t.TempDir()
+	targetBackup := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+	if db, err := database.Open(t.Context(), filepath.Join(sourceData, "atlasnote.db")); err != nil {
+		t.Fatalf("create source database: %v", err)
+	} else if err := db.Close(); err != nil {
+		t.Fatalf("close source database: %v", err)
+	}
+	if err := config.SaveStorageLocationsTo(configFile, config.StorageLocations{Version: 1, DataRoot: sourceData, BackupRoot: sourceBackup}); err != nil {
+		t.Fatalf("save source locations: %v", err)
+	}
+	writeTestMigrationFileForAppTest(t, sourceBackup, filepath.Join(".atlasnote-backups", "space", "generations", "one", "manifest.json"), "manifest-one")
+
+	migration := config.PendingStorageLocationMigration{
+		Version: config.PendingStorageMigrationVersion, ID: "api-owned-backup-stage",
+		Action:         config.PendingStorageMigrationActionMigrate,
+		SourceDataRoot: sourceData, TargetDataRoot: sourceData,
+		SourceBackupRoot: sourceBackup, TargetBackupRoot: targetBackup,
+		DataPlan:   config.PendingStorageMigrationPlanUnchanged,
+		BackupPlan: config.PendingStorageMigrationPlanCopyRequired,
+		Phase:      config.PendingStorageMigrationPhaseDataPlaced,
+	}
+	stage := filepath.Join(targetBackup, ".atlasnote-backups.atlasnote-migration-"+migration.ID)
+	marker := map[string]any{
+		"version": 1, "operationId": migration.ID, "kind": "backup",
+		"sourcePath": filepath.Join(sourceBackup, ".atlasnote-backups"),
+		"targetPath": filepath.Join(targetBackup, ".atlasnote-backups"),
+	}
+	encoded, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal stage marker: %v", err)
+	}
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		t.Fatalf("create backup stage: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, ".atlasnote-migration-stage.json"), append(encoded, '\n'), 0o600); err != nil {
+		t.Fatalf("write backup stage marker: %v", err)
+	}
+	writeTestMigrationFileForAppTest(t, stage, "partial.txt", "partial")
+	if err := os.WriteFile(filepath.Join(targetBackup, "fault.txt"), []byte("temporary fault"), 0o600); err != nil {
+		t.Fatalf("write recovery fault: %v", err)
+	}
+	if err := config.SavePendingStorageLocationMigration(migration); err != nil {
+		t.Fatalf("save pending migration: %v", err)
+	}
+
+	failed := NewApp()
+	failed.startup(t.Context())
+	t.Cleanup(func() { failed.shutdown(t.Context()) })
+	if status := failed.GetStartupStatus(); status.Ready || status.Phase != StartupPhaseStorageRecovery {
+		t.Fatalf("recovery status = %#v", status)
+	}
+	if err := os.Remove(filepath.Join(targetBackup, "fault.txt")); err != nil {
+		t.Fatalf("remove recovery fault: %v", err)
+	}
+	if result := failed.RetryPendingStorageLocationMigration(); result.Error != nil || !result.RestartRequired {
+		t.Fatalf("retry pending migration: %#v", result)
+	}
+	pendingAfterRetry, err := config.LoadPendingStorageLocationMigration()
+	if err != nil || pendingAfterRetry != migration {
+		t.Fatalf("pending migration changed during retry: %#v, %v", pendingAfterRetry, err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, "partial.txt")); err != nil {
+		t.Fatalf("retry API changed stage contents: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetBackup, ".atlasnote-backups")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retry API copied backup before restart: %v", err)
+	}
+	if _, err := os.Stat(configFile); err != nil {
+		t.Fatalf("retry API removed bootstrap: %v", err)
+	}
+	failed.shutdown(t.Context())
+
+	restarted := NewApp()
+	restarted.startup(t.Context())
+	t.Cleanup(func() { restarted.shutdown(t.Context()) })
+	if status := restarted.GetStartupStatus(); !status.Ready || status.DataDir != filepath.Clean(sourceData) {
+		t.Fatalf("restarted status = %#v", status)
+	}
+	if got, err := os.ReadFile(filepath.Join(targetBackup, ".atlasnote-backups", "space", "generations", "one", "manifest.json")); err != nil || string(got) != "manifest-one" {
+		t.Fatalf("restarted backup = %q, %v", string(got), err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceBackup, ".atlasnote-backups", "space", "generations", "one", "manifest.json")); err != nil {
+		t.Fatalf("source backup changed: %v", err)
 	}
 }
 

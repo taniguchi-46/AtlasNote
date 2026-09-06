@@ -419,6 +419,253 @@ func TestV2MigrationResumesBackupAfterDataPlacementProgressFailure(t *testing.T)
 	}
 }
 
+func TestV2MigrationResumesOwnedBackupStageAndCopiesAllGenerations(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	t.Setenv(storageLocationsPathEnv, configFile)
+	sourceData := t.TempDir()
+	sourceBackup := t.TempDir()
+	targetBackup := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceData, "atlasnote.db"), []byte("database"), 0o600); err != nil {
+		t.Fatalf("write source database: %v", err)
+	}
+	writeTestMigrationFile(t, sourceBackup, filepath.Join(".atlasnote-backups", "space", "generations", "one", "manifest.json"), "manifest-one")
+	writeTestMigrationFile(t, sourceBackup, filepath.Join(".atlasnote-backups", "space", "generations", "two", "payload.db"), "payload-two")
+
+	migration := PendingStorageLocationMigration{
+		Version: pendingStorageMigrationVersion, ID: "owned-backup-stage",
+		SourceDataRoot: sourceData, TargetDataRoot: sourceData,
+		SourceBackupRoot: sourceBackup, TargetBackupRoot: targetBackup,
+		DataPlan: PendingStorageMigrationPlanUnchanged, BackupPlan: PendingStorageMigrationPlanCopyRequired,
+		Phase: PendingStorageMigrationPhaseDataPlaced,
+	}
+	stage := migrationStagePathForBackup(migration)
+	marker := migrationStageMarkerForBackup(migration)
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		t.Fatalf("create backup stage: %v", err)
+	}
+	if err := writeMigrationStageMarker(stage, marker); err != nil {
+		t.Fatalf("write backup stage marker: %v", err)
+	}
+	writeTestMigrationFile(t, stage, filepath.Join("space", "generations", "partial", "payload.db"), "partial")
+	if err := SavePendingStorageLocationMigration(migration); err != nil {
+		t.Fatalf("save staged migration: %v", err)
+	}
+
+	completed, err := ApplyPendingStorageLocationMigration(context.Background())
+	if !completed || err != nil {
+		t.Fatalf("resume staged migration = %v, %v", completed, err)
+	}
+	for relative, want := range map[string]string{
+		filepath.Join(".atlasnote-backups", "space", "generations", "one", "manifest.json"): "manifest-one",
+		filepath.Join(".atlasnote-backups", "space", "generations", "two", "payload.db"):    "payload-two",
+	} {
+		got, readErr := os.ReadFile(filepath.Join(targetBackup, relative))
+		if readErr != nil || string(got) != want {
+			t.Fatalf("copied backup %s = %q, %v", relative, string(got), readErr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(targetBackup, "space")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial stage content leaked beside archive: %v", err)
+	}
+	if _, err := os.Stat(stage); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("owned backup stage remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceBackup, ".atlasnote-backups", "space", "generations", "two", "payload.db")); err != nil {
+		t.Fatalf("source backup changed: %v", err)
+	}
+	locations, err := LoadStorageLocations()
+	if err != nil || locations.DataRoot != filepath.Clean(sourceData) || locations.BackupRoot != filepath.Clean(targetBackup) {
+		t.Fatalf("committed locations = %#v, %v", locations, err)
+	}
+	if _, err := LoadPendingStorageLocationMigration(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("completed migration marker remains: %v", err)
+	}
+}
+
+func TestV2MigrationDoesNotTreatOwnedBackupStageAsNoBackup(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	t.Setenv(storageLocationsPathEnv, configFile)
+	sourceData := t.TempDir()
+	sourceBackup := t.TempDir()
+	targetBackup := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceData, "atlasnote.db"), []byte("database"), 0o600); err != nil {
+		t.Fatalf("write source database: %v", err)
+	}
+	migration := PendingStorageLocationMigration{
+		Version: pendingStorageMigrationVersion, ID: "owned-backup-without-source",
+		SourceDataRoot: sourceData, TargetDataRoot: sourceData,
+		SourceBackupRoot: sourceBackup, TargetBackupRoot: targetBackup,
+		DataPlan: PendingStorageMigrationPlanUnchanged, BackupPlan: PendingStorageMigrationPlanCopyRequired,
+		Phase: PendingStorageMigrationPhaseDataPlaced,
+	}
+	stage := migrationStagePathForBackup(migration)
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		t.Fatalf("create backup stage: %v", err)
+	}
+	if err := writeMigrationStageMarker(stage, migrationStageMarkerForBackup(migration)); err != nil {
+		t.Fatalf("write backup stage marker: %v", err)
+	}
+	writeTestMigrationFile(t, stage, "partial.txt", "keep")
+	if err := SavePendingStorageLocationMigration(migration); err != nil {
+		t.Fatalf("save staged migration: %v", err)
+	}
+
+	completed, err := ApplyPendingStorageLocationMigration(context.Background())
+	if completed || !errors.Is(err, ErrRootInvalid) {
+		t.Fatalf("missing source archive with owned stage = %v, %v", completed, err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, "partial.txt")); err != nil {
+		t.Fatalf("owned stage content changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, migrationStageMarkerFile)); err != nil {
+		t.Fatalf("owned stage marker changed: %v", err)
+	}
+	if _, err := LoadStorageLocations(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("bootstrap unexpectedly committed: %v", err)
+	}
+	if _, err := LoadPendingStorageLocationMigration(); err != nil {
+		t.Fatalf("pending migration was removed: %v", err)
+	}
+}
+
+func TestV2MigrationRejectsMismatchedOwnedBackupStageWithoutMutation(t *testing.T) {
+	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+	t.Setenv(storageLocationsPathEnv, configFile)
+	sourceData := t.TempDir()
+	sourceBackup := t.TempDir()
+	targetBackup := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceData, "atlasnote.db"), []byte("database"), 0o600); err != nil {
+		t.Fatalf("write source database: %v", err)
+	}
+	writeTestMigrationFile(t, sourceBackup, filepath.Join(".atlasnote-backups", "space", "generation", "manifest.json"), "manifest")
+	migration := PendingStorageLocationMigration{
+		Version: pendingStorageMigrationVersion, ID: "mismatched-backup-stage",
+		SourceDataRoot: sourceData, TargetDataRoot: sourceData,
+		SourceBackupRoot: sourceBackup, TargetBackupRoot: targetBackup,
+		DataPlan: PendingStorageMigrationPlanUnchanged, BackupPlan: PendingStorageMigrationPlanCopyRequired,
+		Phase: PendingStorageMigrationPhaseDataPlaced,
+	}
+	stage := migrationStagePathForBackup(migration)
+	expectedMarker := migrationStageMarkerForBackup(migration)
+	if err := os.MkdirAll(stage, 0o700); err != nil {
+		t.Fatalf("create backup stage: %v", err)
+	}
+	if err := writeMigrationStageMarker(stage, expectedMarker); err != nil {
+		t.Fatalf("write backup stage marker: %v", err)
+	}
+	writeTestMigrationFile(t, stage, "partial.txt", "partial")
+	if err := SavePendingStorageLocationMigration(migration); err != nil {
+		t.Fatalf("save staged migration: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*migrationStageMarker)
+	}{
+		{name: "operation-id", mutate: func(marker *migrationStageMarker) { marker.OperationID = "other-operation" }},
+		{name: "kind", mutate: func(marker *migrationStageMarker) { marker.Kind = "data" }},
+		{name: "source-path", mutate: func(marker *migrationStageMarker) { marker.SourcePath = filepath.Join(sourceBackup, "other") }},
+		{name: "target-path", mutate: func(marker *migrationStageMarker) { marker.TargetPath = filepath.Join(targetBackup, "other") }},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			marker := expectedMarker
+			testCase.mutate(&marker)
+			if err := writeMigrationStageMarker(stage, marker); err != nil {
+				t.Fatalf("write mismatched stage marker: %v", err)
+			}
+			completed, err := ApplyPendingStorageLocationMigration(context.Background())
+			if completed || err == nil {
+				t.Fatalf("mismatched stage marker apply = %v, %v, want rejection", completed, err)
+			}
+			if _, err := os.Stat(filepath.Join(stage, "partial.txt")); err != nil {
+				t.Fatalf("partial stage content changed: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(targetBackup, ".atlasnote-backups")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("backup target changed after rejection: %v", err)
+			}
+			if _, err := LoadPendingStorageLocationMigration(); err != nil {
+				t.Fatalf("pending migration was removed after rejection: %v", err)
+			}
+		})
+	}
+}
+
+func TestV2MigrationRejectsUnsafeBackupStageLinksWithoutMutation(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, stage string, marker migrationStageMarker, sourceBackup string) string
+	}{
+		{
+			name: "stage-link",
+			setup: func(t *testing.T, stage string, _ migrationStageMarker, sourceBackup string) string {
+				t.Helper()
+				if err := os.Symlink(sourceBackup, stage); err != nil {
+					t.Skipf("symbolic links are unavailable: %v", err)
+				}
+				return stage
+			},
+		},
+		{
+			name: "marker-link",
+			setup: func(t *testing.T, stage string, marker migrationStageMarker, _ string) string {
+				t.Helper()
+				if err := os.MkdirAll(stage, 0o700); err != nil {
+					t.Fatalf("create backup stage: %v", err)
+				}
+				encoded, err := json.MarshalIndent(marker, "", "  ")
+				if err != nil {
+					t.Fatalf("encode backup stage marker: %v", err)
+				}
+				externalMarker := filepath.Join(t.TempDir(), migrationStageMarkerFile)
+				if err := os.WriteFile(externalMarker, append(encoded, '\n'), 0o600); err != nil {
+					t.Fatalf("write external stage marker: %v", err)
+				}
+				if err := os.Symlink(externalMarker, filepath.Join(stage, migrationStageMarkerFile)); err != nil {
+					t.Skipf("symbolic links are unavailable: %v", err)
+				}
+				return filepath.Join(stage, migrationStageMarkerFile)
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
+			t.Setenv(storageLocationsPathEnv, configFile)
+			sourceData := t.TempDir()
+			sourceBackup := t.TempDir()
+			targetBackup := t.TempDir()
+			if err := os.WriteFile(filepath.Join(sourceData, "atlasnote.db"), []byte("database"), 0o600); err != nil {
+				t.Fatalf("write source database: %v", err)
+			}
+			writeTestMigrationFile(t, sourceBackup, filepath.Join(".atlasnote-backups", "space", "generation", "manifest.json"), "manifest")
+			migration := PendingStorageLocationMigration{
+				Version: pendingStorageMigrationVersion, ID: "unsafe-backup-stage",
+				SourceDataRoot: sourceData, TargetDataRoot: sourceData,
+				SourceBackupRoot: sourceBackup, TargetBackupRoot: targetBackup,
+				DataPlan: PendingStorageMigrationPlanUnchanged, BackupPlan: PendingStorageMigrationPlanCopyRequired,
+				Phase: PendingStorageMigrationPhaseDataPlaced,
+			}
+			stage := migrationStagePathForBackup(migration)
+			markerPath := testCase.setup(t, stage, migrationStageMarkerForBackup(migration), sourceBackup)
+			if err := SavePendingStorageLocationMigration(migration); err != nil {
+				t.Fatalf("save staged migration: %v", err)
+			}
+
+			completed, err := ApplyPendingStorageLocationMigration(context.Background())
+			if completed || err == nil {
+				t.Fatalf("unsafe stage link apply = %v, %v, want rejection", completed, err)
+			}
+			if _, err := os.Lstat(markerPath); err != nil {
+				t.Fatalf("unsafe stage entry changed after rejection: %v", err)
+			}
+			if _, err := LoadPendingStorageLocationMigration(); err != nil {
+				t.Fatalf("pending migration was removed after rejection: %v", err)
+			}
+		})
+	}
+}
+
 func TestV2MigrationResumesAfterBackupPlacementProgressFailure(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
 	t.Setenv(storageLocationsPathEnv, configFile)
