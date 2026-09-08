@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -79,12 +80,49 @@ const (
 	RootErrorReadFailed       RootErrorCode = "READ_FAILED"
 	RootErrorUnrelatedContent RootErrorCode = "UNRELATED_CONTENT"
 	RootErrorMissingData      RootErrorCode = "MISSING_ATLAS_DATA"
+	RootErrorOverlappingRoots RootErrorCode = "OVERLAPPING_ROOTS"
+	RootErrorInvalidConfig    RootErrorCode = "INVALID_CONFIGURATION"
+)
+
+// RootValidationStage identifies the operation which rejected a root. It is
+// intentionally a small, stable allowlist so callers can explain an OS error
+// without exposing its path or raw message.
+type RootValidationStage string
+
+const (
+	RootValidationStagePath            RootValidationStage = "path"
+	RootValidationStageConfig          RootValidationStage = "configuration"
+	RootValidationStageRootLookup      RootValidationStage = "root-lookup"
+	RootValidationStageParentLookup    RootValidationStage = "parent-lookup"
+	RootValidationStageReadDirectory   RootValidationStage = "read-directory"
+	RootValidationStageReadEntry       RootValidationStage = "read-entry"
+	RootValidationStageCreateFile      RootValidationStage = "create-file"
+	RootValidationStageWriteFile       RootValidationStage = "write-file"
+	RootValidationStageCloseFile       RootValidationStage = "close-file"
+	RootValidationStageRenameFile      RootValidationStage = "rename-file"
+	RootValidationStageRemoveFile      RootValidationStage = "remove-file"
+	RootValidationStageCreateDirectory RootValidationStage = "create-directory"
+	RootValidationStageRenameDirectory RootValidationStage = "rename-directory"
+	RootValidationStageRemoveDirectory RootValidationStage = "remove-directory"
+	RootValidationStageContent         RootValidationStage = "content"
+	RootValidationStageValidation      RootValidationStage = "validation"
+)
+
+// RootValidationRole identifies which selected root failed validation.
+type RootValidationRole string
+
+const (
+	RootValidationRoleUnknown RootValidationRole = "unknown"
+	RootValidationRoleData    RootValidationRole = "data"
+	RootValidationRoleBackup  RootValidationRole = "backup"
 )
 
 // RootValidationError reports a classified root validation failure while
 // preserving ErrRootInvalid for callers that only need the legacy contract.
 type RootValidationError struct {
 	Code  RootErrorCode
+	Stage RootValidationStage
+	Role  RootValidationRole
 	Cause error
 }
 
@@ -99,6 +137,12 @@ func (e *RootValidationError) Unwrap() error {
 	return e.Cause
 }
 
+// Is preserves both legacy sentinels even when Cause is the concrete OS error
+// that caused a failed read/create/write/rename/remove operation.
+func (e *RootValidationError) Is(target error) bool {
+	return target == ErrRootInvalid || errors.Is(e.Cause, target)
+}
+
 // RootErrorCodeOf returns a stable reason code when a root validation error
 // was classified, or an empty value for an unrelated error.
 func RootErrorCodeOf(err error) RootErrorCode {
@@ -107,6 +151,16 @@ func RootErrorCodeOf(err error) RootErrorCode {
 		return validationErr.Code
 	}
 	return ""
+}
+
+// RootErrorOSNumberOf returns the platform error number when the validation
+// retained one, or zero when the failure did not originate from an OS errno.
+func RootErrorOSNumberOf(err error) int {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return int(errno)
+	}
+	return 0
 }
 
 var (
@@ -297,22 +351,22 @@ func ResolveStorageLocations() (LocationResolution, error) {
 }
 
 func ProbeDataRoot(root string) (RootProbe, error) {
-	return probeRoot(root, false)
+	return probeRoot(root, false, RootValidationRoleData)
 }
 
 func ProbeBackupRoot(root string) (RootProbe, error) {
-	return probeRoot(root, true)
+	return probeRoot(root, true, RootValidationRoleBackup)
 }
 
-func probeRoot(root string, backup bool) (RootProbe, error) {
+func probeRoot(root string, backup bool, role RootValidationRole) (RootProbe, error) {
 	absolute, err := normalizeAbsolutePath(root)
 	if err != nil {
-		return RootProbe{}, &RootValidationError{Code: RootErrorInvalidPath, Cause: err}
+		return RootProbe{}, rootValidationErrorAt(RootErrorInvalidPath, RootValidationStagePath, role, err)
 	}
 	probe := RootProbe{Path: absolute}
 	info, err := os.Lstat(absolute)
 	if errors.Is(err, os.ErrNotExist) {
-		parent, parentErr := writableExistingParent(absolute)
+		parent, parentErr := writableExistingParent(absolute, role)
 		if parentErr != nil {
 			return RootProbe{}, parentErr
 		}
@@ -321,28 +375,22 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		return probe, nil
 	}
 	if err != nil {
-		return RootProbe{}, &RootValidationError{
-			Code:  RootErrorReadFailed,
-			Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
-		}
+		return RootProbe{}, rootValidationErrorAt(RootErrorReadFailed, RootValidationStageRootLookup, role, err)
 	}
 	if isUnsafeStoragePath(absolute, info) || !info.IsDir() {
 		if isUnsafeStoragePath(absolute, info) {
-			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
+			return RootProbe{}, rootValidationErrorAt(RootErrorUnsafeLink, RootValidationStageRootLookup, role, nil)
 		}
-		return RootProbe{}, rootValidationError(RootErrorNotDirectory)
+		return RootProbe{}, rootValidationErrorAt(RootErrorNotDirectory, RootValidationStageRootLookup, role, nil)
 	}
 	probe.Exists = true
-	probe.Writable = writableDirectory(absolute)
-	if !probe.Writable {
-		return RootProbe{}, rootValidationError(RootErrorNotWritable)
+	if writableErr := writableDirectoryError(absolute, role); writableErr != nil {
+		return RootProbe{}, writableErr
 	}
+	probe.Writable = true
 	entries, err := os.ReadDir(absolute)
 	if err != nil {
-		return RootProbe{}, &RootValidationError{
-			Code:  RootErrorReadFailed,
-			Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
-		}
+		return RootProbe{}, rootValidationErrorAt(RootErrorReadFailed, RootValidationStageReadDirectory, role, err)
 	}
 	hasRecognized := false
 	effectiveEntries := 0
@@ -350,13 +398,10 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		entryPath := filepath.Join(absolute, entry.Name())
 		entryInfo, entryErr := entry.Info()
 		if entryErr != nil {
-			return RootProbe{}, &RootValidationError{
-				Code:  RootErrorReadFailed,
-				Cause: fmt.Errorf("%w: %w", ErrRootInvalid, entryErr),
-			}
+			return RootProbe{}, rootValidationErrorAt(RootErrorReadFailed, RootValidationStageReadEntry, role, entryErr)
 		}
 		if isUnsafeStoragePath(entryPath, entryInfo) {
-			return RootProbe{}, rootValidationError(RootErrorUnsafeLink)
+			return RootProbe{}, rootValidationErrorAt(RootErrorUnsafeLink, RootValidationStageReadEntry, role, nil)
 		}
 		name := entry.Name()
 		if !backup && name == storageLocationsFile {
@@ -367,7 +412,7 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		effectiveEntries++
 		if backup && name == ".atlasnote-backups" {
 			if !entryInfo.IsDir() {
-				return RootProbe{}, rootValidationError(RootErrorNotDirectory)
+				return RootProbe{}, rootValidationErrorAt(RootErrorNotDirectory, RootValidationStageReadEntry, role, nil)
 			}
 			probe.HasBackups = true
 			hasRecognized = true
@@ -385,10 +430,10 @@ func probeRoot(root string, backup bool) (RootProbe, error) {
 		return probe, nil
 	}
 	if !hasRecognized {
-		return RootProbe{}, rootValidationError(RootErrorUnrelatedContent)
+		return RootProbe{}, rootValidationErrorAt(RootErrorUnrelatedContent, RootValidationStageContent, role, nil)
 	}
 	if !backup && !probe.HasAtlasData {
-		return RootProbe{}, rootValidationError(RootErrorMissingData)
+		return RootProbe{}, rootValidationErrorAt(RootErrorMissingData, RootValidationStageContent, role, nil)
 	}
 	probe.Kind = RootExisting
 	return probe, nil
@@ -414,13 +459,19 @@ func validateStorageLocations(locations StorageLocations) error {
 	return nil
 }
 
+// ValidateStorageLocationPaths checks only the pair's structural constraints.
+// Candidate selection must not require the unchanged root to be accessible.
+func ValidateStorageLocationPaths(locations StorageLocations) error {
+	return validateStorageLocationPaths(locations)
+}
+
 func validateStorageLocationPaths(locations StorageLocations) error {
 	if locations.Version != storageLocationsVersion || strings.TrimSpace(locations.DataRoot) == "" {
-		return ErrLocationsInvalid
+		return rootValidationErrorAt(RootErrorInvalidConfig, RootValidationStageConfig, RootValidationRoleUnknown, ErrLocationsInvalid)
 	}
 	dataRoot, err := normalizeAbsolutePath(locations.DataRoot)
 	if err != nil || dataRoot != filepath.Clean(locations.DataRoot) {
-		return ErrLocationsInvalid
+		return rootValidationErrorAt(RootErrorInvalidPath, RootValidationStagePath, RootValidationRoleData, err)
 	}
 	backupValue := locations.BackupRoot
 	backupRoot := backupValue
@@ -429,16 +480,23 @@ func validateStorageLocationPaths(locations StorageLocations) error {
 	}
 	backupRoot, err = normalizeAbsolutePath(backupRoot)
 	if err != nil || (backupValue != "" && backupRoot != filepath.Clean(backupValue)) {
-		return ErrLocationsInvalid
+		return rootValidationErrorAt(RootErrorInvalidPath, RootValidationStagePath, RootValidationRoleBackup, err)
 	}
 	if backupRoot != dataRoot && (isWithinOrEqual(dataRoot, backupRoot) || isWithinOrEqual(backupRoot, dataRoot)) {
-		return ErrLocationsInvalid
+		return rootValidationErrorAt(RootErrorOverlappingRoots, RootValidationStageConfig, RootValidationRoleUnknown, ErrLocationsInvalid)
 	}
 	return nil
 }
 
 func rootValidationError(code RootErrorCode) error {
-	return &RootValidationError{Code: code, Cause: ErrRootInvalid}
+	return rootValidationErrorAt(code, RootValidationStageValidation, RootValidationRoleUnknown, nil)
+}
+
+func rootValidationErrorAt(code RootErrorCode, stage RootValidationStage, role RootValidationRole, cause error) error {
+	if cause == nil {
+		cause = ErrRootInvalid
+	}
+	return &RootValidationError{Code: code, Stage: stage, Role: role, Cause: cause}
 }
 
 func normalizeAbsolutePath(value string) (string, error) {
@@ -453,65 +511,74 @@ func normalizeAbsolutePath(value string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
+// writableDirectory is kept as a small compatibility helper for package-local
+// callers. Root probing uses writableDirectoryError so it can retain the
+// exact failed operation and underlying OS error.
 func writableDirectory(path string) bool {
+	return writableDirectoryError(path, RootValidationRoleUnknown) == nil
+}
+
+func writableDirectoryError(path string, role RootValidationRole) error {
 	temporary, err := os.CreateTemp(path, ".atlasnote-write-test-"+time.Now().UTC().Format("20060102150405.000000000"))
 	if err != nil {
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageCreateFile, role, err)
 	}
 	temporaryPath := temporary.Name()
+	if _, err := temporary.Write([]byte("atlasnote-write-test")); err != nil {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageWriteFile, role, err)
+	}
 	if err := temporary.Close(); err != nil {
 		_ = os.Remove(temporaryPath)
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageCloseFile, role, err)
 	}
 	renamedFilePath := temporaryPath + ".renamed"
 	if err := os.Rename(temporaryPath, renamedFilePath); err != nil {
 		_ = os.Remove(temporaryPath)
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageRenameFile, role, err)
 	}
 	if err := os.Remove(renamedFilePath); err != nil {
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageRemoveFile, role, err)
 	}
 
 	temporaryDirectory, err := os.MkdirTemp(path, ".atlasnote-directory-test-"+time.Now().UTC().Format("20060102150405.000000000"))
 	if err != nil {
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageCreateDirectory, role, err)
 	}
 	renamedDirectoryPath := temporaryDirectory + ".renamed"
 	if err := os.Rename(temporaryDirectory, renamedDirectoryPath); err != nil {
 		_ = os.Remove(temporaryDirectory)
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageRenameDirectory, role, err)
 	}
 	if err := os.Remove(renamedDirectoryPath); err != nil {
-		return false
+		return rootValidationErrorAt(RootErrorNotWritable, RootValidationStageRemoveDirectory, role, err)
 	}
-	return true
+	return nil
 }
 
-func writableExistingParent(path string) (string, error) {
+func writableExistingParent(path string, role RootValidationRole) (string, error) {
 	current := filepath.Clean(filepath.Dir(path))
 	for {
 		info, err := os.Lstat(current)
 		if err == nil {
 			if isUnsafeStoragePath(current, info) {
-				return "", rootValidationError(RootErrorUnsafeLink)
+				return "", rootValidationErrorAt(RootErrorUnsafeLink, RootValidationStageParentLookup, role, nil)
 			}
 			if !info.IsDir() {
-				return "", rootValidationError(RootErrorNotDirectory)
+				return "", rootValidationErrorAt(RootErrorNotDirectory, RootValidationStageParentLookup, role, nil)
 			}
-			if !writableDirectory(current) {
-				return "", rootValidationError(RootErrorNotWritable)
+			if writableErr := writableDirectoryError(current, role); writableErr != nil {
+				return "", writableErr
 			}
 			return current, nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return "", &RootValidationError{
-				Code:  RootErrorReadFailed,
-				Cause: fmt.Errorf("%w: %w", ErrRootInvalid, err),
-			}
+			return "", rootValidationErrorAt(RootErrorReadFailed, RootValidationStageParentLookup, role, err)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", ErrRootInvalid
+			return "", rootValidationErrorAt(RootErrorInvalidPath, RootValidationStageParentLookup, role, ErrRootInvalid)
 		}
 		current = parent
 	}

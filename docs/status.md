@@ -1,10 +1,12 @@
 # プロジェクト状況
 
-最終更新: 2026-09-06
+最終更新: 2026-09-08
 
-保存場所の再起動時移行失敗を`storage-recovery`へ接続し、元へ戻す／別の空フォルダへ切り替える／同じ移行を再試行する保留操作、候補の再検証、v2移行進捗の永続化、Windowsインストーラーの日本語化・安全なアンインストールを実装済み。Go・フロントエンドのテスト、既存のWails生成EXEを入力としたNSIS 3.12のスクリプトコンパイル、専用一時フォルダ／HKCUだけを使うアンインストール回帰ハーネスは確認済み。今回の環境ではWails CLIがPATHにないためclean buildの再実行は未完了で、実際のインストール／アンインストール操作、Windowsの「インストールされているアプリ」経由の確認も未実施（2026-09-06）。
+Priority 2の追加レビュー3件を修正した。両保存先が利用不能な復旧時の候補選択、複数Store間の診断記録の保持、OS原因別の日本語理由／対処を回帰テストで確認した。`go test ./... -count=1`、Frontendのtypecheck、保存場所setup・note delete・storage spaces・backups・operation loggerのテストが成功。診断履歴のA→B→A・保持上限・起動後の破損／リンク・ロック競合もtemp fixtureで成功した。OS理由分類部分はLinux／macOS向けテストバイナリのクロスコンパイルまで確認し、他OSでの実行・手動UI・インストーラー再検証は今回未実施。commit／pushは再レビュー後に行う。
 
-2026-09-06のPriority 1回帰確認では、`go test ./... -count=1`、Frontendのtypecheck／lint、note delete・保存場所setup・backupのFrontendテスト、Windows実共有ハンドルを使う保存場所移行テスト、復元後のtrash→revision付きdeleteを通すApp統合テストが成功した。Windowsのstage linkサブテストはシンボリックリンク作成権限不足でskipされ、Frontend production buildは既存`node_modules`の`esbuild`欠落により未完了である。
+保存場所の再起動時移行失敗を`storage-recovery`へ接続し、元へ戻す／別の空フォルダへ切り替える／同じ移行を再試行する保留操作、候補の再検証、v2移行進捗の永続化、Windowsインストーラーの日本語化・安全なアンインストールを実装済み。保存場所の検証失敗は段階・役割・OSエラー番号を含む安全な理由へ分類し、独立した上限付き診断履歴を設定／復旧画面で表示・コピーできる。Go・フロントエンドのテスト、Frontend production build、同梱Wails CLIによるclean build、NSIS 3.12のアンインストール回帰ハーネスは確認済み。実際のインストール／アンインストール操作、Windowsの「インストールされているアプリ」経由の確認は未実施（2026-09-08）。
+
+2026-09-08のPriority 2回帰確認では、`go test ./... -count=1`、Frontendのtypecheck／lint、note delete・保存場所setup・storage space・backup・operation loggerのFrontendテスト、Frontend production build、同梱Wails CLIによるWindows clean build、NSISアンインストール回帰ハーネスが成功した。Windowsのstage linkサブテストはシンボリックリンク作成権限不足でskipされている。
 
 ## 現在のフェーズ
 
@@ -34,6 +36,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
 - Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
 - Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
+- 2026-09-08に、物理保存場所選択の候補・Apply・再起動時移行で、パス単位の候補検証、RootValidationErrorによる段階／役割／OSエラー番号の分類、markerだけに依存しないdata root再検証、失敗時の保留状態保持を追加した。保存場所エラーの独立診断履歴は安全なallowlistと上限を持ち、設定／復旧画面から表示・コピーできる。Wails生成バインディング、Frontend回帰テスト、Go全体テスト、NSIS権限回帰ハーネスで確認済み。
 - 2026-09-06に、保存場所移行のデータstage・分離バックアップstage・同一targetルートのバックアップstage・source読み取り拒否をWindowsの実共有ハンドルで検証した。共有中はowned marker・stage・保留マーカーを保持し、ハンドル解放後に再試行して完了すること、誤ったバックアップ残骸検査パスを修正したことを確認した。marker不一致、look-alike sibling、marker linkも変更なしで拒否する。
 - 2026-09-06に、同一／分離アーカイブルートのApp統合テストで、自動バックアップからの復元を再起動で適用し、復元されたノートのrevisionを基準にtrash後のrevisionで完全削除できること、他ノート・自動バックアップ・復元安全用バックアップ・保留マーカーが保持されることを確認した。Frontendの実Pinia Storeテストでは、trash後のstale lock応答がrevisionを巻き戻さず、最新のlock応答だけを反映することも確認した。
 - Notebook階層の循環防止

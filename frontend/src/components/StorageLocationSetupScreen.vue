@@ -31,7 +31,18 @@
         </div>
       </div>
 
-      <p v-if="message" class="storage-location-message" :class="{ error: hasError }" role="alert" aria-live="polite">{{ message }}</p>
+      <div v-if="message" class="storage-location-message" :class="{ error: hasError }" role="alert" aria-live="polite">
+        <p>{{ message }}</p>
+        <dl v-if="currentError">
+          <div v-if="currentError.reason"><dt>理由</dt><dd>{{ currentError.reason }}</dd></div>
+          <div v-if="currentError.stage"><dt>検証段階</dt><dd>{{ currentError.stage }}</dd></div>
+          <div v-if="currentError.role"><dt>対象</dt><dd>{{ currentError.role }}</dd></div>
+          <div v-if="currentError.osErrorNumber"><dt>OSエラー番号</dt><dd>{{ currentError.osErrorNumber }}</dd></div>
+          <div><dt>コード</dt><dd>{{ currentError.code }}</dd></div>
+          <div v-if="currentError.diagnosticId"><dt>診断 ID</dt><dd>{{ currentError.diagnosticId }}</dd></div>
+          <div v-if="currentError.action"><dt>対応</dt><dd>{{ currentError.action }}</dd></div>
+        </dl>
+      </div>
       <div class="storage-location-actions">
         <button type="button" class="primary" :disabled="isBusy" @click="apply">
           {{ isBusy ? '確認中…' : isRecovery ? '別の保存場所で開始' : 'この設定で開始' }}
@@ -55,6 +66,26 @@
         <button type="button" :disabled="isBusy" @click="openInstalledApps">Windowsの「インストールされているアプリ」を開く</button>
         <button type="button" :disabled="isBusy" @click="exitApplication">終了</button>
       </div>
+      <section class="storage-location-diagnostics" aria-labelledby="storage-location-diagnostics-title">
+        <div class="storage-location-diagnostics-heading">
+          <div>
+            <h2 id="storage-location-diagnostics-title">診断情報</h2>
+            <p>保存場所の確認に関する安全な情報だけを表示します。</p>
+          </div>
+          <button type="button" :disabled="locationStore.isDiagnosticsLoading" @click="copyDiagnostics">
+            {{ locationStore.isDiagnosticsLoading ? '取得中…' : '診断情報をコピー' }}
+          </button>
+        </div>
+        <p v-if="copyMessage" class="storage-location-diagnostics-message" role="status">{{ copyMessage }}</p>
+        <ul v-if="locationStore.diagnostics.length" class="storage-location-diagnostics-list">
+          <li v-for="event in locationStore.diagnostics.slice().reverse().slice(0, 5)" :key="event.diagnosticId">
+            <code>{{ event.diagnosticId }}</code>
+            <span>{{ event.reason || event.code }}</span>
+            <small>{{ event.timestamp }}</small>
+          </li>
+        </ul>
+        <p v-else>記録された診断情報はありません。</p>
+      </section>
     </section>
   </main>
 </template>
@@ -64,6 +95,7 @@ import { computed, onMounted, ref } from 'vue'
 import { exitApplication, openInstalledApps } from '../api/startup'
 import type { StorageLocationError, StorageLocationStatus } from '../api/storageLocations'
 import { useStorageLocationStore } from '../stores/useStorageLocationStore'
+import { ClipboardSetText } from '../../wailsjs/runtime/runtime'
 
 const props = defineProps<{
   initialStatus?: StorageLocationStatus
@@ -78,8 +110,10 @@ const isRecovery = computed(() => props.mode === 'recovery')
 const isBusy = computed(() => locationStore.isBusy)
 const localMessage = ref('')
 const initialErrorCleared = ref(false)
-const message = computed(() => localMessage.value || locationStore.error?.message || (!initialErrorCleared.value ? props.initialError?.message : '') || '')
-const hasError = computed(() => Boolean(locationStore.error || (!initialErrorCleared.value && props.initialError)))
+const copyMessage = ref('')
+const currentError = computed(() => locationStore.error || (!initialErrorCleared.value ? props.initialError : undefined))
+const message = computed(() => localMessage.value || currentError.value?.message || '')
+const hasError = computed(() => Boolean(currentError.value))
 const hasPendingMigration = computed(() => Boolean(status.value?.pendingMigration))
 
 const dataRoot = computed(() => status.value?.pendingDataRoot || status.value?.dataRoot || '')
@@ -91,6 +125,7 @@ async function choose(kind: 'data' | 'backup') {
   if (isBusy.value) return
   localMessage.value = ''
   const selected = await locationStore.choose(kind)
+  void locationStore.loadDiagnostics()
   if (selected) {
     initialErrorCleared.value = true
     localMessage.value = '選択したフォルダを確認しました。'
@@ -101,6 +136,7 @@ async function apply() {
   if (isBusy.value) return
   localMessage.value = ''
   const applied = await locationStore.apply()
+  void locationStore.loadDiagnostics()
   if (applied) {
     initialErrorCleared.value = true
     emit('completed')
@@ -111,6 +147,7 @@ async function cancelPendingMigration() {
   if (isBusy.value) return
   localMessage.value = ''
   const completed = await locationStore.cancelPendingMigration()
+  void locationStore.loadDiagnostics()
   if (completed) localMessage.value = '元の保存場所へ戻す設定を保存しました。'
 }
 
@@ -118,12 +155,29 @@ async function retryPendingMigration() {
   if (isBusy.value) return
   localMessage.value = ''
   const completed = await locationStore.retryPendingMigration()
+  void locationStore.loadDiagnostics()
   if (completed) localMessage.value = '同じ移行を再試行する設定を保存しました。'
 }
 
 onMounted(() => {
   void locationStore.initialize()
+  void locationStore.loadDiagnostics()
 })
+
+async function copyDiagnostics() {
+  copyMessage.value = ''
+  if (!locationStore.diagnosticReport) await locationStore.loadDiagnostics()
+  if (!locationStore.diagnosticReport) {
+    copyMessage.value = '診断情報を取得できませんでした。'
+    return
+  }
+  try {
+    const copied = await ClipboardSetText(locationStore.diagnosticReport)
+    copyMessage.value = copied ? '診断情報をクリップボードにコピーしました。' : 'クリップボードへのコピーに失敗しました。'
+  } catch {
+    copyMessage.value = 'クリップボードへのコピーに失敗しました。'
+  }
+}
 
 </script>
 
@@ -172,11 +226,25 @@ button:focus-visible { outline: 2px solid var(--text-active); outline-offset: 2p
 button.primary { border-color: var(--brand-primary); background: var(--brand-primary); color: #fff; font-weight: 700; }
 button.primary:hover:not(:disabled) { background: var(--brand-hover); }
 .storage-location-message { margin: 16px 0 0; color: var(--color-success); font-size: 0.9rem; }
+.storage-location-message p { margin: 0; }
 .storage-location-message.error { color: var(--color-danger); }
+.storage-location-message dl { display: grid; gap: 4px; margin: 8px 0 0; font-size: 0.82rem; }
+.storage-location-message dl div { display: flex; gap: 8px; }
+.storage-location-message dt { font-weight: 700; }
+.storage-location-message dd { margin: 0; }
 .storage-location-note { margin: 18px 0 0; color: var(--text-secondary); font-size: 0.8rem; }
 .storage-location-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .storage-location-recovery-help { margin: 12px 0 0; color: var(--text-secondary); font-size: 0.84rem; line-height: 1.6; }
 .storage-location-exit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.storage-location-diagnostics { display: grid; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 0.8rem; }
+.storage-location-diagnostics-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.storage-location-diagnostics-heading h2 { margin: 0; color: var(--text-primary); font-size: 1rem; }
+.storage-location-diagnostics-heading p, .storage-location-diagnostics > p { margin: 4px 0 0; }
+.storage-location-diagnostics-heading button { flex: 0 0 auto; }
+.storage-location-diagnostics-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.storage-location-diagnostics-list li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.storage-location-diagnostics-list small { color: var(--text-secondary); }
+.storage-location-diagnostics-message { color: var(--text-active) !important; }
 @media (max-width: 600px) {
   .storage-location-setup { padding: 16px; }
   .storage-location-card { padding: 24px; }

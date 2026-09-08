@@ -2,6 +2,7 @@ import {
   ApplyStorageLocations,
   CancelStorageLocationSelection,
   CancelPendingStorageLocationMigration,
+  GetStorageLocationDiagnostics,
   GetStorageLocationStatus,
   RetryPendingStorageLocationMigration,
   SelectStorageLocation,
@@ -26,6 +27,34 @@ export type StorageLocationStatus = {
 export type StorageLocationError = {
   code: string
   message: string
+  reason?: string
+  stage?: string
+  role?: string
+  osErrorNumber?: number
+  diagnosticId?: string
+  action?: string
+}
+
+export type StorageLocationDiagnostic = {
+  schema: number
+  timestamp: string
+  diagnosticId: string
+  operation: string
+  phase?: string
+  role?: string
+  code: string
+  reason?: string
+  stage?: string
+  osErrorNumber?: number
+  os?: string
+  arch?: string
+  appVersion?: string
+  vcsRevision?: string
+}
+
+export type StorageLocationDiagnosticsResult = {
+  events: StorageLocationDiagnostic[]
+  report: string
 }
 
 export type StorageLocationStatusResult = {
@@ -77,4 +106,8 @@ export function cancelPendingStorageLocationMigration(): Promise<StorageLocation
 
 export function retryPendingStorageLocationMigration(): Promise<StorageLocationMutationResult> {
   return RetryPendingStorageLocationMigration()
+}
+
+export function getStorageLocationDiagnostics(): Promise<StorageLocationDiagnosticsResult> {
+  return GetStorageLocationDiagnostics()
 }

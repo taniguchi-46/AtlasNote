@@ -3,10 +3,12 @@ import { defineStore } from 'pinia'
 import {
   applyStorageLocations,
   cancelPendingStorageLocationMigration,
+  getStorageLocationDiagnostics,
   getStorageLocationStatus,
   retryPendingStorageLocationMigration,
   selectStorageLocation,
   type StorageLocationError,
+  type StorageLocationDiagnostic,
   type StorageLocationStatus,
 } from '../api/storageLocations'
 
@@ -16,6 +18,7 @@ type RestartApplication = () => Promise<void>
 const unavailableError: StorageLocationError = {
   code: 'STORAGE_LOCATION_UNAVAILABLE',
   message: '保存場所を利用できませんでした。現在のデータは変更していません。',
+  action: '保存場所を確認してから再試行してください。',
 }
 const developmentRestartError = 'automatic restart is unavailable in Wails development mode'
 
@@ -32,6 +35,9 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
   const isLoading = ref(false)
   const isOperating = ref(false)
   const error = ref<StorageLocationError | null>(null)
+  const diagnostics = ref<StorageLocationDiagnostic[]>([])
+  const diagnosticReport = ref('')
+  const isDiagnosticsLoading = ref(false)
   let prepareChange: PrepareChange | null = null
   let restartApplication: RestartApplication | null = null
 
@@ -63,11 +69,11 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     error.value = null
     try {
       const result = await selectStorageLocation(kind)
+      if (result.status) status.value = result.status
       if (result.error) {
         error.value = result.error
         return false
       }
-      if (result.status) status.value = result.status
       return !result.canceled
     } catch {
       error.value = unavailableError
@@ -86,18 +92,22 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
       preparation = prepareChange ? await prepareChange() : { ready: true }
       if (!preparation.ready) return false
       const result = await applyStorageLocations()
+      if (result.status) status.value = result.status
       if (result.error) {
         error.value = result.error
         await preparation.rollback?.()
         return false
       }
-      if (result.status) status.value = result.status
       if (result.restartRequired && restartApplication) {
         try {
           await restartApplication()
         } catch (cause) {
           await preparation.rollback?.()
-          error.value = { code: 'STORAGE_LOCATION_RESTART_FAILED', message: restartFailureMessage(cause) }
+          error.value = {
+            code: 'STORAGE_LOCATION_RESTART_FAILED',
+            message: restartFailureMessage(cause),
+            action: 'Atlas Noteを手動で再起動してください。',
+          }
           return false
         }
       }
@@ -121,16 +131,20 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     error.value = null
     try {
       const result = await action()
+      if (result.status) status.value = result.status
       if (result.error) {
         error.value = result.error
         return false
       }
-      if (result.status) status.value = result.status
       if (result.restartRequired && restartApplication) {
         try {
           await restartApplication()
         } catch (cause) {
-          error.value = { code: 'STORAGE_LOCATION_RESTART_FAILED', message: restartFailureMessage(cause) }
+          error.value = {
+            code: 'STORAGE_LOCATION_RESTART_FAILED',
+            message: restartFailureMessage(cause),
+            action: 'Atlas Noteを手動で再起動してください。',
+          }
           return false
         }
       }
@@ -165,12 +179,32 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     error.value = null
   }
 
+  async function loadDiagnostics() {
+    if (isDiagnosticsLoading.value) return false
+    isDiagnosticsLoading.value = true
+    try {
+      const result = await getStorageLocationDiagnostics()
+      diagnostics.value = result.events ?? []
+      diagnosticReport.value = result.report ?? ''
+      return true
+    } catch {
+      diagnostics.value = []
+      diagnosticReport.value = ''
+      return false
+    } finally {
+      isDiagnosticsLoading.value = false
+    }
+  }
+
   return {
     status,
     isLoading,
     isOperating,
     isBusy,
     error,
+    diagnostics,
+    diagnosticReport,
+    isDiagnosticsLoading,
     initialize,
     choose,
     apply,
@@ -179,5 +213,6 @@ export const useStorageLocationStore = defineStore('storage-locations', () => {
     setLifecycle,
     clearLifecycle,
     clearError,
+    loadDiagnostics,
   }
 })

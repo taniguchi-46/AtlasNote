@@ -1,6 +1,6 @@
 # 物理保存場所
 
-最終更新: 2026-09-06
+最終更新: 2026-09-08
 
 ## 目的
 
@@ -41,7 +41,7 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
 4. 初回画面ではOSのフォルダ選択ダイアログから保存領域とバックアップ保存領域を選ぶ。空のフォルダ、または既存のAtlas Note保存場所を選べる。無関係な既存ファイル、symlink、書き込み不能な場所は拒否する。
 5. 「この設定で開始」で設定を保存し、アプリを再起動してから通常の初期化を行う。
 
-保存済みルートが読めない、書き込めない、無関係なファイルだけがある、またはOneDrive・Windows Securityなどでアクセスできない場合は`storage-recovery`で停止する。この画面では元のルートを削除・移動せず、別の空フォルダまたは既存のAtlas Noteルートを選択して設定を保存できる。検証エラーは`STORAGE_LOCATION_*`コードとして表示する。
+保存済みルートが読めない、書き込めない、無関係なファイルだけがある、またはOSのアクセス制御・同期状態などで利用できない場合は`storage-recovery`で停止する。この画面では元のルートを削除・移動せず、別の空フォルダまたは既存のAtlas Noteルートを選択して設定を保存できる。検証エラーは既存の`STORAGE_LOCATION_*`コードに、安全な日本語理由、検証段階、対象役割、取得できるOSエラー番号、診断IDを添えて表示する。
 
 再起動時の移行が失敗した場合も`storage-recovery`へ戻す。復旧画面では、保留マーカーへ原子的に保存された同じ移行を再試行するか、元の保存場所へ戻すか、別の保存場所へ切り替える。別の空フォルダへ切り替える場合は元データを自動移行せず、元の保存場所を保持したまま新しい保存場所を初期化する。画面上の選択取消はメモリ上の候補だけを取り消し、保留マーカーの取消とは別の操作として扱う。
 
@@ -60,9 +60,13 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
 - UIの移行再試行APIは、上記の所有markerと現在のフェーズを読み取り専用で検証してから再起動を要求する。再試行API自身はコピー、stage cleanup、設定コミットを行わない。バックアップstageがある場合は、sourceの`.atlasnote-backups`が読めることを確認し、sourceがない状態を「バックアップなし」の正常系として扱わない。
 - Windowsでは、stage cleanupまたはsource読み取りが共有ハンドルで拒否された場合、owned marker・stage・保留マーカーを保持して失敗する。ハンドル解放後の再試行でstageを再利用して移行を完了する経路を、データstage、分離バックアップstage、同一targetルートのバックアップstageで検証済みである（`internal/config/storage_locations_migration_windows_test.go`）。
 
-保存場所の変更は「設定 > 保存場所」から行う。パス文字列を自由入力するAPIは提供せず、選択した場所の検証結果と安全なエラーだけをUIへ返す。
+保存場所の変更は「設定 > 保存場所」から行う。パス文字列を自由入力するAPIは提供せず、選択した場所の検証結果と安全なエラーだけをUIへ返す。保存場所に関する診断記録はOSユーザーキャッシュ配下の独立領域へ、最大100件・256KiB以内で原子的に保存する。記録にはパス、ファイル名、ユーザー名、ノート本文、環境値、秘密情報、raw errorを含めず、保存できない場合はメモリ上の制限付き記録へ退避する。設定画面と復旧画面では記録を表示し、安全なレポートだけをクリップボードへコピーできる。
 
-フォルダ検証は、内容、パスの重複・包含、symlink／Windows reparse point、読み取り、書込み、一時ファイルのclose・rename・削除、親フォルダ作成とフォルダ置換に必要なアクセスを、選択時・適用直前・再起動時に確認する。検証のために選択フォルダ自体を削除しない。
+フォルダ選択時は、選択したルートの内容・リンク・読み書き・一時ファイルやフォルダのclose／rename／削除に必要なアクセスと、候補ペアの構造的なパス関係を検証する。同一ルートは許可し、相互包含は拒否する。未変更の相手側が利用不能でも有効候補を保持できるため、両保存先が利用不能な復旧状態でもどちらからでも再選択できる。両ルートの完全検証は適用直前と再起動時に行い、適用時の検証拒否では未確定候補だけを戻し、永続保留マーカーは保持する。検証のために選択フォルダ自体を削除しない。
+
+OS原因を確実に判定できる読み書きエラーは、アクセス拒否・共有違反／使用中・空き容量不足を日本語の理由と対処へ反映する。OS定数はプラットフォームごとに分類し、既存コード・段階・OS番号は維持する。未知の原因は一般メッセージへ戻し、特定の同期サービスやセキュリティ製品が原因と断定しない。
+
+診断履歴は書込みロック下で最新のディスク内容を検証し、新しい記録を診断IDで重複排除して記録順に追加した後、100件・256KiB上限を適用して原子的に保存する。他のStoreで期限外となった古いキャッシュは再投入しない。起動後に破損・リンク化した履歴も上書きせず、ロック競合や書込み失敗では従来どおりそのStoreの上限付きメモリ記録へ退避する。
 
 ## バックアップ・復元との境界
 
@@ -81,10 +85,10 @@ Atlas Noteの物理的な保存場所を、ノートを分ける論理保存空�
 - 設定・検査・移行: `internal/config/storage_locations*.go`
 - Wails API: `storage_locations_api.go`
 - フロントAPI / Store / UI: `frontend/src/api/storageLocations.ts`、`frontend/src/stores/useStorageLocationStore.ts`、`frontend/src/components/StorageLocation*.vue`
-- 回帰テスト: `internal/config/storage_locations_test.go`、`storage_locations_app_test.go`、`internal/backup/service_test.go`
+- 回帰テスト: `internal/config/storage_locations_test.go`、`internal/config/storage_locations_validation_test.go`、`storage_locations_app_test.go`、`storage_locations_candidate_test.go`、`internal/diagnostics/store_test.go`、`internal/backup/service_test.go`
 
 ```text
-go test ./internal/config ./internal/backup . -count=1
+go test ./internal/config ./internal/diagnostics ./internal/backup . -count=1
 npm --prefix frontend run typecheck
 npm --prefix frontend run test:storage-location-setup
 npm --prefix frontend run test:storage-spaces

@@ -186,7 +186,11 @@ function Add-RegistryDeleteDeny {
     param([Parameter(Mandatory = $true)][string]$Path)
     $base = Open-TestRegistryBase
     try {
-        $key = $base.OpenSubKey($Path, $true)
+        $key = $base.OpenSubKey(
+            $Path,
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            ([System.Security.AccessControl.RegistryRights]::ReadKey -bor [System.Security.AccessControl.RegistryRights]::ChangePermissions)
+        )
         if ($null -eq $key) { throw "Registry fixture key is missing: $Path" }
         try {
             $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -213,7 +217,11 @@ function Remove-RegistryDeleteDeny {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)]$Rule)
     $base = Open-TestRegistryBase
     try {
-        $key = $base.OpenSubKey($Path, $true)
+        $key = $base.OpenSubKey(
+            $Path,
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            ([System.Security.AccessControl.RegistryRights]::ReadKey -bor [System.Security.AccessControl.RegistryRights]::ChangePermissions)
+        )
         if ($null -ne $key) {
             try {
                 $acl = $key.GetAccessControl()

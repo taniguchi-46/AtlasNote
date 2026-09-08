@@ -31,7 +31,7 @@ Wails標準NSISインストーラを使用し、Program Files、Start Menu、デ
 powershell -NoProfile -File .\build\windows\installer\tests\test-uninstall.ps1
 ```
 
-このハーネスはインストール済みWindowsアプリの実環境や「インストールされているアプリ」画面経由の操作を代替しない。リリース前には実機での確認も行う。
+このハーネスはインストール済みWindowsアプリの実環境や「インストールされているアプリ」画面経由の操作を代替しない。リリース前には実機での確認も行う。レジストリ削除拒否のテストでは、アクセス制御変更に必要な最小権限だけを要求し、削除権限そのものは要求しない。
 
 ## リリース前確認
 

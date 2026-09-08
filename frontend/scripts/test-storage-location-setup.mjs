@@ -30,7 +30,7 @@ const compiledStore = ts.transpileModule(
 )
 await writeFile(storeOutFile, compiledStore.outputText, 'utf8')
 await writeFile(path.join(outDir, 'mock-storage-locations.mjs'), `
-export const calls = { status: 0, choices: [], applies: 0, cancels: 0, retries: 0 }
+export const calls = { status: 0, choices: [], applies: 0, cancels: 0, retries: 0, diagnostics: 0 }
 let statusResult = { status: null, error: undefined }
 let selectionResult = { status: null, canceled: false, error: undefined }
 let mutationResult = { status: null, restartRequired: false, error: undefined }
@@ -57,6 +57,10 @@ export async function cancelPendingStorageLocationMigration() {
 export async function retryPendingStorageLocationMigration() {
   calls.retries += 1
   return clone(mutationResult)
+}
+export async function getStorageLocationDiagnostics() {
+  calls.diagnostics += 1
+  return { events: [], report: '{"schema":1,"events":[]}' }
 }
 `, 'utf8')
 
@@ -112,6 +116,15 @@ assert.equal(await store.choose('data'), true)
 assert.equal(store.status.pendingDataRoot, 'C:/NewNotes')
 assert.deepEqual(mock.calls.choices, ['data'])
 
+mock.setSelectionResult({
+  status: { ...initialStatus, pendingDataRoot: 'C:/StillPrevious', pendingSelection: true },
+  error: { code: 'STORAGE_LOCATION_NOT_WRITABLE', message: '選択先を利用できません。' },
+  canceled: false,
+})
+assert.equal(await store.choose('data'), false)
+assert.equal(store.status.pendingDataRoot, 'C:/StillPrevious', 'status must update even when selection returns an error')
+assert.equal(store.error.code, 'STORAGE_LOCATION_NOT_WRITABLE')
+
 let rollbackCalls = 0
 store.setLifecycle(
   async () => ({ ready: true, rollback: () => { rollbackCalls += 1 } }),
@@ -125,6 +138,14 @@ assert.equal(await store.apply(), false)
 assert.equal(rollbackCalls, 1, 'failed apply must roll back the preparation')
 assert.equal(store.error.code, 'STORAGE_LOCATION_VALIDATION_FAILED')
 
+mock.setMutationResult({
+  status: { ...initialStatus, pendingSelection: false, pendingDataRoot: '' },
+  restartRequired: false,
+  error: { code: 'STORAGE_LOCATION_VALIDATION_FAILED', message: '適用時に選択先が変わりました。' },
+})
+assert.equal(await store.apply(), false)
+assert.equal(store.status.pendingSelection, false, 'apply must retain returned status on an error')
+
 let restartCalls = 0
 store.setLifecycle(
   async () => ({ ready: true, rollback: () => { rollbackCalls += 1 } }),
@@ -136,12 +157,32 @@ mock.setMutationResult({
 })
 assert.equal(await store.apply(), true)
 assert.equal(restartCalls, 1)
-assert.equal(mock.calls.applies, 2)
+assert.equal(mock.calls.applies, 3)
 
 mock.setMutationResult({ restartRequired: true })
 assert.equal(await store.cancelPendingMigration(), true)
 assert.equal(await store.retryPendingMigration(), true)
 assert.equal(mock.calls.cancels, 1)
 assert.equal(mock.calls.retries, 1)
+assert.equal(await store.loadDiagnostics(), true)
+assert.equal(mock.calls.diagnostics, 1)
+
+// Exercise both recovery selection orders through the real Pinia store.
+for (const order of [['data', 'backup'], ['backup', 'data']]) {
+  setActivePinia(createPinia())
+  const recovery = useStorageLocationStore()
+  let status = { ...initialStatus, pendingMigration: false, pendingRestart: false }
+  for (const kind of order) {
+    status = { ...status, [kind === 'data' ? 'pendingDataRoot' : 'pendingBackupRoot']: `C:/New-${kind}`, pendingSelection: true }
+    mock.setSelectionResult({ status, canceled: false })
+    assert.equal(await recovery.choose(kind), true)
+    assert.deepEqual(recovery.status, status)
+  }
+  mock.setMutationResult({ status: { ...initialStatus, pendingDataRoot: '', pendingBackupRoot: '', pendingSelection: false }, restartRequired: false, error: { code: 'STORAGE_LOCATION_UNWRITABLE', message: '利用できません。' } })
+  assert.equal(await recovery.apply(), false)
+  assert.equal(recovery.status.pendingSelection, false)
+  assert.equal(recovery.status.pendingDataRoot, '')
+  assert.equal(recovery.status.pendingBackupRoot, '')
+}
 
 console.log('storage location setup tests passed')

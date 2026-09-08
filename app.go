@@ -17,6 +17,7 @@ import (
 	"atlasnote/internal/credential"
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
+	"atlasnote/internal/diagnostics"
 	"atlasnote/internal/note"
 	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
@@ -49,6 +50,7 @@ type App struct {
 	notesDir                    string
 	startupErr                  error
 	startupStorageError         *StorageLocationError
+	diagnostics                 *diagnostics.Store
 	startupPhase                StartupPhase
 	startupLocked               bool
 	recoveryReport              note.RecoveryReport
@@ -134,7 +136,7 @@ type StorageSpaceLockStatusResult struct {
 }
 
 func NewApp() *App {
-	app := &App{}
+	app := &App{diagnostics: newAppDiagnosticsStore()}
 	app.initialize(context.Background())
 	return app
 }
@@ -1458,7 +1460,7 @@ func (a *App) GetStartupStatus() StartupStatus {
 	locationStatusPtr := &locationStatus
 	startupStorageError := a.startupStorageError
 	if startupStorageError == nil && locationStatusErr != nil && !locationStatus.EnvironmentOverride {
-		startupStorageError = storageLocationError(locationStatusErr)
+		startupStorageError = a.storageLocationStatusFailure(locationStatusErr)
 	}
 	phase := a.startupPhase
 	if phase == "" {
@@ -1782,7 +1784,13 @@ func (a *App) enterStorageLocationRecovery(cause error) bool {
 	}
 	a.locationMu.Unlock()
 	a.startupErr = nil
-	storageErr := storageLocationError(cause)
+	storageErr := a.storageLocationErrorFor(
+		cause,
+		"storage-location.startup",
+		string(StartupPhaseStorageRecovery),
+		storageLocationRole(cause),
+		"",
+	)
 	a.statusMu.Lock()
 	a.startupStorageError = storageErr
 	a.startupPhase = StartupPhaseStorageRecovery

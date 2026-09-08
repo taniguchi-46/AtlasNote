@@ -564,6 +564,9 @@ func validatePendingMigrationExecution(migration PendingStorageLocationMigration
 				return err
 			}
 			if placed {
+				if err := requirePlacedDataMigrationRoot(migration); err != nil {
+					return err
+				}
 				dataPlaced = true
 			} else if err := requireEmptyOrMissingMigrationTarget(migration.TargetDataRoot, false); err != nil {
 				return err
@@ -638,6 +641,44 @@ func requireExistingMigrationTarget(path string, backup bool) error {
 	return nil
 }
 
+func requirePlacedDataMigrationRoot(migration PendingStorageLocationMigration) error {
+	marker := migrationStageMarkerForData(migration)
+	matched, err := migrationStageMarkerMatches(migration.TargetDataRoot, marker)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return ErrRootInvalid
+	}
+	probe, err := ProbeDataRoot(migration.TargetDataRoot)
+	if err != nil {
+		return err
+	}
+	if probe.Kind != RootExisting {
+		return rootValidationErrorAt(RootErrorMissingData, RootValidationStageContent, RootValidationRoleData, ErrRootInvalid)
+	}
+	return nil
+}
+
+func requirePlacedBackupMigrationRoot(migration PendingStorageLocationMigration) error {
+	marker := migrationStageMarkerForBackup(migration)
+	matched, err := migrationStageMarkerMatches(marker.TargetPath, marker)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return ErrRootInvalid
+	}
+	probe, err := ProbeBackupRoot(migration.TargetBackupRoot)
+	if err != nil {
+		return err
+	}
+	if probe.Kind != RootExisting || !probe.HasBackups {
+		return rootValidationErrorAt(RootErrorMissingData, RootValidationStageContent, RootValidationRoleBackup, ErrRootInvalid)
+	}
+	return nil
+}
+
 func validateDataMigrationPlacementState(migration PendingStorageLocationMigration) error {
 	if migration.DataPlan != PendingStorageMigrationPlanCopyRequired {
 		return nil
@@ -656,7 +697,7 @@ func validateDataMigrationPlacementState(migration PendingStorageLocationMigrati
 	if !matched {
 		return ErrRootInvalid
 	}
-	return nil
+	return requirePlacedDataMigrationRoot(migration)
 }
 
 func validateBackupMigrationPendingState(migration PendingStorageLocationMigration) error {
@@ -676,7 +717,7 @@ func validateBackupMigrationPendingState(migration PendingStorageLocationMigrati
 		if stageOwned {
 			return ErrRootInvalid
 		}
-		return nil
+		return requirePlacedBackupMigrationRoot(migration)
 	}
 	if stageOwned {
 		available, err := readableBackupArchive(migration.SourceBackupRoot)
@@ -711,7 +752,7 @@ func validateBackupMigrationPlacementState(migration PendingStorageLocationMigra
 		return err
 	}
 	if placed {
-		return nil
+		return requirePlacedBackupMigrationRoot(migration)
 	}
 	available, err := readableBackupArchive(migration.SourceBackupRoot)
 	if err != nil {
@@ -732,8 +773,22 @@ func validateCommittedMigrationCleanupState(migration PendingStorageLocationMigr
 		} else if owned {
 			return ErrRootInvalid
 		}
-		if _, err := migrationStageMarkerMatches(migration.TargetDataRoot, migrationStageMarkerForData(migration)); err != nil {
+		matched, err := migrationStageMarkerMatches(migration.TargetDataRoot, migrationStageMarkerForData(migration))
+		if err != nil {
 			return err
+		}
+		if matched {
+			if err := requirePlacedDataMigrationRoot(migration); err != nil {
+				return err
+			}
+		} else {
+			probe, probeErr := ProbeDataRoot(migration.TargetDataRoot)
+			if probeErr != nil {
+				return probeErr
+			}
+			if probe.Kind != RootExisting {
+				return rootValidationErrorAt(RootErrorMissingData, RootValidationStageContent, RootValidationRoleData, ErrRootInvalid)
+			}
 		}
 	}
 	if migration.BackupPlan == PendingStorageMigrationPlanCopyRequired {
@@ -742,8 +797,14 @@ func validateCommittedMigrationCleanupState(migration PendingStorageLocationMigr
 		} else if owned {
 			return ErrRootInvalid
 		}
-		if _, err := migrationStageMarkerMatches(migrationStageMarkerForBackup(migration).TargetPath, migrationStageMarkerForBackup(migration)); err != nil {
+		matched, err := migrationStageMarkerMatches(migrationStageMarkerForBackup(migration).TargetPath, migrationStageMarkerForBackup(migration))
+		if err != nil {
 			return err
+		}
+		if matched {
+			if err := requirePlacedBackupMigrationRoot(migration); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
