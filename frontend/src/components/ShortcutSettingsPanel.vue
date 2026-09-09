@@ -1,5 +1,5 @@
 <template>
-  <section class="shortcut-settings">
+  <section class="shortcut-settings" data-settings-anchor="shortcuts" tabindex="-1">
     <div class="shortcut-settings-heading">
       <div>
         <h3>ショートカット</h3>
@@ -29,21 +29,34 @@
           <span class="shortcut-label">{{ action.label }}</span>
           <span class="shortcut-scope">{{ action.scope === 'editor' ? 'ノート本文' : 'アプリ全体' }}</span>
         </div>
-        <kbd>{{ formatShortcutBinding(settingsStore.shortcutBindings[action.id]) }}</kbd>
-        <button
-          type="button"
-          class="secondary-btn shortcut-change"
-          data-shortcut-capture
-          :aria-pressed="capturingActionId === action.id"
-          @click="beginCapture(action.id)"
-          @keydown="handleCaptureKeydown(action.id, $event)"
-        >
-          {{ capturingActionId === action.id ? 'キーを入力…' : '変更' }}
-        </button>
+        <div class="shortcut-bindings">
+          <div v-for="slot in shortcutSlots" :key="slot" class="shortcut-slot">
+            <span class="shortcut-slot-label">枠{{ slot + 1 }}</span>
+            <kbd>{{ formatShortcutBinding(settingsStore.shortcutBindings[action.id][slot]) }}</kbd>
+            <button
+              type="button"
+              class="secondary-btn shortcut-change"
+              data-shortcut-capture
+              :aria-pressed="capturingActionId === action.id && capturingSlot === slot"
+              @click="beginCapture(action.id, slot)"
+              @keydown="handleCaptureKeydown(action.id, slot, $event)"
+            >
+              {{ capturingActionId === action.id && capturingSlot === slot ? 'キーを入力…' : '変更' }}
+            </button>
+            <button
+              type="button"
+              class="text-btn"
+              :disabled="settingsStore.shortcutBindings[action.id][slot] === null"
+              @click="clearBinding(action.id, slot)"
+            >
+              解除
+            </button>
+          </div>
+        </div>
         <button
           type="button"
           class="text-btn"
-          :disabled="shortcutBindingsEqual(settingsStore.shortcutBindings[action.id], action.defaultBinding)"
+          :disabled="isDefaultBinding(action.id, action.defaultBinding)"
           @click="resetBinding(action.id)"
         >
           初期値
@@ -70,19 +83,24 @@ import {
   formatShortcutBinding,
   shortcutBindingsEqual,
   type ShortcutActionId,
+  type ShortcutBinding,
+  type ShortcutBindingSlot,
 } from '../utils/keyboardShortcuts'
 
 const settingsStore = useSettingsStore()
 const shortcutActions = SHORTCUT_ACTIONS
+const shortcutSlots = [0, 1] as const
 const capturingActionId = ref<ShortcutActionId | null>(null)
+const capturingSlot = ref<ShortcutBindingSlot | null>(null)
 const feedback = ref<{
   actionId: ShortcutActionId | null
   kind: 'success' | 'error'
   message: string
 } | null>(null)
 
-function beginCapture(actionId: ShortcutActionId) {
+function beginCapture(actionId: ShortcutActionId, slot: ShortcutBindingSlot) {
   capturingActionId.value = actionId
+  capturingSlot.value = slot
   feedback.value = {
     actionId,
     kind: 'success',
@@ -90,8 +108,8 @@ function beginCapture(actionId: ShortcutActionId) {
   }
 }
 
-function handleCaptureKeydown(actionId: ShortcutActionId, event: KeyboardEvent) {
-  if (capturingActionId.value !== actionId) return
+function handleCaptureKeydown(actionId: ShortcutActionId, slot: ShortcutBindingSlot, event: KeyboardEvent) {
+  if (capturingActionId.value !== actionId || capturingSlot.value !== slot) return
   event.preventDefault()
   event.stopPropagation()
 
@@ -100,9 +118,10 @@ function handleCaptureKeydown(actionId: ShortcutActionId, event: KeyboardEvent) 
     || event.code === 'Delete'
     || event.code === 'Backspace'
   ) {
-    const result = settingsStore.setShortcutBinding(actionId, null)
+    const result = settingsStore.setShortcutBinding(actionId, slot, null)
     if (result.ok) {
       capturingActionId.value = null
+      capturingSlot.value = null
       feedback.value = { actionId, kind: 'success', message: '割り当てを解除しました。' }
     }
     return
@@ -118,18 +137,39 @@ function handleCaptureKeydown(actionId: ShortcutActionId, event: KeyboardEvent) 
     return
   }
 
-  const result = settingsStore.setShortcutBinding(actionId, binding)
+  const result = settingsStore.setShortcutBinding(actionId, slot, binding)
   if (!result.ok) {
     feedback.value = { actionId, kind: 'error', message: result.message }
     return
   }
 
   capturingActionId.value = null
+  capturingSlot.value = null
   feedback.value = { actionId, kind: 'success', message: 'ショートカットを変更しました。' }
+}
+
+function clearBinding(actionId: ShortcutActionId, slot: ShortcutBindingSlot) {
+  const result = settingsStore.setShortcutBinding(actionId, slot, null)
+  if (capturingActionId.value === actionId && capturingSlot.value === slot) {
+    capturingActionId.value = null
+    capturingSlot.value = null
+  }
+  feedback.value = result.ok
+    ? { actionId, kind: 'success', message: '割り当てを解除しました。' }
+    : { actionId, kind: 'error', message: result.message }
+}
+
+function isDefaultBinding(actionId: ShortcutActionId, defaultBinding: ShortcutBinding | null) {
+  const slots = settingsStore.shortcutBindings[actionId]
+  return shortcutBindingsEqual(slots[0], defaultBinding) && slots[1] === null
 }
 
 function resetBinding(actionId: ShortcutActionId) {
   const result = settingsStore.resetShortcutBinding(actionId)
+  if (capturingActionId.value === actionId) {
+    capturingActionId.value = null
+    capturingSlot.value = null
+  }
   feedback.value = result.ok
     ? { actionId, kind: 'success', message: '初期値に戻しました。' }
     : { actionId, kind: 'error', message: result.message }
@@ -138,6 +178,7 @@ function resetBinding(actionId: ShortcutActionId) {
 function resetAllBindings() {
   settingsStore.resetAllShortcutBindings()
   capturingActionId.value = null
+  capturingSlot.value = null
   feedback.value = {
     actionId: null,
     kind: 'success',
@@ -182,17 +223,40 @@ function resetAllBindings() {
 
 .shortcut-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 120px auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(280px, 1.5fr) auto;
   gap: 12px;
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.shortcut-description {
+.shortcut-description,
+.shortcut-bindings {
   display: flex;
+  gap: 8px;
+}
+
+.shortcut-description {
   flex-direction: column;
   gap: 3px;
+}
+
+.shortcut-bindings {
+  flex-wrap: wrap;
+}
+
+.shortcut-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+}
+
+.shortcut-slot-label {
+  flex-basis: 100%;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .shortcut-label {
@@ -278,7 +342,7 @@ kbd {
   }
 
   .shortcut-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .shortcut-description {
@@ -286,6 +350,11 @@ kbd {
   }
 
   .shortcut-feedback {
+    grid-column: 1 / -1;
+  }
+
+  .shortcut-bindings,
+  .shortcut-row > .text-btn {
     grid-column: 1 / -1;
   }
 }

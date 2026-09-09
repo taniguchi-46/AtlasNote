@@ -206,6 +206,7 @@ import type { AIContextSource, WritingKind } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
 import { useAIWritingStore } from '../stores/useAIWritingStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useSettingsStore } from '../stores/useSettingsStore'
 
 const props = withDefaults(defineProps<{
   externalComposer?: boolean
@@ -219,6 +220,7 @@ const props = withDefaults(defineProps<{
 const noteStore = useNoteStore()
 const aiStore = useAIStore()
 const writingStore = useAIWritingStore()
+const settingsStore = useSettingsStore()
 
 const writingKinds: Array<{ value: WritingKind; label: string }> = [
   { value: 'prompt', label: 'プロンプト' },
@@ -240,6 +242,8 @@ const resultTextarea = ref<HTMLTextAreaElement | null>(null)
 let previousNoteID: string | null = null
 
 const canGenerate = computed(() => Boolean(
+  settingsStore.aiEnabled
+  &&
   noteStore.activeNote
   && !noteStore.activeNote.isTrashed
   && instruction.value.trim()
@@ -248,6 +252,8 @@ const canGenerate = computed(() => Boolean(
 ))
 
 const canCreateNoteFromResult = computed(() => Boolean(
+  settingsStore.aiEnabled
+  &&
   writingStore.state === 'success'
   && writingStore.content.trim()
   && noteStore.activeNote
@@ -259,6 +265,8 @@ const canApplyToCurrentNote = computed(() => {
   const target = writingStore.targetSource
   const current = noteStore.activeNote
   return Boolean(
+    settingsStore.aiEnabled
+    &&
     writingStore.state === 'success'
     && writingStore.content.trim()
     && target
@@ -287,11 +295,14 @@ function contextInput() {
 }
 
 async function preview() {
+  if (!settingsStore.aiEnabled) return false
   if (!await ensureCurrentNotePersisted()) return false
+  if (!settingsStore.aiEnabled) return false
   return writingStore.previewContext(contextInput())
 }
 
 async function ensureCurrentNotePersisted() {
+  if (!settingsStore.aiEnabled) return false
   const selectedNote = noteStore.activeNote
   if (!selectedNote || selectedNote.isTrashed) {
     writingStore.setPreconditionError('AI_NOTE_UNAVAILABLE')
@@ -311,6 +322,7 @@ async function ensureCurrentNotePersisted() {
     writingStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
     return false
   }
+  if (!settingsStore.aiEnabled) return false
   const current = noteStore.activeNote
   if (!current || current.id !== noteID || current.isTrashed || noteStore.activeDraft) {
     writingStore.setPreconditionError(current?.isTrashed ? 'AI_NOTE_UNAVAILABLE' : 'AI_DRAFT_NOT_SAVED')
@@ -320,8 +332,10 @@ async function ensureCurrentNotePersisted() {
 }
 
 async function confirmAndGenerate() {
+  if (!settingsStore.aiEnabled) return false
   if (!canGenerate.value) return false
   if (!await preview()) return false
+  if (!settingsStore.aiEnabled) return false
 
   const setting = aiStore.configuredSetting
   if (!setting) return false
@@ -334,6 +348,7 @@ async function confirmAndGenerate() {
   if (!window.confirm(
     `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nローカル追加検索: ${localSearchSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n生成結果は自動保存されません。`,
   )) return false
+  if (!settingsStore.aiEnabled) return false
 
   const generated = await writingStore.generate({
     providerID: setting.providerID,
@@ -342,6 +357,7 @@ async function confirmAndGenerate() {
     instruction: instruction.value,
     ...contextInput(),
   })
+  if (!settingsStore.aiEnabled) return false
   if (generated) instruction.value = ''
   return generated
 }
@@ -385,17 +401,21 @@ function generatedNoteTitle() {
 }
 
 async function createGeneratedNote() {
+  if (!settingsStore.aiEnabled) return
   if (!canCreateNoteFromResult.value) return
   const current = noteStore.activeNote
   if (!current) return
   if (!window.confirm('生成した文章を新規ノートとして作成します。通常ノートとしてWebDAV同期の対象になります。続行しますか？')) return
+  if (!settingsStore.aiEnabled) return
   const created = await noteStore.newNote(generatedNoteTitle(), writingStore.content, current.notebookId ?? null)
-  if (created) writingStore.clear()
+  if (settingsStore.aiEnabled && created) writingStore.clear()
 }
 
 async function applyToCurrentNote(mode: 'append' | 'replace') {
+  if (!settingsStore.aiEnabled) return
   if (!canApplyToCurrentNote.value) return
   if (!await ensureCurrentNotePersisted()) return
+  if (!settingsStore.aiEnabled) return
   const target = writingStore.targetSource
   const current = noteStore.activeNote
   if (!target || !current || target.noteID !== current.id || target.revision !== current.revision) {
@@ -404,7 +424,9 @@ async function applyToCurrentNote(mode: 'append' | 'replace') {
   }
   const action = mode === 'replace' ? '現在のノート本文を生成結果で置き換えます' : '生成結果を現在のノート末尾へ追記します'
   if (!window.confirm(`${action}。この変更は通常ノートとしてWebDAV同期の対象になります。続行しますか？`)) return
-  if (await noteStore.applyAIWritingContent(current.id, writingStore.content, target.revision, mode)) {
+  if (!settingsStore.aiEnabled) return
+  const applied = await noteStore.applyAIWritingContent(current.id, writingStore.content, target.revision, mode)
+  if (settingsStore.aiEnabled && applied) {
     writingStore.clear()
   }
 }

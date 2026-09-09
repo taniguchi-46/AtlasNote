@@ -12,6 +12,7 @@ build/windows/*
 !build/windows/icon.ico
 !build/windows/installer/
 build/windows/installer/*
+!build/windows/installer/installer-options.nsh
 !build/windows/installer/project.nsi
 !build/windows/installer/uninstall.nsh
 !build/windows/installer/tests/

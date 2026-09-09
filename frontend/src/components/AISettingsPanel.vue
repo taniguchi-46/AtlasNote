@@ -1,6 +1,24 @@
 <template>
-  <section class="ai-settings">
+  <section class="ai-settings" data-settings-anchor="ai" tabindex="-1">
     <h3>AI</h3>
+    <div class="ai-availability-setting" data-settings-anchor="ai.enabled" tabindex="-1">
+      <label class="ai-switch-label" for="ai-enabled">
+        <input
+          id="ai-enabled"
+          v-model="settingsStore.aiEnabled"
+          type="checkbox"
+          role="switch"
+          :disabled="settingsStore.aiEnabled && isAIProcessing"
+        />
+        <span>AI機能を有効にする</span>
+      </label>
+      <p class="field-help">
+        {{ settingsStore.aiEnabled ? 'AIワークスペースとAI操作を利用できます。' : 'AIワークスペースとAI操作を停止中です。保存済みの設定・履歴・認証情報は保持されます。' }}
+      </p>
+      <p v-if="settingsStore.aiEnabled && isAIProcessing" class="field-help" role="status">
+        実行中のAI処理が完了するまでOFFにできません。
+      </p>
+    </div>
     <p class="field-help">
       API Key は表示・再表示されず、この画面を閉じると入力中の値も破棄されます。認証確認・モデル取得・生成確認では保存されません。
     </p>
@@ -135,10 +153,31 @@
 import { computed } from 'vue'
 import type { CredentialStatus } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
+import { useAIChatStore } from '../stores/useAIChatStore'
+import { useAIAssistantStore } from '../stores/useAIAssistantStore'
+import { useAILibrarianStore } from '../stores/useAILibrarianStore'
+import { useAIWritingStore } from '../stores/useAIWritingStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import { isAIActivityBusy, isAIComposerSubmitting } from '../utils/aiBusy'
 
 const aiStore = useAIStore()
+const chatStore = useAIChatStore()
+const assistantStore = useAIAssistantStore()
+const librarianStore = useAILibrarianStore()
+const writingStore = useAIWritingStore()
 const settingsStore = useSettingsStore()
+
+const isAIProcessing = computed(() => isAIActivityBusy({
+  isSubmitting: isAIComposerSubmitting.value,
+  isSummaryBusy: aiStore.isGenerating || aiStore.summaryState === 'confirming',
+  isLibrarianBusy: librarianStore.isGenerating,
+  isAssistantBusy: assistantStore.isBusy,
+  isWritingBusy: writingStore.isBusy,
+  isApplyingAgentProposal: chatStore.timeline.some((entry) => (
+    entry.kind === 'agent-proposal' && entry.proposalState === 'applying'
+  )),
+  isSettingsBusy: aiStore.isSettingsBusy,
+}))
 
 const canDeleteProvider = computed(() => {
   const status = aiStore.activeProviderSetting?.credentialStatus
@@ -203,6 +242,9 @@ async function handleDeleteAll() {
 
 <style scoped>
 .ai-settings { color: var(--text-primary); padding-bottom: 64px; }
+.ai-availability-setting { margin: 16px 0 20px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); }
+.ai-switch-label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.ai-switch-label input { width: 16px; height: 16px; margin: 0; }
 .setting-group { margin: 20px 0; }
 .setting-group label { display: block; margin-bottom: 7px; font-size: 14px; font-weight: 600; }
 .wide-field input, .wide-field select { width: min(100%, 460px); }

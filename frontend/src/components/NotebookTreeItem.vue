@@ -33,7 +33,7 @@
       </span>
 
       <span class="notebook-name">
-        {{ node.name }}
+        <span class="notebook-name-text" :title="node.name">{{ node.name }}</span>
         <LockKeyholeIcon v-if="node.locked" class="notebook-lock-icon" :size="13" aria-label="ロック中" />
         <LockIcon v-else-if="node.protected" class="notebook-lock-icon" :size="13" aria-label="保護中" />
       </span>
@@ -329,10 +329,19 @@ async function deleteSelf(mode: NotebookDeleteMode) {
 }
 
 .notebook-name {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 5px;
+  flex: 1;
   min-width: 0;
+}
+
+.notebook-name-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notebook-lock-icon {

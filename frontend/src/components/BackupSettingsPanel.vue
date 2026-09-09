@@ -1,5 +1,5 @@
 <template>
-  <section class="backup-settings">
+  <section class="backup-settings" data-settings-anchor="backups" tabindex="-1">
     <h3>バックアップ</h3>
     <p class="backup-description">
       現在の保存空間を自動でバックアップします。復元前には現在のデータも安全用バックアップとして保存されます。

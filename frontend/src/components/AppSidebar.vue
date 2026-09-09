@@ -156,7 +156,7 @@ const navItems = computed<Array<{
   },
   {
     section: 'recent',
-    label: '最近更新した',
+    label: '今日',
     icon: Clock3Icon,
     count: 0,
   },

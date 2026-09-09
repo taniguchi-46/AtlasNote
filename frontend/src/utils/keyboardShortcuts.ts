@@ -21,7 +21,9 @@ export type ShortcutBinding = {
   meta: boolean
 }
 
-export type ShortcutBindings = Record<ShortcutActionId, ShortcutBinding | null>
+export type ShortcutBindingSlot = 0 | 1
+export type ShortcutBindingSlots = [ShortcutBinding | null, ShortcutBinding | null]
+export type ShortcutBindings = Record<ShortcutActionId, ShortcutBindingSlots>
 
 export type ShortcutActionDefinition = {
   id: ShortcutActionId
@@ -47,10 +49,13 @@ export type ShortcutValidationResult =
       code: 'UNKNOWN_ACTION' | 'INVALID_BINDING' | 'RESERVED_BINDING' | 'DUPLICATE_BINDING'
       message: string
       conflictingActionId?: ShortcutActionId
+      conflictingSlot?: ShortcutBindingSlot
     }
 
-export const SHORTCUT_STORAGE_KEY = 'atlas-keybindings-v1'
-export const SHORTCUT_STORAGE_VERSION = 1
+export const SHORTCUT_STORAGE_KEY = 'atlas-keybindings-v2'
+export const SHORTCUT_LEGACY_STORAGE_KEY = 'atlas-keybindings-v1'
+export const SHORTCUT_STORAGE_VERSION = 2
+export const SHORTCUT_LEGACY_STORAGE_VERSION = 1
 
 const createBinding = (
   code: string,
@@ -110,8 +115,17 @@ function cloneBinding(binding: ShortcutBinding | null): ShortcutBinding | null {
   return binding ? { ...binding } : null
 }
 
+function createBindingSlots(
+  first: ShortcutBinding | null,
+  second: ShortcutBinding | null = null,
+): ShortcutBindingSlots {
+  return [cloneBinding(first), cloneBinding(second)]
+}
+
 function createEmptyShortcutBindings(): ShortcutBindings {
-  return Object.fromEntries(SHORTCUT_ACTIONS.map((action) => [action.id, null])) as ShortcutBindings
+  return Object.fromEntries(
+    SHORTCUT_ACTIONS.map((action) => [action.id, createBindingSlots(null)]),
+  ) as ShortcutBindings
 }
 
 function isShortcutActionId(value: string): value is ShortcutActionId {
@@ -154,7 +168,7 @@ function normalizeBinding(value: unknown): ShortcutBinding | null {
 
 export function createDefaultShortcutBindings(): ShortcutBindings {
   return Object.fromEntries(
-    SHORTCUT_ACTIONS.map((action) => [action.id, cloneBinding(action.defaultBinding)]),
+    SHORTCUT_ACTIONS.map((action) => [action.id, createBindingSlots(action.defaultBinding)]),
   ) as ShortcutBindings
 }
 
@@ -224,7 +238,9 @@ export function findMatchingShortcutAction(
 ): ShortcutActionId | null {
   for (const action of SHORTCUT_ACTIONS) {
     if (scope && action.scope !== scope) continue
-    if (matchesShortcut(event, bindings[action.id])) return action.id
+    for (const binding of bindings[action.id]) {
+      if (matchesShortcut(event, binding)) return action.id
+    }
   }
   return null
 }
@@ -233,6 +249,7 @@ export function validateShortcutBinding(
   actionId: ShortcutActionId,
   binding: ShortcutBinding | null,
   bindings: ShortcutBindings,
+  slot: ShortcutBindingSlot = 0,
 ): ShortcutValidationResult {
   if (!shortcutActionById.has(actionId)) {
     return { ok: false, code: 'UNKNOWN_ACTION', message: '不明なショートカット操作です。' }
@@ -255,15 +272,17 @@ export function validateShortcutBinding(
     }
   }
 
-  const conflict = SHORTCUT_ACTIONS.find((action) => (
-    action.id !== actionId && shortcutBindingsEqual(bindings[action.id], normalized)
-  ))
-  if (conflict) {
-    return {
-      ok: false,
-      code: 'DUPLICATE_BINDING',
-      message: `「${conflict.label}」と同じキーは割り当てできません。`,
-      conflictingActionId: conflict.id,
+  for (const action of SHORTCUT_ACTIONS) {
+    for (const conflictSlot of [0, 1] as const) {
+      if (action.id === actionId && conflictSlot === slot) continue
+      if (!shortcutBindingsEqual(bindings[action.id]?.[conflictSlot] ?? null, normalized)) continue
+      return {
+        ok: false,
+        code: 'DUPLICATE_BINDING',
+        message: `「${action.label}」と同じキーは割り当てできません。`,
+        conflictingActionId: action.id,
+        conflictingSlot: conflictSlot,
+      }
     }
   }
   return { ok: true, binding: normalized }
@@ -277,33 +296,78 @@ function sanitizeShortcutBindings(value: unknown): ShortcutBindings {
 
   for (const action of SHORTCUT_ACTIONS) {
     const hasStoredValue = Object.prototype.hasOwnProperty.call(source, action.id)
-    const storedValue = hasStoredValue ? source[action.id] : action.defaultBinding
-    let candidate = storedValue === null ? null : normalizeBinding(storedValue)
-    if (storedValue !== null && !candidate) candidate = cloneBinding(action.defaultBinding)
+    const storedSlots = hasStoredValue && Array.isArray(source[action.id])
+      ? source[action.id] as unknown[]
+      : null
 
-    let validation = validateShortcutBinding(action.id, candidate, result)
-    if (!validation.ok && hasStoredValue) {
-      candidate = cloneBinding(action.defaultBinding)
-      validation = validateShortcutBinding(action.id, candidate, result)
+    for (const slot of [0, 1] as const) {
+      const hasStoredSlot = storedSlots ? slot in storedSlots : false
+      const storedValue = hasStoredSlot
+        ? storedSlots?.[slot]
+        : slot === 0
+          ? action.defaultBinding
+          : null
+      let candidate = storedValue === null ? null : normalizeBinding(storedValue)
+      if (storedValue !== null && !candidate) {
+        candidate = slot === 0 ? cloneBinding(action.defaultBinding) : null
+      }
+
+      let validation = validateShortcutBinding(action.id, candidate, result, slot)
+      if (!validation.ok && slot === 0 && candidate !== null) {
+        candidate = cloneBinding(action.defaultBinding)
+        validation = validateShortcutBinding(action.id, candidate, result, slot)
+      }
+      result[action.id][slot] = validation.ok ? cloneBinding(validation.binding) : null
     }
-    result[action.id] = validation.ok ? cloneBinding(validation.binding) : null
   }
   return result
 }
 
-export function parseStoredShortcutBindings(raw: string | null): ShortcutBindings {
-  if (!raw) return createDefaultShortcutBindings()
+function parseStoredDocument(raw: string | null) {
+  if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return createDefaultShortcutBindings()
+      return null
     }
-    const record = parsed as Record<string, unknown>
-    if (record.version !== SHORTCUT_STORAGE_VERSION) return createDefaultShortcutBindings()
-    return sanitizeShortcutBindings(record.bindings)
+    return parsed as Record<string, unknown>
   } catch {
-    return createDefaultShortcutBindings()
+    return null
   }
+}
+
+function convertLegacyShortcutBindings(value: unknown) {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+  return Object.fromEntries(
+    SHORTCUT_ACTIONS.map((action) => [
+      action.id,
+      [
+        Object.prototype.hasOwnProperty.call(source, action.id)
+          ? source[action.id]
+          : action.defaultBinding,
+        null,
+      ],
+    ]),
+  )
+}
+
+export function parseStoredShortcutBindings(
+  raw: string | null,
+  legacyRaw: string | null = null,
+): ShortcutBindings {
+  const currentRecord = parseStoredDocument(raw)
+  if (currentRecord?.version === SHORTCUT_STORAGE_VERSION) {
+    return sanitizeShortcutBindings(currentRecord.bindings)
+  }
+
+  const legacyRecord = parseStoredDocument(legacyRaw)
+  if (legacyRecord?.version === SHORTCUT_LEGACY_STORAGE_VERSION) {
+    return sanitizeShortcutBindings(convertLegacyShortcutBindings(legacyRecord.bindings))
+  }
+
+  return createDefaultShortcutBindings()
 }
 
 export function serializeShortcutBindings(bindings: ShortcutBindings) {

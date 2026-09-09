@@ -618,9 +618,11 @@ import { useNotebookStore } from '../stores/useNotebookStore'
 import { useNoteStore } from '../stores/useNoteStore'
 import { runAgentProposalPermissionFlow } from '../utils/agentProposalPermission'
 import {
+  cleanupInterruptedComposerSubmission,
   completeLibrarianTimelineTrace,
   recordAssistantTimelineFailure,
 } from '../utils/aiWorkspaceTimeline'
+import { isAIActivityBusy, withAIComposerSubmission } from '../utils/aiBusy'
 import AIMarkdownPreview from './AIMarkdownPreview.vue'
 import AISummaryPanel from './AISummaryPanel.vue'
 import AILibrarianPanel from './AILibrarianPanel.vue'
@@ -782,7 +784,7 @@ function setWritingPanelRef(value: TemplateRefValue) {
 }
 
 const placement = computed(() => settingsStore.aiWorkspacePlacement)
-const isOpen = computed(() => props.open)
+const isOpen = computed(() => props.open && settingsStore.aiEnabled)
 const effectivePanelSize = computed(() => getEffectivePanelSize(placement.value))
 const resizeBounds = computed<ResizeBounds>(() => getResizeBounds(placement.value))
 const resizeAriaLabel = computed(() => (
@@ -803,14 +805,15 @@ const hasPendingAgentProposal = computed(() => chatStore.timeline.some((entry) =
   entry.kind === 'agent-proposal'
   && (entry.proposalState === 'generating' || entry.proposalState === 'awaiting-review' || entry.proposalState === 'applying' || entry.proposalState === 'conflict' || entry.proposalState === 'save-failure')
 )))
-const isAnyBusy = computed(() => (
-  isSubmitting.value
-  || aiStore.isGenerating
-  || librarianStore.isGenerating
-  || assistantStore.isBusy
-  || writingStore.isBusy
-  || isApplyingAgentProposal.value
-))
+const isAnyBusy = computed(() => isAIActivityBusy({
+  isSubmitting: isSubmitting.value,
+  isSummaryBusy: aiStore.isGenerating || aiStore.summaryState === 'confirming',
+  isLibrarianBusy: librarianStore.isGenerating,
+  isAssistantBusy: assistantStore.isBusy,
+  isWritingBusy: writingStore.isBusy,
+  isApplyingAgentProposal: isApplyingAgentProposal.value,
+  isSettingsBusy: aiStore.isSettingsBusy,
+}))
 const hasUsableNote = computed(() => Boolean(
   noteStore.activeNote && !noteStore.activeNote.isTrashed,
 ))
@@ -870,6 +873,8 @@ const hasUnreadyNotebookContext = computed(() => (
 ))
 const canSubmitComposer = computed(() => {
   if (
+    !settingsStore.aiEnabled
+    ||
     !hasUsableNote.value
     || activeNoteProtected.value
     || noteStore.isLoading
@@ -1143,11 +1148,14 @@ async function applyAgentProposal(entryID: string) {
     || entry?.kind !== 'agent-proposal'
     || (entry.proposalState !== 'awaiting-review' && entry.proposalState !== 'save-failure')
     || isAnyBusy.value
+    || !settingsStore.aiEnabled
   ) return
 
   if (!window.confirm(
     `次のAgent変更提案を本文へ適用します。\n\n対象: ${proposal.targetTitle || '無題のノート'}\nrevision: ${proposal.baseRevision}\n変更箇所: 本文\n\n通常のノート保存およびWebDAV同期の対象になります。通常のノート編集の「元に戻す」対象にはなりません。変更前後はAIタイムラインで確認できます。`,
   )) return
+
+  if (!settingsStore.aiEnabled) return
 
   await persistAgentProposal(entryID)
 }
@@ -1160,10 +1168,19 @@ async function persistAgentProposal(entryID: string, automatic = false) {
     || entry?.kind !== 'agent-proposal'
     || (entry.proposalState !== 'awaiting-review' && entry.proposalState !== 'save-failure')
   ) return
+  if (!settingsStore.aiEnabled) return
 
   chatStore.setAgentProposalState(entryID, 'applying')
+  if (!settingsStore.aiEnabled) {
+    chatStore.setAgentProposalState(entryID, 'awaiting-review')
+    return
+  }
   try {
     const outcome = await noteStore.applyAgentEditProposal(proposal)
+    if (!settingsStore.aiEnabled) {
+      chatStore.setAgentProposalState(entryID, 'awaiting-review', 'AI機能がOFFになったため、自動適用を停止しました。')
+      return
+    }
     if (outcome === 'applied') {
       chatStore.setAgentProposalState(
         entryID,
@@ -1322,6 +1339,7 @@ function clearResultAnchors() {
 
 async function submitComposer() {
   if (isSubmitting.value) return
+  if (!settingsStore.aiEnabled) return
   if (!canSubmitComposer.value) {
     if (!aiStore.configuredSetting?.modelID) openAISettings()
     return
@@ -1329,7 +1347,7 @@ async function submitComposer() {
 
   isSubmitting.value = true
   try {
-    await runComposerSubmission()
+    await withAIComposerSubmission(() => runComposerSubmission())
   } finally {
     isSubmitting.value = false
   }
@@ -1341,6 +1359,7 @@ async function stopAssistant() {
 }
 
 async function runComposerSubmission() {
+  if (!settingsStore.aiEnabled) return
   closeContextPicker()
   const draftSnapshot = chatStore.draft
   const tool = chatStore.selectedTool
@@ -1354,13 +1373,32 @@ async function runComposerSubmission() {
   const traceID = tool
     ? chatStore.appendToolTrace(tool, `${toolLabel}を準備しています。`)
     : null
+  const cleanupInterruptedSubmission = () => {
+    cleanupInterruptedComposerSubmission({
+      timeline: chatStore.timeline,
+      userEntryID,
+      agentProposalEntryID,
+      traceID,
+      removeTimelineEntry: (entryID) => chatStore.removeTimelineEntry(entryID),
+      clearResultForTrace,
+    })
+    if (activeLibrarianTraceID.value === traceID) activeLibrarianTraceID.value = null
+  }
   showResultAfterTrace(tool, traceID)
   if (traceID) await nextTick()
+  if (!settingsStore.aiEnabled) {
+    cleanupInterruptedSubmission()
+    return
+  }
 
   let submitted = false
   let executionFailed = false
   if (tool === 'summary') {
     submitted = Boolean(await summaryPanel.value?.startSummary())
+    if (!settingsStore.aiEnabled) {
+      cleanupInterruptedSubmission()
+      return
+    }
     executionFailed = !submitted && Boolean(aiStore.summaryError)
     if (traceID) {
       chatStore.updateTimelineEntry(traceID, {
@@ -1372,6 +1410,10 @@ async function runComposerSubmission() {
     submitted = Boolean(
       await writingPanel.value?.submitPrompt(prompt, selectedWritingKind.value),
     )
+    if (!settingsStore.aiEnabled) {
+      cleanupInterruptedSubmission()
+      return
+    }
     executionFailed = !submitted && Boolean(writingStore.error)
     if (traceID) {
       chatStore.updateTimelineEntry(traceID, {
@@ -1389,6 +1431,10 @@ async function runComposerSubmission() {
     submitted = Boolean(
       await librarianPanel.value?.startOperation(librarianToolMap[tool]!),
     )
+    if (!settingsStore.aiEnabled) {
+      cleanupInterruptedSubmission()
+      return
+    }
     executionFailed = !submitted && Boolean(librarianStore.error)
     if (!submitted && traceID) {
       chatStore.updateTimelineEntry(traceID, {
@@ -1404,7 +1450,8 @@ async function runComposerSubmission() {
         permission: agentEditPermission,
         entryID: agentProposalEntryID,
         submitPrompt: async (nextPrompt, permission) => Boolean(
-          await assistantPanel.value?.submitPrompt(nextPrompt, permission),
+          settingsStore.aiEnabled
+            && await assistantPanel.value?.submitPrompt(nextPrompt, permission),
         ),
         readResult: () => {
           const response = [...assistantStore.messages]
@@ -1421,7 +1468,14 @@ async function runComposerSubmission() {
         autoApply: async (entryID) => persistAgentProposal(entryID, true),
       })
     } else {
-      submitted = Boolean(await assistantPanel.value?.submitPrompt(prompt, agentEditPermission))
+      submitted = Boolean(
+        settingsStore.aiEnabled
+        && await assistantPanel.value?.submitPrompt(prompt, agentEditPermission),
+      )
+    }
+    if (!settingsStore.aiEnabled) {
+      cleanupInterruptedSubmission()
+      return
     }
     executionFailed = !submitted && Boolean(assistantStore.error)
     if (submitted) {

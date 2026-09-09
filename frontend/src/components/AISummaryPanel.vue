@@ -164,6 +164,7 @@ onBeforeUnmount(() => {
 })
 
 async function handleAISummary() {
+  if (!settingsStore.aiEnabled) return false
   const selectedNote = noteStore.activeNote
   if (!selectedNote) return false
   if (isActiveNoteProtected.value) {
@@ -193,6 +194,7 @@ async function handleAISummary() {
     aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
     return false
   }
+  if (!settingsStore.aiEnabled) return false
   const currentNote = noteStore.activeNote
   const currentDraft = noteStore.activeDraft
   if (!saved || !currentNote || currentNote.id !== noteID || currentDraft) {
@@ -213,6 +215,10 @@ async function handleAISummary() {
     if (!aiStore.isSummaryReady) settingsStore.openSettings('ai')
     return false
   }
+  if (!settingsStore.aiEnabled) {
+    aiStore.cancelSummaryConfirmation()
+    return false
+  }
 
   const snapshot = aiStore.pendingSummary
   if (!snapshot) return false
@@ -220,6 +226,10 @@ async function handleAISummary() {
     `次の内容を AI に送信して要約します。\n\nプロバイダー: ${snapshot.providerID}\nモデル: ${snapshot.modelID}\n送信内容: 現在のノート本文のみ\n出力: Markdown形式の概要・要点・必要に応じた決定事項等\n\n成功した要約はこの端末の履歴へ保存されます。ノート本文とWebDAV同期は変更されません。`,
   )
   if (!confirmed) {
+    aiStore.cancelSummaryConfirmation()
+    return false
+  }
+  if (!settingsStore.aiEnabled) {
     aiStore.cancelSummaryConfirmation()
     return false
   }

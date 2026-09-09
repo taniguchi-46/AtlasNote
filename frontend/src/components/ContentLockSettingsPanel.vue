@@ -1,5 +1,5 @@
 <template>
-  <section class="content-lock-settings">
+  <section class="content-lock-settings" data-settings-anchor="locks" tabindex="-1">
     <h3>ロック</h3>
     <p class="content-lock-description">
       保存空間・ノートブック・ノートごとに本文を暗号化して保護します。保護されたノートはAI機能では利用できません。

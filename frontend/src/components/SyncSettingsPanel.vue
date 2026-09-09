@@ -1,5 +1,5 @@
 <template>
-  <section class="sync-settings">
+  <section class="sync-settings" data-settings-anchor="sync" tabindex="-1">
     <h3>同期</h3>
 
     <button type="button" class="secondary-button" @click="wizardOpen = !wizardOpen">

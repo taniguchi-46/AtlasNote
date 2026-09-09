@@ -427,7 +427,7 @@ function executeGlobalShortcut(actionId: ShortcutActionId) {
       noteEditorRef.value.toggleEditMode()
       return true
     case 'ai.toggleWorkspace':
-      if (!noteStore.activeNote || !noteEditorRef.value) return false
+      if (!settingsStore.aiEnabled || !noteStore.activeNote || !noteEditorRef.value) return false
       noteEditorRef.value.toggleAIWorkspace()
       return true
     case 'editor.undo':

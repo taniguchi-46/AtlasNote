@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
 import {
+  SHORTCUT_LEGACY_STORAGE_KEY,
   SHORTCUT_STORAGE_KEY,
   createDefaultShortcutBindings,
   getShortcutActionDefinition,
@@ -10,6 +11,7 @@ import {
   validateShortcutBinding,
   type ShortcutActionId,
   type ShortcutBinding,
+  type ShortcutBindingSlot,
 } from '../utils/keyboardShortcuts'
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
@@ -26,6 +28,7 @@ export type SettingsTab =
   | 'storage-locations'
   | 'backups'
   | 'locks'
+  | 'help'
 
 export const SIDEBAR_WIDTH_MIN = 180
 export const SIDEBAR_WIDTH_MAX = 360
@@ -66,6 +69,13 @@ function readStringOption<T extends readonly string[]>(key: string, fallback: T[
   return value && options.includes(value as T[number]) ? value as T[number] : fallback
 }
 
+function readBooleanOption(key: string, fallback: boolean) {
+  const value = localStorage.getItem(key)
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return fallback
+}
+
 export const useSettingsStore = defineStore('settings', () => {
   const isSettingsOpen = ref(false)
   const requestedTab = ref<SettingsTab>('theme')
@@ -87,6 +97,7 @@ export const useSettingsStore = defineStore('settings', () => {
       AI_AGENT_EDIT_PERMISSION_OPTIONS,
     ),
   )
+  const aiEnabled = ref(readBooleanOption('atlas-ai-enabled', true))
   const aiWorkspaceRightWidth = ref(
     readClampedNumberInRange(
       'atlas-ai-workspace-right-width',
@@ -125,7 +136,10 @@ export const useSettingsStore = defineStore('settings', () => {
     isKnownNotebookIcon(savedDefaultNotebookIcon) ? savedDefaultNotebookIcon : DEFAULT_NOTEBOOK_ICON,
   )
   const shortcutBindings = ref(
-    parseStoredShortcutBindings(localStorage.getItem(SHORTCUT_STORAGE_KEY)),
+    parseStoredShortcutBindings(
+      localStorage.getItem(SHORTCUT_STORAGE_KEY),
+      localStorage.getItem(SHORTCUT_LEGACY_STORAGE_KEY),
+    ),
   )
 
   watch(sidebarWidth, (newSidebarWidth) => {
@@ -142,6 +156,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(aiAgentEditPermission, (newPermission) => {
     localStorage.setItem('atlas-ai-agent-edit-permission', newPermission)
+  }, { immediate: true })
+
+  watch(aiEnabled, (newEnabled) => {
+    localStorage.setItem('atlas-ai-enabled', String(newEnabled))
   }, { immediate: true })
 
   watch(aiWorkspaceRightWidth, (newWidth) => {
@@ -232,20 +250,40 @@ export const useSettingsStore = defineStore('settings', () => {
     )
   }
 
-  function setShortcutBinding(actionId: ShortcutActionId, binding: ShortcutBinding | null) {
-    const validation = validateShortcutBinding(actionId, binding, shortcutBindings.value)
+  function setShortcutBinding(
+    actionId: ShortcutActionId,
+    slot: ShortcutBindingSlot,
+    binding: ShortcutBinding | null,
+  ) {
+    const nextSlots = [...shortcutBindings.value[actionId]] as [ShortcutBinding | null, ShortcutBinding | null]
+    nextSlots[slot] = binding ? { ...binding } : null
+    const nextBindings = {
+      ...shortcutBindings.value,
+      [actionId]: nextSlots,
+    }
+    const validation = validateShortcutBinding(actionId, binding, nextBindings, slot)
     if (!validation.ok) return validation
 
     shortcutBindings.value = {
       ...shortcutBindings.value,
-      [actionId]: validation.binding ? { ...validation.binding } : null,
+      [actionId]: [
+        slot === 0 && validation.binding ? { ...validation.binding } : nextSlots[0],
+        slot === 1 && validation.binding ? { ...validation.binding } : nextSlots[1],
+      ],
     }
     return validation
   }
 
   function resetShortcutBinding(actionId: ShortcutActionId) {
     const defaultBinding = getShortcutActionDefinition(actionId)?.defaultBinding ?? null
-    return setShortcutBinding(actionId, defaultBinding)
+    const nextBindings = {
+      ...shortcutBindings.value,
+      [actionId]: [defaultBinding ? { ...defaultBinding } : null, null],
+    } as typeof shortcutBindings.value
+    const validation = validateShortcutBinding(actionId, defaultBinding, nextBindings, 0)
+    if (!validation.ok) return validation
+    shortcutBindings.value = nextBindings
+    return validation
   }
 
   function resetAllShortcutBindings() {
@@ -259,6 +297,7 @@ export const useSettingsStore = defineStore('settings', () => {
     noteListWidth,
     aiWorkspacePlacement,
     aiAgentEditPermission,
+    aiEnabled,
     aiWorkspaceRightWidth,
     aiWorkspaceBottomHeight,
     contentLockAutoLockMinutes,

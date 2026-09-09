@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const rootDir = process.cwd()
 const componentPath = (...parts) => path.join(rootDir, 'src', 'components', ...parts)
 const agentProposalPermissionPath = path.join(rootDir, 'src', 'utils', 'agentProposalPermission.ts')
 const workspaceTimelinePath = path.join(rootDir, 'src', 'utils', 'aiWorkspaceTimeline.ts')
+const aiBusyPath = path.join(rootDir, 'src', 'utils', 'aiBusy.ts')
 
 const [
   workspaceSource,
@@ -14,6 +16,7 @@ const [
   settingsStoreSource,
   chatStoreSource,
   settingsModalSource,
+  aiSettingsSource,
   summarySource,
   librarianSource,
   assistantSource,
@@ -23,12 +26,14 @@ const [
   agentProposalCardSource,
   agentProposalPermissionSource,
   workspaceTimelineSource,
+  aiBusySource,
 ] = await Promise.all([
   readFile(componentPath('AIWorkspace.vue'), 'utf8'),
   readFile(componentPath('NoteEditor.vue'), 'utf8'),
   readFile(path.join(rootDir, 'src', 'stores', 'useSettingsStore.ts'), 'utf8'),
   readFile(path.join(rootDir, 'src', 'stores', 'useAIChatStore.ts'), 'utf8'),
   readFile(componentPath('SettingsModal.vue'), 'utf8'),
+  readFile(componentPath('AISettingsPanel.vue'), 'utf8'),
   readFile(componentPath('AISummaryPanel.vue'), 'utf8'),
   readFile(componentPath('AILibrarianPanel.vue'), 'utf8'),
   readFile(componentPath('AIAssistantPanel.vue'), 'utf8'),
@@ -38,6 +43,7 @@ const [
   readFile(componentPath('AIAgentProposalCard.vue'), 'utf8'),
   readFile(agentProposalPermissionPath, 'utf8'),
   readFile(workspaceTimelinePath, 'utf8'),
+  readFile(aiBusyPath, 'utf8'),
 ])
 
 const workspaceTemplate = workspaceSource.slice(
@@ -52,6 +58,9 @@ assert.match(settingsStoreSource, /export type AIAgentEditPermission = 'review-r
 assert.match(settingsStoreSource, /'atlas-ai-agent-edit-permission',\s*'review-required'/)
 assert.match(settingsStoreSource, /localStorage\.setItem\('atlas-ai-agent-edit-permission', newPermission\)/)
 assert.match(settingsStoreSource, /aiAgentEditPermission,/)
+assert.match(settingsStoreSource, /readBooleanOption\('atlas-ai-enabled', true\)/)
+assert.match(settingsStoreSource, /localStorage\.setItem\('atlas-ai-enabled', String\(newEnabled\)\)/)
+assert.match(settingsStoreSource, /aiEnabled,/)
 assert.match(settingsStoreSource, /AI_WORKSPACE_RIGHT_WIDTH_MIN = 300/)
 assert.match(settingsStoreSource, /AI_WORKSPACE_RIGHT_WIDTH_MAX = 960/)
 assert.match(settingsStoreSource, /readClampedNumberInRange/)
@@ -72,10 +81,18 @@ assert.match(settingsModalSource, /Agentの本文編集権限/)
 assert.match(settingsModalSource, /v-model="settingsStore\.aiAgentEditPermission"/)
 assert.match(settingsModalSource, /value="review-required">提案のみ/)
 assert.match(settingsModalSource, /value="auto-update">更新可能/)
+assert.match(aiSettingsSource, /v-model="settingsStore\.aiEnabled"/)
+assert.match(aiSettingsSource, /isAIProcessing/)
+assert.match(aiSettingsSource, /isSubmitting: isAIComposerSubmitting\.value/)
+assert.match(aiSettingsSource, /実行中のAI処理が完了するまでOFFにできません/)
 
 // Right/bottom placement and pointer/keyboard resizing remain available.
 assert.match(workspaceSource, /ResizeObserver/)
 assert.match(workspaceSource, /defineProps<\{ open: boolean \}>/)
+assert.match(workspaceSource, /computed\(\(\) => props\.open && settingsStore\.aiEnabled\)/)
+assert.match(workspaceSource, /isAIActivityBusy/)
+assert.match(workspaceSource, /withAIComposerSubmission\(\(\) => runComposerSubmission\(\)\)/)
+assert.match(workspaceSource, /cleanupInterruptedComposerSubmission/)
 assert.match(workspaceSource, /role="separator"/)
 assert.match(workspaceSource, /@pointerdown="startResize"/)
 assert.match(workspaceSource, /@pointermove="handleResize"/)
@@ -386,7 +403,7 @@ assert.match(workspaceSource, /if \(fixedScopeTools\.has\(tool\)\) return `\$\{l
 assert.match(workspaceSource, /const prompt = tool && fixedScopeTools\.has\(tool\) \? '' : draftSnapshot\.trim\(\)/)
 assert.match(workspaceSource, /const isSubmitting = ref\(false\)/)
 assert.match(workspaceSource, /if \(isSubmitting\.value\) return/)
-assert.match(workspaceSource, /isSubmitting\.value = true[\s\S]*?try \{[\s\S]*?await runComposerSubmission\(\)[\s\S]*?finally \{[\s\S]*?isSubmitting\.value = false/)
+assert.match(workspaceSource, /isSubmitting\.value = true[\s\S]*?try \{[\s\S]*?await withAIComposerSubmission\(\(\) => runComposerSubmission\(\)\)[\s\S]*?finally \{[\s\S]*?isSubmitting\.value = false/)
 assert.match(workspaceSource, /if \(assistantStore\.state === 'canceling'\) return 'AI処理を停止しています…'/)
 assert.match(workspaceSource, /assistantStore\.state === 'generating' && assistantStore\.error[\s\S]*?AI処理は継続しています。/)
 assert.match(workspaceSource, /async function stopAssistant\(\) \{\s*if \(assistantStore\.state === 'canceling'\) return\s*await assistantStore\.cancel\(\)/)
@@ -440,6 +457,7 @@ assert.match(workspaceTemplate, /<XIcon :size="16" aria-hidden="true" \/>/)
 
 assert.match(editorSource, /v-model:open="isAIWorkspaceOpen"/)
 assert.match(editorSource, /class="icon-btn ai-workspace-toggle"/)
+assert.match(editorSource, /v-if="settingsStore\.aiEnabled"[\s\S]*class="icon-btn ai-workspace-toggle"/)
 assert.match(editorSource, /PanelRightOpenIcon/)
 assert.match(editorSource, /PanelBottomOpenIcon/)
 assert.ok(
@@ -595,8 +613,137 @@ assert.match(recordsSource, /removeAllHistories/)
 assert.match(recordsSource, /removeAllArtifacts/)
 
 testNativeKeyboardActionContracts()
+await testAIActivityAndInterruptedSubmission(aiBusySource, workspaceTimelineSource)
 
 console.log('AI workspace tests passed')
+
+async function testAIActivityAndInterruptedSubmission(aiBusySource, workspaceTimelineSource) {
+  const outDir = path.join(rootDir, '.tmp', 'ai-workspace-activity-test')
+  const busyOutFile = path.join(outDir, 'aiBusy.mjs')
+  const timelineOutFile = path.join(outDir, 'aiWorkspaceTimeline.mjs')
+  await mkdir(outDir, { recursive: true })
+
+  try {
+    const compilerOptions = {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    }
+    await writeFile(
+      busyOutFile,
+      ts.transpileModule(aiBusySource, { compilerOptions, fileName: aiBusyPath }).outputText,
+      'utf8',
+    )
+    await writeFile(
+      timelineOutFile,
+      ts.transpileModule(workspaceTimelineSource, { compilerOptions, fileName: workspaceTimelinePath }).outputText,
+      'utf8',
+    )
+    const busy = await import(`${pathToFileURL(busyOutFile).href}?test=${Date.now()}`)
+    const timelineHelpers = await import(`${pathToFileURL(timelineOutFile).href}?test=${Date.now()}`)
+    const { computed, ref } = await import('vue')
+    const simulatedAIEnabled = ref(true)
+    const isAIProcessing = computed(() => busy.isAIActivityBusy({
+      isSubmitting: busy.isAIComposerSubmitting.value,
+    }))
+    const isAIEnabledSwitchDisabled = computed(() => (
+      simulatedAIEnabled.value && isAIProcessing.value
+    ))
+
+    let releaseSave
+    const saveGate = new Promise((resolve) => { releaseSave = resolve })
+    let timeline = [
+      {
+        id: 'existing-proposal',
+        role: 'assistant',
+        kind: 'agent-proposal',
+        content: '既存の提案',
+        proposalState: 'awaiting-review',
+        createdAt: 1,
+      },
+      {
+        id: 'existing-result',
+        role: 'assistant',
+        kind: 'message',
+        content: '既存の結果',
+        createdAt: 2,
+      },
+      {
+        id: 'submission-user',
+        role: 'user',
+        kind: 'message',
+        content: '入力下書き',
+        createdAt: 3,
+      },
+      {
+        id: 'submission-proposal',
+        role: 'assistant',
+        kind: 'agent-proposal',
+        content: 'ノート本文の変更提案を生成しています…',
+        proposalState: 'generating',
+        createdAt: 4,
+      },
+      {
+        id: 'submission-trace',
+        role: 'tool',
+        kind: 'tool-trace',
+        content: 'ツールを準備しています。',
+        status: 'pending',
+        createdAt: 5,
+      },
+      {
+        id: 'completed-trace',
+        role: 'tool',
+        kind: 'tool-trace',
+        content: '完了済みの結果',
+        status: 'success',
+        createdAt: 6,
+      },
+    ]
+    const removed = []
+    const clearedResults = []
+    const draft = '入力下書き'
+    const history = ['既存履歴']
+
+    const pendingSubmission = busy.withAIComposerSubmission(async () => {
+      await saveGate
+      simulatedAIEnabled.value = false
+      if (!simulatedAIEnabled.value) {
+        timelineHelpers.cleanupInterruptedComposerSubmission({
+          timeline,
+          userEntryID: 'submission-user',
+          agentProposalEntryID: 'submission-proposal',
+          traceID: 'submission-trace',
+          removeTimelineEntry: (entryID) => {
+            removed.push(entryID)
+            timeline = timeline.filter((entry) => entry.id !== entryID)
+          },
+          clearResultForTrace: (traceID) => clearedResults.push(traceID),
+        })
+      }
+    })
+
+    assert.equal(busy.isAIComposerSubmitting.value, true, 'draft flush must register as AI activity immediately')
+    assert.equal(isAIProcessing.value, true, 'AI settings must observe submission preparation and save wait')
+    assert.equal(isAIEnabledSwitchDisabled.value, true, 'the enabled AI switch must be disabled while submission is pending')
+
+    releaseSave()
+    await pendingSubmission
+    assert.equal(busy.isAIComposerSubmitting.value, false, 'AI activity must end after cleanup completes')
+    simulatedAIEnabled.value = true
+    assert.equal(isAIEnabledSwitchDisabled.value, false, 'the switch can be enabled again after cleanup completes')
+    assert.deepEqual(removed.sort(), ['submission-proposal', 'submission-trace', 'submission-user'])
+    assert.deepEqual(clearedResults, ['submission-trace'])
+    assert.deepEqual(
+      timeline.map((entry) => entry.id),
+      ['existing-proposal', 'existing-result', 'completed-trace'],
+      'interruption cleanup must preserve existing proposals and completed results',
+    )
+    assert.equal(draft, '入力下書き', 'interruption cleanup must not clear the composer draft')
+    assert.deepEqual(history, ['既存履歴'], 'interruption cleanup must not clear saved history state')
+  } finally {
+    await rm(outDir, { recursive: true, force: true })
+  }
+}
 
 function testNativeKeyboardActionContracts() {
   // Enter/Space activation and focusability come from the native button element.

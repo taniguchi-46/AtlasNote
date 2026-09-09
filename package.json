@@ -8,8 +8,8 @@
     "frontend:build": "npm --prefix frontend run build",
     "frontend:typecheck": "npm --prefix frontend run typecheck",
     "frontend:lint": "npm --prefix frontend run lint",
-    "windows:installer": "wails build -clean -platform windows/amd64 -nsis"
+    "windows:installer": "wails build -clean -platform windows/amd64 -nsis",
+    "windows:installer-options-test": "powershell -NoProfile -ExecutionPolicy Bypass -File build/windows/installer/tests/test-installer-options.ps1"
   },
   "packageManager": "npm@10.8.2"
 }
-

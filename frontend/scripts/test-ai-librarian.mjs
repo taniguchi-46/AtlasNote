@@ -72,7 +72,8 @@ const compiledNoteStore = ts.transpileModule(
     .replace("from '../utils/agentEditProposal'", "from './agentEditProposal.mjs'")
     .replace("from './useSettingsStore'", "from './mock-note-stores.mjs'")
     .replace("from './useNotificationStore'", "from './mock-note-stores.mjs'")
-    .replace("from './useAppStore'", "from './mock-note-stores.mjs'"),
+    .replace("from './useAppStore'", "from './mock-note-stores.mjs'")
+    .replace("from './useContentLockStore'", "from './mock-note-stores.mjs'"),
   {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
@@ -183,6 +184,12 @@ const app = { sortOption: '', sidebarSection: 'all' }
 export function useNotificationStore() { return notifications }
 export function useSettingsStore() { return settings }
 export function useAppStore() { return app }
+export function useContentLockStore() {
+  return {
+    async requestAccess() { return true },
+    async refreshTarget() { return null },
+  }
+}
 export function parseNoteSortOption() { return null }
 `, 'utf8')
 await writeFile(path.join(outDir, 'mock-ai-librarian.mjs'), `
@@ -286,6 +293,7 @@ function createAdoptCandidate(noteStore, librarianStore) {
     'librarianStore',
     'tagStore',
     'notebookStore',
+    'settingsStore',
     'candidateLabel',
     'normalizeTagName',
     'createNoteLinkHref',
@@ -297,6 +305,7 @@ function createAdoptCandidate(noteStore, librarianStore) {
     librarianStore,
     { activeNoteTags: [], tags: [] },
     { notebooks: [] },
+    { aiEnabled: true },
     (candidate) => candidate.value ?? candidate.name ?? candidate.noteID ?? '',
     (value) => value.normalize('NFC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase(),
     (noteID) => `atlasnote://note/${noteID}`,

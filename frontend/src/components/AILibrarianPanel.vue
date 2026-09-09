@@ -216,6 +216,7 @@ async function buildCandidatePool(note: note.Note) {
     .filter((term, index, all) => term !== '' && all.indexOf(term) === index)
 
   for (const query of terms) {
+    if (!settingsStore.aiEnabled) return []
     try {
       const result = await searchNotes({
         query,
@@ -235,11 +236,14 @@ async function buildCandidatePool(note: note.Note) {
     } catch {
       // Candidate discovery is best-effort; the local editor remains usable.
     }
+    if (!settingsStore.aiEnabled) return []
     if (candidates.size >= 20) break
   }
 
+  if (!settingsStore.aiEnabled) return []
   try {
     const backlinks = await listBacklinks({ noteId: note.id, page: 1, pageSize: 20 })
+    if (!settingsStore.aiEnabled) return []
     for (const item of backlinks.items ?? []) {
       addCandidate(candidates, { noteID: item.id, title: item.title })
     }
@@ -251,6 +255,7 @@ async function buildCandidatePool(note: note.Note) {
 }
 
 async function startOperation(requestedOperation: LibrarianOperation) {
+  if (!settingsStore.aiEnabled) return false
   const selectedNote = noteStore.activeNote
   if (!selectedNote) return false
   if (isActiveNoteProtected.value) return false
@@ -274,6 +279,7 @@ async function startOperation(requestedOperation: LibrarianOperation) {
     librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
     return false
   }
+  if (!settingsStore.aiEnabled) return false
   const currentNote = noteStore.activeNote
   if (!currentNote || currentNote.id !== noteID || noteStore.activeDraft) {
     librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
@@ -282,14 +288,17 @@ async function startOperation(requestedOperation: LibrarianOperation) {
 
   if (!tagStore.activeNoteTagsReady || tagStore.activeNoteId !== noteID) {
     await tagStore.loadNoteTags(noteID)
+    if (!settingsStore.aiEnabled) return false
   }
   if (notebookStore.notebooks.length === 0) {
     await notebookStore.fetchNotebooks()
+    if (!settingsStore.aiEnabled) return false
   }
 
   let pool: LibrarianCandidateContext[] = []
   if (requestedOperation === 'related' || requestedOperation === 'duplicate') {
     pool = await buildCandidatePool(currentNote)
+    if (!settingsStore.aiEnabled) return false
     if (pool.length === 0) {
       candidatePool.value = []
       lastOperation.value = requestedOperation
@@ -302,6 +311,7 @@ async function startOperation(requestedOperation: LibrarianOperation) {
   if (!window.confirm(`現在のノート「${currentNote.title || '無題'}」をAIへ送信して${label}を生成します。\n\n生成結果は保存されず、採用した候補だけが既存の保存処理へ渡されます。`)) {
     return false
   }
+  if (!settingsStore.aiEnabled) return false
 
   candidatePool.value = pool
   lastOperation.value = requestedOperation
@@ -319,6 +329,7 @@ async function startOperation(requestedOperation: LibrarianOperation) {
 }
 
 async function adopt(candidate: LibrarianCandidate) {
+  if (!settingsStore.aiEnabled) return
   const currentNote = noteStore.activeNote
   if (!currentNote || currentNote.id !== librarianStore.targetNoteID || currentNote.revision !== librarianStore.baseRevision || noteStore.activeDraft) {
     librarianStore.setApplyError('AI_REVISION_CONFLICT')
@@ -329,10 +340,12 @@ async function adopt(candidate: LibrarianCandidate) {
     switch (librarianStore.operation) {
       case 'title':
         if (!candidate.value || !await noteStore.saveNote(currentNote.id, { title: candidate.value })) throw new Error('AI_PROVIDER_UNAVAILABLE')
+        if (!settingsStore.aiEnabled) return
         break
       case 'classification':
         if (!candidate.notebookID) throw new Error('AI_INPUT_INVALID')
         await noteStore.moveNotesToNotebook([currentNote.id], candidate.notebookID)
+        if (!settingsStore.aiEnabled) return
         break
       case 'tags': {
         if (!candidate.name) throw new Error('AI_INPUT_INVALID')
@@ -346,6 +359,7 @@ async function adopt(candidate: LibrarianCandidate) {
         const expectedTagIDs = currentTags.map((item) => item.id)
         const tagIDs = expectedTagIDs.includes(tag.id) ? expectedTagIDs : [...expectedTagIDs, tag.id]
         await tagStore.setTagsForNoteWithExpectedRevision(currentNote.id, tagIDs, currentNote.revision, expectedTagIDs)
+        if (!settingsStore.aiEnabled) return
         break
       }
       case 'related': {
@@ -356,6 +370,7 @@ async function adopt(candidate: LibrarianCandidate) {
         const link = createNoteLinkMarkdown(title, candidate.noteID)
         const content = currentNote.content.trimEnd() + `\n\n- ${link}\n`
         if (!await noteStore.saveNote(currentNote.id, { content })) throw new Error('AI_PROVIDER_UNAVAILABLE')
+        if (!settingsStore.aiEnabled) return
         break
       }
       case 'duplicate':

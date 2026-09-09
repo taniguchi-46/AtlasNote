@@ -76,6 +76,7 @@
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
           <button
+            v-if="settingsStore.aiEnabled"
             ref="aiWorkspaceToggle"
             class="icon-btn ai-workspace-toggle"
             :class="{ 'is-active': isAIWorkspaceOpen }"
@@ -414,6 +415,8 @@
               @beforeinput="handleMarkdownBeforeInput"
               @input="handleMarkdownInput"
               @keydown="handleMarkdownKeydown"
+              @compositionstart="handleMarkdownCompositionStart"
+              @compositionend="handleMarkdownCompositionEnd"
               @scroll="syncMarkdownHighlightLayer"
               @click="handleMarkdownClick"
               @keyup="updateMarkdownSelection"
@@ -550,6 +553,10 @@ import {
   createMarkdownEditHistory,
   type MarkdownEditSnapshot,
 } from '../utils/markdownEditHistory'
+import {
+  continueMarkdownList,
+  createMarkdownLineBreakTracker,
+} from '../utils/markdownListContinuation'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -610,6 +617,8 @@ let activeNoteId: string | null = null
 let savedRichSelection: { from: number; to: number } | null = null
 let markdownHighlightResizeObserver: ResizeObserver | null = null
 let lastScrolledAgentHighlightKey = ''
+let isMarkdownComposing = false
+const markdownLineBreakTracker = createMarkdownLineBreakTracker()
 let pendingMarkdownInput: {
   before: MarkdownEditSnapshot
   forceNewGroup: boolean
@@ -862,6 +871,8 @@ onBeforeUnmount(() => {
   noteStore.clearAgentEditorHighlight(activeNoteId ?? undefined)
   void noteStore.flushPendingDraft()
   markdownHighlightResizeObserver?.disconnect()
+  isMarkdownComposing = false
+  markdownLineBreakTracker.reset()
   pendingMarkdownInput = null
   markdownEditHistory.reset({ content: '', selectionStart: 0, selectionEnd: 0 })
   localMarkdown.value = ''
@@ -916,6 +927,7 @@ function handleTitleInput() {
 }
 
 function toggleAIWorkspace() {
+  if (!settingsStore.aiEnabled) return
   isAIWorkspaceOpen.value = !isAIWorkspaceOpen.value
 }
 
@@ -1673,6 +1685,15 @@ function getMarkdownInputRecordOptions(inputType: string) {
   return { group: inputType || 'input', forceNewGroup: true }
 }
 
+function handleMarkdownCompositionStart() {
+  markdownLineBreakTracker.reset()
+  isMarkdownComposing = true
+}
+
+function handleMarkdownCompositionEnd() {
+  isMarkdownComposing = false
+}
+
 function handleMarkdownBeforeInput(event: InputEvent) {
   if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
     if (event.cancelable) {
@@ -1680,10 +1701,28 @@ function handleMarkdownBeforeInput(event: InputEvent) {
       pendingMarkdownInput = null
       applyMarkdownHistory(event.inputType === 'historyUndo' ? 'undo' : 'redo')
     }
+    markdownLineBreakTracker.reset()
     return
   }
 
   const textarea = event.currentTarget as HTMLTextAreaElement
+  const skipListContinuation = markdownLineBreakTracker.shouldSkipListContinuation(event)
+  if (
+    (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph')
+    && !skipListContinuation
+    && !isMarkdownComposing
+    && !event.isComposing
+  ) {
+    const before = createMarkdownSnapshot(textarea.value, textarea)
+    const after = continueMarkdownList(before)
+    if (after && event.cancelable) {
+      event.preventDefault()
+      applyMarkdownSnapshot(before, after)
+      pendingMarkdownInput = null
+      return
+    }
+  }
+
   pendingMarkdownInput = {
     before: createMarkdownSnapshot(textarea.value, textarea),
     ...getMarkdownInputRecordOptions(event.inputType),
@@ -1691,6 +1730,28 @@ function handleMarkdownBeforeInput(event: InputEvent) {
 }
 
 function handleMarkdownKeydown(event: KeyboardEvent) {
+  markdownLineBreakTracker.handleKeydown(event)
+  if (
+    event.key === 'Enter'
+    && !event.shiftKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.metaKey
+    && !isMarkdownComposing
+    && !event.isComposing
+  ) {
+    const textarea = event.currentTarget as HTMLTextAreaElement
+    const before = createMarkdownSnapshot(textarea.value, textarea)
+    const after = continueMarkdownList(before)
+    if (after) {
+      event.preventDefault()
+      event.stopPropagation()
+      applyMarkdownSnapshot(before, after)
+      pendingMarkdownInput = null
+      return
+    }
+  }
+
   const actionId = findMatchingShortcutAction(
     event,
     settingsStore.shortcutBindings,
@@ -1707,6 +1768,30 @@ function handleMarkdownKeydown(event: KeyboardEvent) {
     event.preventDefault()
     event.stopPropagation()
   }
+}
+
+function applyMarkdownSnapshot(before: MarkdownEditSnapshot, after: MarkdownEditSnapshot) {
+  pendingMarkdownInput = null
+  markdownEditHistory.record(before, after, { group: 'markdown-list', forceNewGroup: true })
+  dismissAgentEditorHighlight()
+  localMarkdown.value = after.content
+  lastMarkdownSelection = {
+    start: after.selectionStart,
+    end: after.selectionEnd,
+  }
+  updateAutoTitleFromMarkdown(after.content)
+  scheduleAutoSave(after.content)
+  markdownSelectionVersion.value += 1
+
+  const noteId = activeNoteId
+  void nextTick(() => {
+    if (activeNoteId !== noteId) return
+    const textarea = markdownTextarea.value
+    if (!textarea) return
+    textarea.focus()
+    textarea.setSelectionRange(after.selectionStart, after.selectionEnd)
+    markdownSelectionVersion.value += 1
+  })
 }
 
 function applyMarkdownHistory(action: 'undo' | 'redo') {
@@ -1738,6 +1823,7 @@ function applyMarkdownHistory(action: 'undo' | 'redo') {
 }
 
 function handleMarkdownInput(event: Event) {
+  markdownLineBreakTracker.reset()
   const textarea = event.currentTarget as HTMLTextAreaElement
   const after = createMarkdownSnapshot(textarea.value, textarea)
   const pending = pendingMarkdownInput

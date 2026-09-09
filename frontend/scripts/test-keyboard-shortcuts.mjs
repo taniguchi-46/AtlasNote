@@ -23,10 +23,10 @@ try {
   const shortcuts = await import(pathToFileURL(outFile).href)
 
   const defaults = shortcuts.createDefaultShortcutBindings()
-  assert.equal(shortcuts.formatShortcutBinding(defaults['editor.undo']), 'Ctrl+Z')
-  assert.equal(shortcuts.formatShortcutBinding(defaults['editor.redo']), 'Ctrl+Y')
-  assert.equal(defaults['sync.run'], null)
-  assert.equal(defaults['theme.toggle'], null)
+  assert.equal(shortcuts.formatShortcutBinding(defaults['editor.undo'][0]), 'Ctrl+Z')
+  assert.equal(shortcuts.formatShortcutBinding(defaults['editor.redo'][0]), 'Ctrl+Y')
+  assert.deepEqual(defaults['sync.run'], [null, null])
+  assert.deepEqual(defaults['theme.toggle'], [null, null])
 
   const ctrlZEvent = {
     code: 'KeyZ',
@@ -40,9 +40,19 @@ try {
   assert.equal(shortcuts.isNativeHistoryShortcut(ctrlZEvent), true)
   assert.equal(shortcuts.isNativeHistoryShortcut({ ...ctrlZEvent, altKey: true }), false)
 
-  const duplicate = shortcuts.validateShortcutBinding('editor.redo', defaults['editor.undo'], defaults)
+  const duplicate = shortcuts.validateShortcutBinding('editor.redo', defaults['editor.undo'][0], defaults, 0)
   assert.equal(duplicate.ok, false)
   assert.equal(duplicate.code, 'DUPLICATE_BINDING')
+  assert.equal(duplicate.conflictingSlot, 0)
+
+  const sameActionDuplicate = shortcuts.validateShortcutBinding(
+    'editor.undo',
+    defaults['editor.undo'][0],
+    { ...defaults, 'editor.undo': [defaults['editor.undo'][0], null] },
+    1,
+  )
+  assert.equal(sameActionDuplicate.ok, false)
+  assert.equal(sameActionDuplicate.conflictingSlot, 0)
 
   const reserved = shortcuts.validateShortcutBinding(
     'note.new',
@@ -63,9 +73,12 @@ try {
 
   const customized = {
     ...defaults,
-    'editor.undo': { code: 'KeyU', ctrl: true, shift: false, alt: true, meta: false },
-    'editor.redo': null,
-    'sync.run': { code: 'F6', ctrl: false, shift: false, alt: false, meta: false },
+    'editor.undo': [
+      { code: 'KeyU', ctrl: true, shift: false, alt: true, meta: false },
+      { code: 'F7', ctrl: false, shift: false, alt: false, meta: false },
+    ],
+    'editor.redo': [null, null],
+    'sync.run': [{ code: 'F6', ctrl: false, shift: false, alt: false, meta: false }, null],
   }
   const restored = shortcuts.parseStoredShortcutBindings(
     shortcuts.serializeShortcutBindings(customized),
@@ -86,6 +99,28 @@ try {
     }, restored, 'editor'),
     'editor.undo',
   )
+  assert.equal(
+    shortcuts.findMatchingShortcutAction({
+      code: 'F7',
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+    }, restored, 'editor'),
+    'editor.undo',
+  )
+  const legacy = JSON.stringify({
+    version: 1,
+    bindings: {
+      'editor.undo': { code: 'KeyU', ctrl: true, shift: false, alt: true, meta: false },
+      'editor.redo': null,
+    },
+  })
+  const migrated = shortcuts.parseStoredShortcutBindings(null, legacy)
+  assert.equal(shortcuts.formatShortcutBinding(migrated['editor.undo'][0]), 'Ctrl+Alt+U')
+  assert.equal(migrated['editor.undo'][1], null)
+  assert.equal(shortcuts.formatShortcutBinding(migrated['editor.redo'][0]), '未割り当て')
+  assert.equal(shortcuts.formatShortcutBinding(migrated['note.new'][0]), 'Ctrl+N')
   assert.deepEqual(
     shortcuts.parseStoredShortcutBindings('{"version":999,"bindings":{}}'),
     defaults,
@@ -105,7 +140,7 @@ try {
   assert.match(settingsSource, /Esc、Delete、Backspace/, 'shortcut capture must document every key that clears a binding')
   assert.match(
     settingsSource,
-    /event\.code === 'Escape'[\s\S]*settingsStore\.setShortcutBinding\(actionId, null\)/,
+    /event\.code === 'Escape'[\s\S]*settingsStore\.setShortcutBinding\(actionId, slot, null\)/,
     'Escape must clear the current shortcut binding',
   )
   assert.match(aiWorkspaceSource, /通常のノート編集の「元に戻す」対象にはなりません/, 'Agent apply must not promise local undo')

@@ -632,7 +632,7 @@ const sectionTitle = computed(() => {
     case 'uncategorized': return '未分類'
     case 'favorites': return 'お気に入り'
     case 'pinned': return 'ピン留め'
-    case 'recent': return '最近更新した'
+    case 'recent': return '今日'
     case 'trash': return 'ゴミ箱'
     default: return 'すべてのノート'
   }

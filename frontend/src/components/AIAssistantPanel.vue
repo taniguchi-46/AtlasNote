@@ -174,7 +174,7 @@ import type { AIChatMode, AIContextSource, AssistantKind } from '../api/ai'
 import { useAIStore } from '../stores/useAIStore'
 import { useAIAssistantStore } from '../stores/useAIAssistantStore'
 import { useNoteStore } from '../stores/useNoteStore'
-import type { AIAgentEditPermission } from '../stores/useSettingsStore'
+import { useSettingsStore, type AIAgentEditPermission } from '../stores/useSettingsStore'
 import AIMarkdownPreview from './AIMarkdownPreview.vue'
 
 const props = withDefaults(defineProps<{
@@ -193,6 +193,7 @@ const props = withDefaults(defineProps<{
 const noteStore = useNoteStore()
 const aiStore = useAIStore()
 const assistantStore = useAIAssistantStore()
+const settingsStore = useSettingsStore()
 
 const kind = ref<AssistantKind>('qa')
 const question = ref('')
@@ -202,6 +203,8 @@ const historyTitle = ref('')
 let previousNoteID: string | null = null
 
 const canAsk = computed(() => Boolean(
+  settingsStore.aiEnabled
+  &&
   noteStore.activeNote
   && !noteStore.activeNote.isTrashed
   && question.value.trim()
@@ -239,11 +242,14 @@ function contextInput() {
 }
 
 async function preview() {
+  if (!settingsStore.aiEnabled) return false
   if (!await ensureCurrentNotePersisted()) return false
+  if (!settingsStore.aiEnabled) return false
   return assistantStore.previewContext(contextInput())
 }
 
 async function ensureCurrentNotePersisted() {
+  if (!settingsStore.aiEnabled) return false
   const selectedNote = noteStore.activeNote
   if (!selectedNote || selectedNote.isTrashed) {
     assistantStore.setPreconditionError('AI_NOTE_UNAVAILABLE')
@@ -263,6 +269,7 @@ async function ensureCurrentNotePersisted() {
     assistantStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
     return false
   }
+  if (!settingsStore.aiEnabled) return false
   const current = noteStore.activeNote
   if (!current || current.id !== noteID || current.isTrashed || noteStore.activeDraft) {
     assistantStore.setPreconditionError(current?.isTrashed ? 'AI_NOTE_UNAVAILABLE' : 'AI_DRAFT_NOT_SAVED')
@@ -272,8 +279,10 @@ async function ensureCurrentNotePersisted() {
 }
 
 async function confirmAndAsk(agentEditPermission: AIAgentEditPermission = 'review-required') {
+  if (!settingsStore.aiEnabled) return false
   if (!canAsk.value || !noteStore.activeNote) return false
   if (!await preview()) return false
+  if (!settingsStore.aiEnabled) return false
 
   const setting = aiStore.configuredSetting
   if (!setting) return false
@@ -297,6 +306,7 @@ async function confirmAndAsk(agentEditPermission: AIAgentEditPermission = 'revie
   if (!window.confirm(
     `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}${agentProposalSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
   )) return false
+  if (!settingsStore.aiEnabled) return false
 
   const context = contextInput()
   const asked = await assistantStore.ask({
@@ -309,6 +319,7 @@ async function confirmAndAsk(agentEditPermission: AIAgentEditPermission = 'revie
     webSearch: props.webSearch,
     ...(context.agentTarget ? { agentTarget: context.agentTarget } : {}),
   })
+  if (!settingsStore.aiEnabled) return false
   if (asked) question.value = ''
   return asked
 }
