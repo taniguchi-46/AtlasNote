@@ -7,7 +7,7 @@
           <header class="note-import-header">
             <div>
               <DialogTitle as="h2">ノートをインポート</DialogTitle>
-              <DialogDescription>Markdown、テキスト、HTMLファイルを新しいノートとして取り込みます。</DialogDescription>
+              <DialogDescription>Markdown、テキスト、HTMLファイルを新しいノートとして取り込みます。JSON/CSVは複数ノートを一括で取り込めます。</DialogDescription>
             </div>
             <button
               class="icon-btn"
@@ -76,6 +76,9 @@
             <p class="note-import-help">
               「ファイルを選択してインポート」を押すと、対応するファイルを複数選択できます。
             </p>
+            <p class="note-import-help">
+              JSONはformat/version/notes形式、CSVはtitle,content列を使用します。CSVの各レコードは1件のノートになり、異常なレコードがあるファイルは保存しません。
+            </p>
             <p v-if="localError || importStore.error" class="note-import-error" role="alert">
               {{ localError || importStore.error?.message }}
             </p>
@@ -91,8 +94,8 @@
                 保存エラーのため、残りのファイルは取り込んでいません。成功したノートは保持されています。
               </p>
               <ul v-if="importStore.lastResult.failures.length > 0" class="note-import-failures">
-                <li v-for="failure in importStore.lastResult.failures" :key="`${failure.sourceName}:${failure.code}`">
-                  <strong>{{ failure.sourceName }}</strong>: {{ failure.message }}
+                <li v-for="failure in importStore.lastResult.failures" :key="`${failure.sourceName}:${failure.code}:${failure.recordNumber ?? 0}`">
+                  <strong>{{ failure.sourceName }}<template v-if="failure.recordNumber">（{{ failure.recordNumber }}件目）</template></strong>: {{ failure.message }}
                 </li>
               </ul>
             </section>

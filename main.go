@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
+	"os"
 
+	"atlasnote/internal/appcleanup"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -12,9 +16,22 @@ import (
 var assets embed.FS
 
 func main() {
+	if handled, exitCode := runMaintenanceCommand(os.Args[1:]); handled {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return
+	}
+	applicationLock, err := appcleanup.AcquireApplicationLock()
+	if err != nil {
+		reportMaintenanceFailure("Atlas Noteの保守処理中、または起動用の排他を取得できないため起動できません。")
+		return
+	}
+	defer applicationLock.Release()
 	app := NewApp()
+	app.recordApplicationUser = appcleanup.RecordApplicationUser
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:            "Atlas Note",
 		Width:            1280,
 		Height:           800,
@@ -35,12 +52,17 @@ func main() {
 			app,
 		},
 	})
+	if err := finishApplication(app, err, applicationLock.Release); err != nil {
+		reportMaintenanceFailure("Atlas Noteの終了または自動再起動に失敗しました。手動で起動し直してください。")
+	}
+}
+
+// Also closes resources if Wails fails before its OnShutdown callback.
+func finishApplication(app *App, runErr error, release func() error) error {
+	app.shutdown(context.Background())
+	err := errors.Join(runErr, app.shutdownErr, release())
 	if err != nil {
-		println("Error:", err.Error())
-		return
+		return err
 	}
-	// wails.Run returns after OnShutdown, so the current DB and writer lock are already released.
-	if err := app.launchRestartIfRequested(); err != nil {
-		println("Error: Atlas Note could not restart automatically")
-	}
+	return app.launchRestartIfRequested()
 }

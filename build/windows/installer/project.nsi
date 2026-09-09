@@ -5,7 +5,6 @@
 ## wails_tools.nsh は wails build --nsis で生成されるため、直接編集しません。
 ####
 !include "wails_tools.nsh"
-!include "uninstall.nsh"
 
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
@@ -23,6 +22,7 @@ ManifestDPIAware true
 !include "nsDialogs.nsh"
 !include "WinMessages.nsh"
 !include "installer-options.nsh"
+!include "uninstall.nsh"
 
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
@@ -38,6 +38,7 @@ ManifestDPIAware true
 Page custom AtlasNoteOptionsPageCreate AtlasNoteOptionsPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
+UninstPage custom un.AtlasNoteUninstallOptionsPageCreate un.AtlasNoteUninstallOptionsPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "Japanese"
@@ -64,6 +65,7 @@ Section "インストール"
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
     !insertmacro wails.writeUninstaller
+    ; Actual users are recorded by non-elevated normal app startup (SID), not the installer.
 SectionEnd
 
 Function un.AtlasNoteUnassociate

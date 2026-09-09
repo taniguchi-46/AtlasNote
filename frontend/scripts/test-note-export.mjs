@@ -95,6 +95,7 @@ try {
     'format',
     'htmlFragment',
     'pdfBase64',
+    'textContent',
     'allowPlaintextProtected',
   ]) {
     assert.match(apiSource, new RegExp(`\\b${field}\\b`), `the API input must include ${field}`)
@@ -114,6 +115,9 @@ try {
   assert.match(editorSource, /useNoteExportStore/, 'the editor must use the export store')
   assert.match(editorSource, /HTMLとしてエクスポート/, 'the editor must expose HTML export')
   assert.match(editorSource, /PDFとしてエクスポート/, 'the editor must expose PDF export')
+  assert.match(editorSource, /JSONとしてエクスポート/, 'the editor must expose JSON export')
+  assert.match(editorSource, /CSVとしてエクスポート/, 'the editor must expose CSV export')
+  assert.match(editorSource, /TXTとしてエクスポート/, 'the editor must expose TXT export')
   assert.match(editorSource, /runPrepared/, 'lock, flush, rendering, and Wails export must share one busy lifecycle')
   assert.match(editorSource, /requestAccess\(/, 'export must use the common content-lock access gate')
   assert.match(editorSource, /flushPendingDraft\(\)/, 'dirty content must be flushed before export')
@@ -206,9 +210,15 @@ try {
   const dom = new JSDOM('<!doctype html><html><body></body></html>')
   globalThis.DOMParser = dom.window.DOMParser
   globalThis.URL = dom.window.URL
-  const { createPdfBase64FromHtml, createPdfDocumentDefinition } = await import(
+  const { createPdfBase64FromHtml, createPdfDocumentDefinition, createPlainTextFromHtml } = await import(
     pathToFileURL(documentOutFile).href
   )
+  const plainText = createPlainTextFromHtml(
+    '<h1>見出し</h1><p>本文 <strong>太字</strong><a href="https://example.com">リンク</a></p><pre><code>  code\n\nnext</code></pre><script>discard</script>',
+  )
+  assert.match(plainText, /見出し\n本文 太字リンク/)
+  assert.match(plainText, /  code\n\nnext/, 'TXT export must preserve code whitespace')
+  assert.doesNotMatch(plainText, /discard/, 'TXT export must discard executable elements')
   const noteId = 'a'.repeat(32)
   const documentDefinition = createPdfDocumentDefinition(
     `

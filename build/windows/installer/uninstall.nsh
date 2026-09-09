@@ -1,10 +1,15 @@
-; Shared uninstall flow used by the production installer and the regression
+﻿; Shared uninstall flow used by the production installer and the regression
 ; harness. The caller supplies every path so the harness cannot fall back to
 ; the real Desktop, Program Files, or HKLM locations.
 
 Var AtlasNoteUninstallFailure
 Var AtlasNoteUninstallRecoveryFailed
 Var AtlasNoteUninstallBackupReady
+Var AtlasNoteUninstallCleanupFailure
+Var AtlasNoteUninstallDeleteDisplaySettings
+Var AtlasNoteUninstallDeleteCredentials
+Var AtlasNoteUninstallMaintenanceArgs
+Var AtlasNoteUninstallExpectedUser
 Var AtlasNoteUninstallRegistryExists
 Var AtlasNoteUninstallRegistryProbeFailed
 Var AtlasNoteUninstallRegistryPublisher
@@ -14,6 +19,7 @@ Var AtlasNoteUninstallRegistryDisplayIcon
 Var AtlasNoteUninstallRegistryUninstallString
 Var AtlasNoteUninstallRegistryQuietUninstallString
 Var AtlasNoteUninstallRegistryEstimatedSize
+Var AtlasNoteUninstallRegistryInstallUser
 Var AtlasNoteUninstallRegistryPublisherPresent
 Var AtlasNoteUninstallRegistryDisplayNamePresent
 Var AtlasNoteUninstallRegistryDisplayVersionPresent
@@ -21,13 +27,73 @@ Var AtlasNoteUninstallRegistryDisplayIconPresent
 Var AtlasNoteUninstallRegistryUninstallStringPresent
 Var AtlasNoteUninstallRegistryQuietUninstallStringPresent
 Var AtlasNoteUninstallRegistryEstimatedSizePresent
+Var AtlasNoteUninstallRegistryInstallUserPresent
+
+Function un.AtlasNoteUninstallOptionsPageCreate
+    StrCpy $AtlasNoteUninstallDeleteDisplaySettings 0
+    StrCpy $AtlasNoteUninstallDeleteCredentials 0
+    nsDialogs::Create 1018
+    Pop $0
+    ${If} $0 == error
+        Abort
+    ${EndIf}
+    ${NSD_CreateLabel} 0 0 100% 28u "アンインストール時の追加削除（任意）"
+    Pop $0
+    ${NSD_CreateLabel} 0 18u 100% 34u "ノート、バックアップ、保存空間、復旧情報、保存場所の管理情報は保持されます。選択しない項目は変更しません。"
+    Pop $0
+    ${NSD_CreateCheckbox} 0 58u 100% 14u "端末の表示設定・キャッシュを削除"
+    Pop $AtlasNoteUninstallDeleteDisplaySettings
+    ${NSD_SetState} $AtlasNoteUninstallDeleteDisplaySettings ${BST_UNCHECKED}
+    ${NSD_CreateCheckbox} 0 78u 100% 14u "この利用者のAtlas Note用認証情報を削除"
+    Pop $AtlasNoteUninstallDeleteCredentials
+    ${NSD_SetState} $AtlasNoteUninstallDeleteCredentials ${BST_UNCHECKED}
+    nsDialogs::Show
+FunctionEnd
+
+Function un.AtlasNoteUninstallOptionsPageLeave
+    ${NSD_GetState} $AtlasNoteUninstallDeleteDisplaySettings $0
+    ${If} $0 == ${BST_CHECKED}
+        StrCpy $AtlasNoteUninstallDeleteDisplaySettings 1
+    ${Else}
+        StrCpy $AtlasNoteUninstallDeleteDisplaySettings 0
+    ${EndIf}
+    ${NSD_GetState} $AtlasNoteUninstallDeleteCredentials $0
+    ${If} $0 == ${BST_CHECKED}
+        StrCpy $AtlasNoteUninstallDeleteCredentials 1
+    ${Else}
+        StrCpy $AtlasNoteUninstallDeleteCredentials 0
+    ${EndIf}
+FunctionEnd
 
 !macro AtlasNoteUninstall productPath uninstallPath startShortcutPath desktopShortcutPath registryRoot registryRootHandle registryKey installDirPath defaultInstallPath companyParentPath unassociateFunction
     StrCpy $AtlasNoteUninstallFailure 0
     StrCpy $AtlasNoteUninstallRecoveryFailed 0
     StrCpy $AtlasNoteUninstallBackupReady 0
+    StrCpy $AtlasNoteUninstallCleanupFailure 0
+    StrCpy $AtlasNoteUninstallExpectedUser ""
+    StrCpy $AtlasNoteUninstallMaintenanceArgs ""
     StrCpy $AtlasNoteUninstallRegistryExists 0
     StrCpy $AtlasNoteUninstallRegistryProbeFailed 0
+    StrCpy $AtlasNoteUninstallRegistryInstallUserPresent 0
+
+    ; Optional cleanup is a separate, identity-checked maintenance command.
+    ; Silent uninstall has no selection page and must never delete user data
+    ; or credentials. The helper runs before the product file is removed so a
+    ; failure leaves the normal uninstall retry path intact.
+    ${If} $AtlasNoteUninstallDeleteDisplaySettings == 1
+    ${OrIf} $AtlasNoteUninstallDeleteCredentials == 1
+        IfSilent atlasnote_uninstall_optional_cleanup_done
+        !insertmacro AtlasNoteExecuteCleanup "${productPath}"
+        ${If} $AtlasNoteUninstallCleanupFailure == 1
+            Goto atlasnote_uninstall_cleanup_identity_failure
+        ${EndIf}
+        Goto atlasnote_uninstall_optional_cleanup_done
+
+        atlasnote_uninstall_cleanup_identity_failure:
+            StrCpy $AtlasNoteUninstallCleanupFailure 1
+            Goto atlasnote_uninstall_failure
+    ${EndIf}
+    atlasnote_uninstall_optional_cleanup_done:
 
     ; The application binary is the first destructive operation. A locked
     ; binary stops the uninstall before any recovery-sensitive item changes.
@@ -144,6 +210,14 @@ Var AtlasNoteUninstallRegistryEstimatedSizePresent
         atlasnote_uninstall_estimated_size_read:
             StrCpy $AtlasNoteUninstallRegistryEstimatedSizePresent 1
         atlasnote_uninstall_estimated_size_done:
+
+        ClearErrors
+        ReadRegStr $AtlasNoteUninstallRegistryInstallUser ${registryRoot} "${registryKey}" "AtlasNoteInstallUser"
+        IfErrors 0 atlasnote_uninstall_install_user_read
+        Goto atlasnote_uninstall_install_user_done
+        atlasnote_uninstall_install_user_read:
+            StrCpy $AtlasNoteUninstallRegistryInstallUserPresent 1
+        atlasnote_uninstall_install_user_done:
     ${EndIf}
 
     ${If} $AtlasNoteUninstallRegistryProbeFailed == 1
@@ -238,6 +312,10 @@ Var AtlasNoteUninstallRegistryEstimatedSizePresent
                     WriteRegDWORD ${registryRoot} "${registryKey}" "EstimatedSize" "$AtlasNoteUninstallRegistryEstimatedSize"
                     IfErrors atlasnote_uninstall_registry_restore_failed
                 ${EndIf}
+                ${If} $AtlasNoteUninstallRegistryInstallUserPresent == 1
+                    WriteRegStr ${registryRoot} "${registryKey}" "AtlasNoteInstallUser" "$AtlasNoteUninstallRegistryInstallUser"
+                    IfErrors atlasnote_uninstall_registry_restore_failed
+                ${EndIf}
                 Goto atlasnote_uninstall_registry_restore_done
             ${ElseIf} $1 != 0
                 ; The key still exists or cannot be inspected. Do not claim
@@ -253,7 +331,9 @@ Var AtlasNoteUninstallRegistryEstimatedSizePresent
         SetErrorLevel 1
         IfSilent atlasnote_uninstall_failure_silent atlasnote_uninstall_failure_interactive
         atlasnote_uninstall_failure_interactive:
-            ${If} $AtlasNoteUninstallRecoveryFailed == 1
+            ${If} $AtlasNoteUninstallCleanupFailure == 1
+                MessageBox MB_ICONEXCLAMATION|MB_OK "追加の削除を実行できませんでした。対象ユーザーまたは使用中の保存空間を確認してください。アプリ本体は変更していないため、Atlas Noteを終了し、正しい利用者で再度実行してください。"
+            ${ElseIf} $AtlasNoteUninstallRecoveryFailed == 1
                 MessageBox MB_ICONEXCLAMATION|MB_OK "アンインストールに失敗しました。再実行に必要なファイルまたは登録情報を復元できませんでした。再インストールしてから、もう一度アンインストールしてください。"
             ${Else}
                 MessageBox MB_ICONEXCLAMATION|MB_OK "一部のアプリファイルまたは登録を削除できませんでした。Atlas Noteを終了してから再度実行してください。"
@@ -261,4 +341,25 @@ Var AtlasNoteUninstallRegistryEstimatedSizePresent
         atlasnote_uninstall_failure_silent:
             Quit
     atlasnote_uninstall_done:
+!macroend
+
+; The production uninstall and executable fixture both use this exact argv /
+; ExecWait / exit-status handling. This macro performs no installer deletion.
+!macro AtlasNoteExecuteCleanup productPath
+    StrCpy $AtlasNoteUninstallCleanupFailure 0
+    StrCpy $AtlasNoteUninstallMaintenanceArgs "--atlasnote-maintenance --registered-user"
+    ${If} $AtlasNoteUninstallDeleteDisplaySettings == 1
+        StrCpy $AtlasNoteUninstallMaintenanceArgs "$AtlasNoteUninstallMaintenanceArgs --delete-display-settings"
+    ${EndIf}
+    ${If} $AtlasNoteUninstallDeleteCredentials == 1
+        StrCpy $AtlasNoteUninstallMaintenanceArgs "$AtlasNoteUninstallMaintenanceArgs --delete-credentials"
+    ${EndIf}
+    StrCpy $0 -1
+    ClearErrors
+    ExecWait '"${productPath}" $AtlasNoteUninstallMaintenanceArgs' $0
+    ${If} ${Errors}
+        StrCpy $AtlasNoteUninstallCleanupFailure 1
+    ${ElseIf} $0 != 0
+        StrCpy $AtlasNoteUninstallCleanupFailure 1
+    ${EndIf}
 !macroend

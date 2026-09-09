@@ -49,6 +49,7 @@ type App struct {
 	dataDir                     string
 	notesDir                    string
 	startupErr                  error
+	shutdownErr                 error
 	startupStorageError         *StorageLocationError
 	diagnostics                 *diagnostics.Store
 	startupPhase                StartupPhase
@@ -68,6 +69,7 @@ type App struct {
 	restartExecutable           string
 	startProcess                func(string) error
 	quitApplication             func(context.Context)
+	recordApplicationUser       func() error
 	locationMu                  sync.Mutex
 	pendingDataRoot             string
 	pendingBackupRoot           string
@@ -144,6 +146,10 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.buildType = runtime.Environment(ctx).BuildType
+	if a.startupErr == nil && a.buildType != "dev" && a.recordApplicationUser != nil {
+		// Registration failure disables optional cleanup; it must not prevent use.
+		_ = a.recordApplicationUser()
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -157,7 +163,7 @@ func (a *App) shutdown(ctx context.Context) {
 	a.noteImporter = nil
 	a.noteExporter = nil
 	if a.db != nil {
-		_ = a.db.Close()
+		a.shutdownErr = errors.Join(a.shutdownErr, a.db.Close())
 		a.db = nil
 	}
 	if a.contentLocks != nil {
@@ -166,7 +172,7 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.markdownStore = nil
 	if a.dataLock != nil {
-		_ = a.dataLock.Release()
+		a.shutdownErr = errors.Join(a.shutdownErr, a.dataLock.Release())
 		a.dataLock = nil
 	}
 }
@@ -432,6 +438,15 @@ func (a *App) selectExportFile(ctx context.Context, input noteexport.Input) (str
 	case noteexport.FormatPDF:
 		options.Title = "PDFとしてエクスポート"
 		options.Filters = []runtime.FileFilter{{DisplayName: "PDFファイル (*.pdf)", Pattern: "*.pdf"}}
+	case noteexport.FormatJSON:
+		options.Title = "JSONとしてエクスポート"
+		options.Filters = []runtime.FileFilter{{DisplayName: "JSONファイル (*.json)", Pattern: "*.json"}}
+	case noteexport.FormatCSV:
+		options.Title = "CSVとしてエクスポート"
+		options.Filters = []runtime.FileFilter{{DisplayName: "CSVファイル (*.csv)", Pattern: "*.csv"}}
+	case noteexport.FormatTXT:
+		options.Title = "TXTとしてエクスポート"
+		options.Filters = []runtime.FileFilter{{DisplayName: "テキストファイル (*.txt)", Pattern: "*.txt"}}
 	}
 	if a.saveExportFile != nil {
 		return a.saveExportFile(ctx, options)
@@ -443,7 +458,7 @@ func (a *App) selectImportFiles(ctx context.Context) ([]string, error) {
 	options := runtime.OpenDialogOptions{
 		Title: "ノートをインポート",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "ノートファイル (*.md, *.txt, *.html, *.htm)", Pattern: "*.md;*.txt;*.html;*.htm"},
+			{DisplayName: "ノートファイル (*.md, *.txt, *.html, *.htm, *.json, *.csv)", Pattern: "*.md;*.txt;*.html;*.htm;*.json;*.csv"},
 		},
 	}
 	if a.openImportFiles != nil {

@@ -14,6 +14,7 @@ const (
 	FailureCodeEncoding        = "NOTE_IMPORT_INVALID_ENCODING"
 	FailureCodeHTML            = "NOTE_IMPORT_INVALID_HTML"
 	FailureCodeEmptyHTML       = "NOTE_IMPORT_EMPTY_HTML"
+	FailureCodeStructured      = "NOTE_IMPORT_INVALID_STRUCTURED_FILE"
 	FailureCodeCreate          = "NOTE_IMPORT_CREATE_FAILED"
 )
 
@@ -44,15 +45,17 @@ type Result struct {
 }
 
 type ImportedNote struct {
-	SourceName string `json:"sourceName"`
-	NoteID     string `json:"noteId"`
-	Title      string `json:"title"`
+	SourceName   string `json:"sourceName"`
+	NoteID       string `json:"noteId"`
+	Title        string `json:"title"`
+	RecordNumber int    `json:"recordNumber,omitempty"`
 }
 
 type FileFailure struct {
-	SourceName string `json:"sourceName"`
-	Code       string `json:"code"`
-	Message    string `json:"message"`
+	SourceName   string `json:"sourceName"`
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+	RecordNumber int    `json:"recordNumber,omitempty"`
 }
 
 type CreatedNotebook struct {

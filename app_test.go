@@ -2203,7 +2203,7 @@ func TestAppImportNotesUsesNativeSelectionAndExistingNoteService(t *testing.T) {
 	}
 
 	app.openImportFiles = func(_ context.Context, options runtime.OpenDialogOptions) ([]string, error) {
-		if options.Title != "ノートをインポート" || len(options.Filters) != 1 || options.Filters[0].Pattern != "*.md;*.txt;*.html;*.htm" {
+		if options.Title != "ノートをインポート" || len(options.Filters) != 1 || options.Filters[0].Pattern != "*.md;*.txt;*.html;*.htm;*.json;*.csv" {
 			t.Fatalf("native file dialog options = %#v", options)
 		}
 		return []string{markdownPath, htmlPath}, nil

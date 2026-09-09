@@ -194,6 +194,74 @@ export async function createPdfBase64FromHtml(html: string, title: string): Prom
   return bytesToBase64(buffer)
 }
 
+export function createPlainTextFromHtml(html: string): string {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(html, 'text/html')
+  return trimPlainTextBoundary(collectPlainText(document.body, 0))
+}
+
+function collectPlainText(node: Node, depth: number, preserveWhitespace = false): string {
+  assertDepth(depth)
+  if (node.nodeType === 3) {
+    const value = node.nodeValue ?? ''
+    return preserveWhitespace ? value.replace(/\r\n?/g, '\n') : normalizeInlineWhitespace(value)
+  }
+  if (node.nodeType !== 1) {
+    return Array.from(node.childNodes)
+      .map((child) => collectPlainText(child, depth + 1, preserveWhitespace))
+      .join('')
+  }
+
+  const element = node as Element
+  if (shouldDiscardElement(element)) return ''
+  const name = element.localName
+  if (name === 'img') return normalizeInlineWhitespace(element.getAttribute('alt') ?? '')
+  if (name === 'br') return '\n'
+  if (name === 'hr') return '\n---\n'
+  if (name === 'pre') {
+    return `${collectPlainTextChildren(element, depth + 1, true)}\n`
+  }
+  if (name === 'code') {
+    return collectPlainTextChildren(element, depth + 1, true)
+  }
+  if (name === 'table') return `${collectPlainTextTable(element, depth + 1)}\n`
+
+  const children = collectPlainTextChildren(element, depth + 1, preserveWhitespace)
+  if (name === 'li') return `${trimPlainTextBlock(children)}\n`
+  if (blockElementNames.has(name)) return `${trimPlainTextBlock(children)}\n`
+  return children
+}
+
+function collectPlainTextChildren(parent: ParentNode, depth: number, preserveWhitespace: boolean) {
+  assertDepth(depth)
+  return Array.from(parent.childNodes)
+    .map((child) => collectPlainText(child, depth + 1, preserveWhitespace))
+    .join('')
+}
+
+function collectPlainTextTable(table: Element, depth: number) {
+  assertDepth(depth)
+  const rows = Array.from(table.querySelectorAll('tr')).filter(
+    (row) => row.closest('table') === table,
+  )
+  return rows
+    .map((row) =>
+      Array.from(row.children)
+        .filter((cell) => cell.localName === 'th' || cell.localName === 'td')
+        .map((cell) => trimPlainTextBlock(collectPlainTextChildren(cell, depth + 1, false)))
+        .join('\t'),
+    )
+    .join('\n')
+}
+
+function trimPlainTextBlock(value: string) {
+  return value.replace(/^[ \t]+|[ \t]+$/g, '')
+}
+
+function trimPlainTextBoundary(value: string) {
+  return value.replace(/^\n+|\n+$/g, '')
+}
+
 function convertContainer(container: ParentNode, depth: number): PdfContent[] {
   assertDepth(depth)
   const content: PdfContent[] = []

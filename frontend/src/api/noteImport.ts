@@ -18,12 +18,14 @@ export type ImportedNote = {
   sourceName: string
   noteId: string
   title: string
+  recordNumber?: number
 }
 
 export type NoteImportFailure = {
   sourceName: string
   code: string
   message: string
+  recordNumber?: number
 }
 
 export type NoteImportResult = {

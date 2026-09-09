@@ -16,6 +16,16 @@ import (
 )
 
 const MaxSourceBytes int64 = 2 * 1024 * 1024
+const MaxStructuredSourceBytes int64 = 32 * 1024 * 1024
+
+func sourceByteLimit(path string) int64 {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".csv", ".json":
+		return MaxStructuredSourceBytes
+	default:
+		return MaxSourceBytes
+	}
+}
 
 var (
 	errSourceTooLarge = errors.New("import source is too large")
@@ -78,92 +88,109 @@ func (s *Service) Import(ctx context.Context, paths []string, input Input) Resul
 			return result
 		}
 
-		candidate, failure := s.readCandidate(sourcePath, titleMode)
-		if failure != nil {
-			result.Failures = append(result.Failures, *failure)
+		candidates, failures := s.readCandidates(sourcePath, titleMode)
+		if len(failures) > 0 {
+			result.Failures = append(result.Failures, failures...)
 			continue
 		}
 
-		if newNotebookName != "" && !createdNotebook {
-			created, err := s.notes.CreateNotebook(ctx, note.NotebookCreateInput{Name: newNotebookName})
+		for _, candidate := range candidates {
+			if newNotebookName != "" && !createdNotebook {
+				created, err := s.notes.CreateNotebook(ctx, note.NotebookCreateInput{Name: newNotebookName})
+				if err != nil {
+					result.Error = &APIError{
+						Code:      ErrorCodeNotebookCreate,
+						Message:   "新しいノートブックを作成できませんでした。",
+						Retryable: true,
+					}
+					return result
+				}
+				destination = &created.ID
+				createdNotebook = true
+				result.CreatedNotebook = &CreatedNotebook{ID: created.ID, Name: created.Name}
+			}
+
+			created, err := s.notes.Create(ctx, note.CreateInput{
+				NotebookID: destination,
+				Title:      candidate.title,
+				Content:    candidate.content,
+			})
 			if err != nil {
+				result.Failures = append(result.Failures, FileFailure{
+					SourceName:   candidate.sourceName,
+					Code:         FailureCodeCreate,
+					Message:      "ノートを保存できませんでした。",
+					RecordNumber: candidate.recordNumber,
+				})
 				result.Error = &APIError{
-					Code:      ErrorCodeNotebookCreate,
-					Message:   "新しいノートブックを作成できませんでした。",
+					Code:      ErrorCodePersistence,
+					Message:   "ノートの保存に失敗したため、残りのファイルは取り込みませんでした。",
 					Retryable: true,
 				}
 				return result
 			}
-			destination = &created.ID
-			createdNotebook = true
-			result.CreatedNotebook = &CreatedNotebook{ID: created.ID, Name: created.Name}
-		}
 
-		created, err := s.notes.Create(ctx, note.CreateInput{
-			NotebookID: destination,
-			Title:      candidate.title,
-			Content:    candidate.content,
-		})
-		if err != nil {
-			result.Failures = append(result.Failures, FileFailure{
-				SourceName: candidate.sourceName,
-				Code:       FailureCodeCreate,
-				Message:    "ノートを保存できませんでした。",
+			result.Imported = append(result.Imported, ImportedNote{
+				SourceName:   candidate.sourceName,
+				NoteID:       created.ID,
+				Title:        created.Title,
+				RecordNumber: candidate.recordNumber,
 			})
-			result.Error = &APIError{
-				Code:      ErrorCodePersistence,
-				Message:   "ノートの保存に失敗したため、残りのファイルは取り込みませんでした。",
-				Retryable: true,
-			}
-			return result
 		}
-
-		result.Imported = append(result.Imported, ImportedNote{
-			SourceName: candidate.sourceName,
-			NoteID:     created.ID,
-			Title:      created.Title,
-		})
 	}
 
 	return result
 }
 
 type candidate struct {
-	sourceName string
-	title      string
-	content    string
+	sourceName   string
+	title        string
+	content      string
+	recordNumber int
 }
 
 func (s *Service) readCandidate(sourcePath string, titleMode TitleMode) (candidate, *FileFailure) {
+	candidates, failures := s.readCandidates(sourcePath, titleMode)
+	if len(failures) > 0 {
+		return candidate{}, &failures[0]
+	}
+	if len(candidates) == 0 {
+		return candidate{}, nil
+	}
+	return candidates[0], nil
+}
+
+func (s *Service) readCandidates(sourcePath string, titleMode TitleMode) ([]candidate, []FileFailure) {
 	sourceName := safeSourceName(sourcePath)
 	extension := strings.ToLower(filepath.Ext(sourceName))
 	if !isSupportedExtension(extension) {
-		return candidate{}, &FileFailure{
+		return nil, []FileFailure{{
 			SourceName: sourceName,
 			Code:       FailureCodeUnsupportedFile,
 			Message:    "対応していないファイル形式です。",
-		}
+		}}
 	}
 
 	data, err := s.readSource(sourcePath)
+	if err == nil && int64(len(data)) > sourceByteLimit(sourcePath) {
+		err = errSourceTooLarge
+	}
 	if err != nil {
-		code := FailureCodeRead
-		message := "ファイルを読み込めませんでした。"
-		if errors.Is(err, errSourceTooLarge) {
-			code = FailureCodeTooLarge
-			message = "ファイルが大きすぎます。"
-		}
-		return candidate{}, &FileFailure{SourceName: sourceName, Code: code, Message: message}
+		return nil, []FileFailure{sourceReadFailure(sourceName, err)}
 	}
 	if !utf8.Valid(data) {
-		return candidate{}, &FileFailure{
+		return nil, []FileFailure{{
 			SourceName: sourceName,
 			Code:       FailureCodeEncoding,
 			Message:    "UTF-8として読み込めないファイルです。",
-		}
+		}}
 	}
 
 	content := strings.TrimPrefix(string(data), "\uFEFF")
+	if extension == ".json" || extension == ".csv" {
+		return parseStructuredCandidates(extension, content, sourceName, titleMode)
+	}
+
 	headingTitle := ""
 	metadataTitle := ""
 	if extension == ".html" || extension == ".htm" {
@@ -175,7 +202,7 @@ func (s *Service) readCandidate(sourcePath string, titleMode TitleMode) (candida
 				code = FailureCodeEmptyHTML
 				message = "HTMLに取り込める本文がありません。"
 			}
-			return candidate{}, &FileFailure{SourceName: sourceName, Code: code, Message: message}
+			return nil, []FileFailure{{SourceName: sourceName, Code: code, Message: message}}
 		}
 		content = converted.Content
 		headingTitle = converted.HeadingTitle
@@ -184,8 +211,21 @@ func (s *Service) readCandidate(sourcePath string, titleMode TitleMode) (candida
 		headingTitle = titleFromFirstLine(content)
 	}
 
+	if len(content) > maxImportedContentSize {
+		return nil, []FileFailure{sourceReadFailure(sourceName, errSourceTooLarge)}
+	}
 	title := resolveTitle(titleMode, sourceName, headingTitle, metadataTitle)
-	return candidate{sourceName: sourceName, title: title, content: content}, nil
+	return []candidate{{sourceName: sourceName, title: title, content: content}}, nil
+}
+
+func sourceReadFailure(sourceName string, err error) FileFailure {
+	code := FailureCodeRead
+	message := "ファイルを読み込めませんでした。"
+	if errors.Is(err, errSourceTooLarge) {
+		code = FailureCodeTooLarge
+		message = "ファイルが大きすぎます。"
+	}
+	return FileFailure{SourceName: sourceName, Code: code, Message: message}
 }
 
 func resolveTitle(titleMode TitleMode, sourceName string, headingTitle string, metadataTitle string) string {
@@ -251,11 +291,12 @@ func readSourceFile(sourcePath string) ([]byte, error) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, MaxSourceBytes+1))
+	limit := sourceByteLimit(sourcePath)
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > MaxSourceBytes {
+	if int64(len(data)) > limit {
 		return nil, errSourceTooLarge
 	}
 	return data, nil
@@ -263,7 +304,7 @@ func readSourceFile(sourcePath string) ([]byte, error) {
 
 func isSupportedExtension(extension string) bool {
 	switch extension {
-	case ".md", ".txt", ".html", ".htm":
+	case ".md", ".txt", ".html", ".htm", ".json", ".csv":
 		return true
 	default:
 		return false

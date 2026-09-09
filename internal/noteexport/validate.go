@@ -28,6 +28,9 @@ func ValidateInput(input Input) *APIError {
 		if input.PDFBase64 != "" {
 			return apiError(ErrorCodeInvalidInput, "HTMLエクスポートにはPDFデータを指定できません。", "pdfBase64", false)
 		}
+		if input.TextContent != "" {
+			return apiError(ErrorCodeInvalidInput, "HTMLエクスポートにはテキストデータを指定できません。", "textContent", false)
+		}
 		if !utf8.ValidString(input.HTMLFragment) {
 			return apiError(ErrorCodeInvalidInput, "HTMLをUTF-8として検証できません。", "htmlFragment", false)
 		}
@@ -38,11 +41,37 @@ func ValidateInput(input Input) *APIError {
 		if input.HTMLFragment != "" {
 			return apiError(ErrorCodeInvalidInput, "PDFエクスポートにはHTMLデータを指定できません。", "htmlFragment", false)
 		}
+		if input.TextContent != "" {
+			return apiError(ErrorCodeInvalidInput, "PDFエクスポートにはテキストデータを指定できません。", "textContent", false)
+		}
 		if input.PDFBase64 == "" {
 			return apiError(ErrorCodeInvalidInput, "PDFデータがありません。", "pdfBase64", false)
 		}
 		if len(input.PDFBase64) > base64.StdEncoding.EncodedLen(MaxPDFBytes) {
 			return apiError(ErrorCodeTooLarge, "PDFがエクスポート上限を超えています。", "pdfBase64", false)
+		}
+	case FormatJSON, FormatCSV:
+		if input.HTMLFragment != "" {
+			return apiError(ErrorCodeInvalidInput, "構造化形式にはHTMLデータを指定できません。", "htmlFragment", false)
+		}
+		if input.PDFBase64 != "" {
+			return apiError(ErrorCodeInvalidInput, "構造化形式にはPDFデータを指定できません。", "pdfBase64", false)
+		}
+		if input.TextContent != "" {
+			return apiError(ErrorCodeInvalidInput, "構造化形式にはテキストデータを指定できません。", "textContent", false)
+		}
+	case FormatTXT:
+		if input.HTMLFragment != "" {
+			return apiError(ErrorCodeInvalidInput, "TXTエクスポートにはHTMLデータを指定できません。", "htmlFragment", false)
+		}
+		if input.PDFBase64 != "" {
+			return apiError(ErrorCodeInvalidInput, "TXTエクスポートにはPDFデータを指定できません。", "pdfBase64", false)
+		}
+		if !utf8.ValidString(input.TextContent) {
+			return apiError(ErrorCodeInvalidInput, "テキストをUTF-8として検証できません。", "textContent", false)
+		}
+		if len(input.TextContent) > MaxTextBytes {
+			return apiError(ErrorCodeTooLarge, "テキストがエクスポート上限を超えています。", "textContent", false)
 		}
 	}
 

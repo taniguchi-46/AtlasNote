@@ -147,6 +147,27 @@
                 >
                   PDFとしてエクスポート
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy"
+                  @select="handleExportNote('json')"
+                >
+                  JSONとしてエクスポート
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy"
+                  @select="handleExportNote('csv')"
+                >
+                  CSVとしてエクスポート
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy"
+                  @select="handleExportNote('txt')"
+                >
+                  TXTとしてエクスポート
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
@@ -525,7 +546,7 @@ import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
 import NoteBacklinks from './NoteBacklinks.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
-import { createPdfBase64FromHtml } from '../utils/noteExportDocument'
+import { createPdfBase64FromHtml, createPlainTextFromHtml } from '../utils/noteExportDocument'
 import type { NoteExportFormat, NoteExportInput } from '../api/noteExport'
 import { logOperationFailure } from '../utils/operationLogger'
 import {
@@ -981,12 +1002,28 @@ async function handleExportNote(format: NoteExportFormat) {
 
     let allowPlaintextProtected = false
     if (current.protected) {
-      const outputLabel = format === 'html' ? 'HTML' : 'PDF'
+      const outputLabel = {
+        html: 'HTML',
+        pdf: 'PDF',
+        json: 'JSON',
+        csv: 'CSV',
+        txt: 'TXT',
+      }[format]
       allowPlaintextProtected = window.confirm(
         `このノートは保護されています。暗号化領域の外へ、復号済みの本文を平文の${outputLabel}ファイルとして保存します。続行しますか？`,
       )
       if (!allowPlaintextProtected) return null
     }
+
+    const input: NoteExportInput = {
+      noteId: current.id,
+      expectedRevision: current.revision,
+      title: current.title,
+      markdown: current.content,
+      format,
+      allowPlaintextProtected,
+    }
+    if (format === 'json' || format === 'csv') return input
 
     let htmlFragment: string
     try {
@@ -1005,16 +1042,13 @@ async function handleExportNote(format: NoteExportFormat) {
       return null
     }
 
-    const input: NoteExportInput = {
-      noteId: current.id,
-      expectedRevision: current.revision,
-      title: current.title,
-      markdown: current.content,
-      format,
-      allowPlaintextProtected,
-    }
     if (format === 'html') {
       input.htmlFragment = htmlFragment
+      return input
+    }
+
+    if (format === 'txt') {
+      input.textContent = createPlainTextFromHtml(htmlFragment)
       return input
     }
 

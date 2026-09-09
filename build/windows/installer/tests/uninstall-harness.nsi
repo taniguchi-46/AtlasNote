@@ -3,6 +3,8 @@ RequestExecutionLevel user
 
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!include "nsDialogs.nsh"
+!include "WinMessages.nsh"
 !include "..\uninstall.nsh"
 
 Name "Atlas Note uninstall harness"
@@ -11,6 +13,8 @@ InstallDir "$TEMP\AtlasNote-uninstall-harness"
 ShowInstDetails nevershow
 SilentInstall silent
 SilentUninstall silent
+
+UninstPage custom un.AtlasNoteUninstallOptionsPageCreate un.AtlasNoteUninstallOptionsPageLeave
 
 Var AtlasNoteHarnessRoot
 Var AtlasNoteHarnessInstallDir

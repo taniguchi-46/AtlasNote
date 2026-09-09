@@ -1,10 +1,10 @@
 # ノートエクスポート
 
-最終更新: 2026-08-27
+最終更新: 2026-09-09
 
 ## 目的と対象範囲
 
-- 現在アクティブな単一ノートの本文を、HTMLまたはPDFファイルとして直接出力する。
+- 現在アクティブな単一ノートの本文を、HTML、PDF、構造化JSON、CSV、プレーンTXTファイルとして直接出力する。
 - ノートタイトルは保存ダイアログの推奨ファイル名と文書メタデータにだけ使用し、本文先頭へ重複して追加しない。
 - 添付ファイル、画像の埋め込み、複数ノートの一括出力は対象外とする。画像要素は画像データを出力せず、`alt`文字列だけを本文へ残す。
 
@@ -22,7 +22,7 @@
 
 1. フロントエンドは対象ノートIDを固定し、共通コンテンツロック解除フローを通す。
 2. エディターのdraftをflushし、アクティブノートが変わっていないことを確認する。
-3. 保存済みMarkdownからHTML断片またはPDFを生成し、同じMarkdownのsnapshotと`expectedRevision`をGo側へ渡す。
+3. 保存済みMarkdownからHTML断片、PDF、またはTXTを生成し、同じMarkdownのsnapshotと`expectedRevision`をGo側へ渡す。JSON／CSVはGo側で保存済みノートの正本snapshotから生成する。
 4. Go側は入力形式と上限を事前検証してから、ネイティブ保存ダイアログを表示する。ダイアログ表示中はコンテンツアクセスgateを保持しない。
 5. 保存先の選択後、Go側はexportアクセスgateを取得し、既存のNote Serviceから本文を最終読み込みする。現在のrevision、Markdown、ロック状態をrequestのsnapshotと再照合する。
 6. 一致する場合だけ、同じgateを保持したまま形式別payloadを検証し、ファイルを原子的に確定する。競合、再ロック、本文差異があればファイルを書き込まず終了する。
@@ -36,6 +36,7 @@
 | 保存済みMarkdown | 2 MiB | `NOTE_EXPORT_TOO_LARGE` |
 | HTML断片 | 8 MiB | `NOTE_EXPORT_TOO_LARGE` |
 | Base64復号後のPDF | 32 MiB | `NOTE_EXPORT_TOO_LARGE` |
+| TXT本文 | 2 MiB | `NOTE_EXPORT_TOO_LARGE` |
 
 形式に不要なpayloadが同時に指定された場合は、ファイルダイアログや本文読み込みより前に拒否する。本文とHTML断片は有効なUTF-8として検証する。
 
@@ -56,6 +57,17 @@
 - 画像データは取り込まず、`alt`文字列だけを保持する。外部リソースを取得しない。
 - フロントエンドは生成したPDFをBase64 payloadとしてGo側へ渡す。Go側は復号後の上限、`%PDF-`ヘッダー、終端`%%EOF`、revisionとMarkdown snapshotを再検証してから保存する。
 
+## JSON／CSVエクスポート
+
+- JSONはUTF-8のversion 1形式`{"format":"atlasnote-notes","version":1,"notes":[{"title":"...","content":"..."}]}`で出力する。本文とタイトルは、検証済みの保存済みノートsnapshotから取得する。
+- CSVはUTF-8の`title,content`ヘッダーと1件のレコードを出力し、タイトル・本文中の改行、カンマ、引用符はCSV規則でエスケープする。
+- CSVセルの先頭（空白類を除く）が`=`、`+`、`-`、`@`の場合は、表計算ソフトで数式として解釈されないよう先頭にアポストロフィを付ける。
+
+## TXTエクスポート
+
+- Markdownを既存の安全なRich HTMLへ変換した後、スクリプト、埋め込み要素、外部URLの実体、画像データを含めず、可視テキストだけをプレーンテキストへ変換する。リンクはラベルだけを残し、コードブロックの空白と改行は保持する。
+- TXT本文はUTF-8、2 MiB以下とし、JSON／CSVと同じ保存済みsnapshot、revision、lock、原子的保存の検証を通す。
+
 ## コンテンツロックと平文警告
 
 - ロック中のノートは共通解除gateを通し、Go側でも保存直前にロック状態を再検証する。保存ダイアログ表示中に自動ロックした場合はエクスポートを拒否する。
@@ -75,12 +87,12 @@
 | --- | --- |
 | `NOTE_EXPORT_BUSY` | 別のエクスポートが実行中 |
 | `NOTE_EXPORT_INVALID_INPUT` | note ID、revision、snapshot、形式別payloadなどが不正 |
-| `NOTE_EXPORT_INVALID_FORMAT` | HTML／PDF以外の形式が指定された |
+| `NOTE_EXPORT_INVALID_FORMAT` | 対応していない形式が指定された |
 | `NOTE_EXPORT_NOTE_NOT_FOUND` | 保存前の最終確認で対象ノートが存在しない |
 | `NOTE_EXPORT_LOCKED` | 対象ノートが未解除または保存前に再ロックされた |
 | `NOTE_EXPORT_STALE` | revisionまたはMarkdown snapshotが現在の正本と一致しない |
 | `NOTE_EXPORT_PROTECTED_CONFIRMATION_REQUIRED` | 保護本文の平文出力が明示確認されていない |
-| `NOTE_EXPORT_TOO_LARGE` | Markdown、HTML、PDFの上限を超えた |
+| `NOTE_EXPORT_TOO_LARGE` | Markdown、HTML、PDF、TXTの上限を超えた |
 | `NOTE_EXPORT_RENDER_FAILED` | HTMLの安全化またはPDFの生成・検証に失敗した |
 | `NOTE_EXPORT_WRITE_FAILED` | 一時ファイル作成、書き込み、sync、close、置換に失敗した |
 | `NOTE_EXPORT_UNAVAILABLE` | ServiceまたはWails APIを利用できない |
@@ -91,9 +103,9 @@
 
 自動テストでは次を確認する。
 
-- 入力形式、UTF-8、各サイズ上限、形式別payload、PDFヘッダー・終端の検証。
+- 入力形式、UTF-8、各サイズ上限、形式別payload、JSON／CSVの正本snapshot、PDFヘッダー・終端の検証。
 - HTMLのタグ・属性・URL allowlist、raw HTML、外部画像、スクリプト、イベント属性、CSP、タイトルescape。
-- 日本語、空本文、各Rich構造、長文・複数ページ、表・コード・リンクを含むHTML／PDF生成。
+- 日本語、空本文、各Rich構造、長文・複数ページ、表・コード・リンクを含むHTML／PDF生成、JSON／CSV／TXTの出力とCSV数式セル無害化。
 - 保存ダイアログのキャンセル、推奨ファイル名、拡張子補完、原子的置換、失敗時cleanupと既存ファイル保護。
 - revision／Markdown競合、未解除ロック、保護本文の確認、ダイアログ中の自動ロック、同時実行拒否。
 - 保存前flush失敗・競合時の中止、アクティブノート変更、エクスポート中の保存空間切替拒否。

@@ -18,6 +18,7 @@ const (
 	MaxMarkdownBytes     = 2 * 1024 * 1024
 	MaxHTMLFragmentBytes = 8 * 1024 * 1024
 	MaxPDFBytes          = 32 * 1024 * 1024
+	MaxTextBytes         = 2 * 1024 * 1024
 )
 
 type Format string
@@ -25,6 +26,9 @@ type Format string
 const (
 	FormatHTML Format = "html"
 	FormatPDF  Format = "pdf"
+	FormatJSON Format = "json"
+	FormatCSV  Format = "csv"
+	FormatTXT  Format = "txt"
 )
 
 func (format Format) Extension() string {
@@ -33,6 +37,12 @@ func (format Format) Extension() string {
 		return ".html"
 	case FormatPDF:
 		return ".pdf"
+	case FormatJSON:
+		return ".json"
+	case FormatCSV:
+		return ".csv"
+	case FormatTXT:
+		return ".txt"
 	default:
 		return ""
 	}
@@ -45,6 +55,7 @@ type Input struct {
 	Markdown                string `json:"markdown"`
 	HTMLFragment            string `json:"htmlFragment"`
 	PDFBase64               string `json:"pdfBase64"`
+	TextContent             string `json:"textContent"`
 	Format                  Format `json:"format"`
 	AllowPlaintextProtected bool   `json:"allowPlaintextProtected"`
 }

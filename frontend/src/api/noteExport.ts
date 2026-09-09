@@ -1,6 +1,6 @@
 import * as WailsApp from '../../wailsjs/go/main/App'
 
-export type NoteExportFormat = 'html' | 'pdf'
+export type NoteExportFormat = 'html' | 'pdf' | 'json' | 'csv' | 'txt'
 
 export type NoteExportInput = {
   noteId: string
@@ -10,6 +10,7 @@ export type NoteExportInput = {
   format: NoteExportFormat
   htmlFragment?: string
   pdfBase64?: string
+  textContent?: string
   allowPlaintextProtected: boolean
 }
 

@@ -217,6 +217,14 @@ func LoadStorageLocationsForRecovery() (StorageLocations, error) {
 	return loadStorageLocationsFrom(path, false)
 }
 
+// LoadStorageLocationsForRecoveryFrom reads a bootstrap file without probing
+// or modifying either storage root. Standalone maintenance commands use it
+// so an uninstall helper can inspect the saved locations without starting the
+// normal migration/recovery path.
+func LoadStorageLocationsForRecoveryFrom(filePath string) (StorageLocations, error) {
+	return loadStorageLocationsFrom(filePath, false)
+}
+
 func loadStorageLocationsFrom(filePath string, probeRoots bool) (StorageLocations, error) {
 	filePath, err := normalizeAbsolutePath(filePath)
 	if err != nil {

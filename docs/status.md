@@ -1,10 +1,10 @@
 # プロジェクト状況
 
-最終更新: 2026-09-08
+最終更新: 2026-09-09
 
-Priority 2の追加レビュー3件を修正した。両保存先が利用不能な復旧時の候補選択、複数Store間の診断記録の保持、OS原因別の日本語理由／対処を回帰テストで確認した。`go test ./... -count=1`、Frontendのtypecheck、保存場所setup・note delete・storage spaces・backups・operation loggerのテストが成功。診断履歴のA→B→A・保持上限・起動後の破損／リンク・ロック競合もtemp fixtureで成功した。OS理由分類部分はLinux／macOS向けテストバイナリのクロスコンパイルまで確認し、他OSでの実行・手動UI・インストーラー再検証は今回未実施。commit／pushは再レビュー後に行う。
+Priority 2の追加レビュー3件を修正した。両保存先が利用不能な復旧時の候補選択、複数Store間の診断記録の保持、OS原因別の日本語理由／対処を回帰テストで確認した。続くPriority 4では、構造化ノート入出力とWindowsアンインストール時の任意追加削除を実装した。`go test ./... -count=1`、Frontendのtypecheck、保存場所setup・note delete・storage spaces・backups・operation loggerのテストが成功。診断履歴のA→B→A・保持上限・起動後の破損／リンク・ロック競合もtemp fixtureで成功した。OS理由分類部分はLinux／macOS向けテストバイナリのクロスコンパイルまで確認し、他OSでの実行・手動UI・インストーラー再検証は今回未実施。commit／pushは再レビュー後に行う。
 
-保存場所の再起動時移行失敗を`storage-recovery`へ接続し、元へ戻す／別の空フォルダへ切り替える／同じ移行を再試行する保留操作、候補の再検証、v2移行進捗の永続化、Windowsインストーラーの日本語化・安全なアンインストールを実装済み。保存場所の検証失敗は段階・役割・OSエラー番号を含む安全な理由へ分類し、独立した上限付き診断履歴を設定／復旧画面で表示・コピーできる。Go・フロントエンドのテスト、Frontend production build、同梱Wails CLIによるclean build、NSIS 3.12のアンインストール回帰ハーネスは確認済み。実際のインストール／アンインストール操作、Windowsの「インストールされているアプリ」経由の確認は未実施（2026-09-08）。
+保存場所の再起動時移行失敗を`storage-recovery`へ接続し、元へ戻す／別の空フォルダへ切り替える／同じ移行を再試行する保留操作、候補の再検証、v2移行進捗の永続化、Windowsインストーラーの日本語化・安全なアンインストールを実装済み。Priority 4ではJSON／CSVの複数ノートインポート、JSON／CSV／TXTの単一ノートエクスポート、既定OFFの表示設定・キャッシュ／現ユーザーCredential Store削除選択を追加した。追加削除は通常起動・migrationから分離し、ノート、バックアップ、保存空間、復旧情報、保存場所管理情報を保持する。保存場所の検証失敗は段階・役割・OSエラー番号を含む安全な理由へ分類し、独立した上限付き診断履歴を設定／復旧画面で表示・コピーできる。Go・フロントエンドのテスト、Frontend production build、同梱Wails CLIによるclean build、NSIS 3.12のアンインストール回帰ハーネスは確認済み。実際のインストール／アンインストール操作、Windowsの「インストールされているアプリ」経由の確認は未実施（2026-09-09）。
 
 2026-09-08のPriority 2回帰確認では、`go test ./... -count=1`、Frontendのtypecheck／lint、note delete・保存場所setup・storage space・backup・operation loggerのFrontendテスト、Frontend production build、同梱Wails CLIによるWindows clean build、NSISアンインストール回帰ハーネスが成功した。Windowsのstage linkサブテストはシンボリックリンク作成権限不足でskipされている。
 
@@ -31,14 +31,15 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - データディレクトリ単位の単一writer保証
 - Pre-Phase 5「ノート保存空間の分割」。既存ルートを移動せず「メイン」として登録し、追加空間を内部ID配下へ作成する。空間ごとにSQLite、Markdown、WebDAV設定・outbox・競合、AIローカル設定・履歴・成果物、同期復旧、単一writer lockを分離する。設定画面の一覧から選択し、同期／AI busy確認とdirty draftのflush、対象空間の事前検証後に選択を保存して自動再起動する。保存空間の削除・改名・外部フォルダ選択は対象外。設計は`docs/development/storage-spaces.md`を正とする（2026-08-25）
 - Pre-Phase 5「ロック機能」。保存空間・ノートブック・ノート単位でMarkdown本文を認証付き暗号化し、名前・タイトルは平文として保持する。保存空間は設定画面から、ノートブック・ノートは3ペインの編集ポップアップから設定でき、設定画面のロック一覧で解除・パスフレーズ変更を行う。ロック済みノート／ノートブックの選択時には、継承元を含む未解除ロックを共通ダイアログで順に要求し、キャンセル時は選択を変更しない。解除時点から固定時間で再ロックする設定（既定はアプリ終了時のみ、1/5/15/30/60分）を備え、操作では期限を延長しない。期限到来時は下書きを保存し、失敗時は鍵を保持して再試行する。保護対象はAIで利用不可とし、既存AI記録は明示確認後だけ削除する。旧平文同期先は設定前に切断し、暗号化同期形式を別途実装するまで保護済み保存空間の同期は拒否する。設計は`docs/development/content-locks.md`を正とする（2026-08-26）
-- Pre-Phase 5「md・txt・HTMLからインポート」。OSネイティブの複数ファイル選択から、最上位・既存ノートブック・新規トップレベルノートブックへ1ファイル1ノートとして保存する。タイトルは自動・ファイル名・先頭見出し・メタデータから選択でき、候補がない場合はファイル名へフォールバックする。HTMLは許可した文書構造だけをMarkdownへ変換し、`hidden`属性を持つ本文と子孫、raw HTML、属性、スクリプト、CSS、外部リソースを保存しない。既存のNote Serviceを通じてMarkdown、SQLite、操作journal、検索・リンク索引、同期outbox、コンテンツロックを維持し、変換失敗はファイル単位、保存失敗は成功済みノートを保持する部分成功として扱う。インポート中は保存空間の切替を拒否する。設計は`docs/development/note-import.md`を正とする（2026-08-26）
-- Pre-Phase 5「単一ノートのHTML・PDFエクスポート」。dirty draftを既存保存laneでflushし、保存済みMarkdownとrevisionをsnapshotとしてGo側で再検証した後、OSネイティブ保存ダイアログの選択先へ原子的に出力する。HTMLはallowlist再サニタイズ、CSP、固定CSSを持つ自己完結文書とし、PDFは同梱Noto Sans JPを使うA4縦の直接生成とする。外部リソース・画像データは含めず、保護ノートは平文出力警告と明示確認を必須とする。エクスポート中の保存空間切替と重複実行を拒否し、保存先フルパス・本文・payloadをログや結果へ返さない。設計は`docs/development/note-export.md`を正とする（2026-08-27）
+- Pre-Phase 5「md・txt・HTML・JSON・CSVからインポート」。OSネイティブの複数ファイル選択から、最上位・既存ノートブック・新規トップレベルノートブックへ保存する。旧形式は1ファイル1ノート、JSON／CSVは1ファイル最大1,000ノートとして扱う。タイトルは自動・ファイル名・先頭見出し・メタデータから選択でき、構造化レコードはtitleを優先し、候補がない場合はファイル名へフォールバックする。HTMLは許可した文書構造だけをMarkdownへ変換し、`hidden`属性を持つ本文と子孫、raw HTML、属性、スクリプト、CSS、外部リソースを保存しない。既存のNote Serviceを通じてMarkdown、SQLite、操作journal、検索・リンク索引、同期outbox、コンテンツロックを維持し、変換失敗はファイル単位、構造化入力はファイル全体の検証失敗、保存失敗は成功済みノートを保持する部分成功として扱う。インポート中は保存空間の切替を拒否する。設計は`docs/development/note-import.md`を正とする（2026-09-09）
+- Pre-Phase 5「単一ノートのHTML・PDF・JSON・CSV・TXTエクスポート」。dirty draftを既存保存laneでflushし、保存済みMarkdownとrevisionをsnapshotとしてGo側で再検証した後、OSネイティブ保存ダイアログの選択先へ原子的に出力する。HTMLはallowlist再サニタイズ、CSP、固定CSSを持つ自己完結文書とし、PDFは同梱Noto Sans JPを使うA4縦の直接生成、JSON／CSVはGo側の正本snapshot生成、TXTは安全な可視テキスト変換とする。外部リソース・画像データは含めず、保護ノートは平文出力警告と明示確認を必須とする。エクスポート中の保存空間切替と重複実行を拒否し、保存先フルパス・本文・payloadをログや結果へ返さない。設計は`docs/development/note-export.md`を正とする（2026-09-09）
 - Pre-Phase 5「アプリ内グローバルショートカット」。Undo／Redoを含む全操作を設定画面で変更・解除・初期化でき、既定は本文Undo`Ctrl + Z`、Redo`Ctrl + Y`、新規ノート`Ctrl + N`、検索`Ctrl + F`、設定`Ctrl + ,`とする。MarkdownとRich双方の本文履歴を既存autosaveへ接続し、Tiptapの固定Undoキーマップを無効化した。設定はversion付き端末ローカル`localStorage`、本文履歴はメモリ限定とし、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。OS全体のシステムホットキーとAgent適用結果のUndoは対象外。設計は`docs/development/keyboard-shortcuts.md`を正とする（2026-08-28、手動UI受け入れ未完了）
 - Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
 - Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
 - 2026-09-08に、物理保存場所選択の候補・Apply・再起動時移行で、パス単位の候補検証、RootValidationErrorによる段階／役割／OSエラー番号の分類、markerだけに依存しないdata root再検証、失敗時の保留状態保持を追加した。保存場所エラーの独立診断履歴は安全なallowlistと上限を持ち、設定／復旧画面から表示・コピーできる。Wails生成バインディング、Frontend回帰テスト、Go全体テスト、NSIS権限回帰ハーネスで確認済み。
 - 2026-09-06に、保存場所移行のデータstage・分離バックアップstage・同一targetルートのバックアップstage・source読み取り拒否をWindowsの実共有ハンドルで検証した。共有中はowned marker・stage・保留マーカーを保持し、ハンドル解放後に再試行して完了すること、誤ったバックアップ残骸検査パスを修正したことを確認した。marker不一致、look-alike sibling、marker linkも変更なしで拒否する。
 - 2026-09-06に、同一／分離アーカイブルートのApp統合テストで、自動バックアップからの復元を再起動で適用し、復元されたノートのrevisionを基準にtrash後のrevisionで完全削除できること、他ノート・自動バックアップ・復元安全用バックアップ・保留マーカーが保持されることを確認した。Frontendの実Pinia Storeテストでは、trash後のstale lock応答がrevisionを巻き戻さず、最新のlock応答だけを反映することも確認した。
+- 2026-09-09に、構造化JSON／CSVの全件検証付き複数ノートインポート、JSON／CSV／TXTのcanonical snapshotエクスポート、CSV数式セル無害化を実装した。Windowsアンインストールでは、既定OFFの追加削除ページから、現在ユーザーの既知のWebViewデータとCredential Store参照だけを削除できる保守コマンドを追加し、通常起動・migration・ノート／バックアップ／保存場所管理情報の削除を行わないことをfixture／mockとNSISコンパイルで確認した。
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -168,6 +169,7 @@ npm --prefix frontend run test:note-batch
 npm --prefix frontend run test:note-selection
 npm --prefix frontend run test:note-delete
 npm --prefix frontend run test:note-export
+npm --prefix frontend run test:note-import
 npm --prefix frontend run test:notifications
 npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
@@ -202,6 +204,7 @@ wails build
 | `docs/development/storage-spaces.md` | 保存空間のディレクトリ、台帳、分離境界、再起動切替 |
 | `docs/development/backup-restore.md` | 自動バックアップ、完全性検証、再起動時の復元・rollback |
 | `docs/development/note-export.md` | 単一ノートのHTML・PDF出力、snapshot再検証、ロック、原子的保存 |
+| `docs/development/note-import.md` | md・txt・HTML・JSON・CSVの安全な変換、全件検証、保存契約 |
 | `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
 | `docs/todo/todo-phese4.md` | Phase 4 v1の実装前課題・受け入れTODO |
 | `docs/todo/todo-phese4-v2.md` | Phase 4 v2の実装・検証TODO |
@@ -218,3 +221,8 @@ wails build
 | `docs/rules/conventions.md` | 実装規約 |
 | `docs/rules/BRANCHING.md` | Git運用ルール |
 | `docs/rules/ai.md` | AI Agent共通ガイド |
+
+### 優先度4レビュー修正（2026-09-09）
+
+追加削除の対象を既知のWebView leaf領域に限定し、保存先重複の事前拒否とハンドルによるパス差し替え防止を追加。本人確認を通常利用時のSID記録とWindowsセッション／実行トークンの照合へ変更。終了処理とアプリ活動マーカーの解放を子プロセス起動前に完了させ、別保存空間の同時利用は保持。従来MD／TXT／HTMLの2 MiB入力上限を復元し、CSV／JSONの32 MiBと各本文2 MiBを維持。fixture／mock回帰とNSIS実引数検証を追加。実機UAC・WebView2配置・インストールからの一連の手動受け入れは未確認。詳細は`docs/development/windows-distribution.md`、`docs/development/note-import.md`を参照。
+検証結果: 一時APPDATAへ隔離した `go test ./... -count=1`、Frontend typecheck・note-import・note-export、NSIS uninstall・追加削除dispatch／SID回帰、差分検査が成功。隔離前の全Goテストは旧配置の実プロファイルを参照して7件失敗したため、その結果は成功扱いにしない。既存installer-optionsハーネスはコンパイル成功後、Windowsのセキュリティ検出でEXE起動が遮断され、実行検証は未完了。保護設定の変更や検出回避は行っていない。

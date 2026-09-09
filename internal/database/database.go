@@ -48,6 +48,17 @@ func sqliteDSN(databasePath string) string {
 }
 
 func sqliteDSNWithMode(databasePath string, mode string) string {
+	return sqliteDSNWithOptions(databasePath, mode, mode == "ro")
+}
+
+// sqliteDSNReadOnly opens a live, already-existing database without making it
+// immutable. Maintenance reads need SQLite to include committed WAL frames;
+// mode=ro still prevents schema/data writes and keeps migration out of scope.
+func sqliteDSNReadOnly(databasePath string) string {
+	return sqliteDSNWithOptions(databasePath, "ro", false)
+}
+
+func sqliteDSNWithOptions(databasePath string, mode string, immutable bool) string {
 	dsn := &url.URL{
 		Scheme: "file",
 		Opaque: filepath.ToSlash(databasePath),
@@ -55,9 +66,9 @@ func sqliteDSNWithMode(databasePath string, mode string) string {
 	query := dsn.Query()
 	if mode != "" {
 		query.Add("mode", mode)
-		if mode == "ro" {
-			// Validation must not create WAL/SHM sidecars beside an immutable
-			// snapshot or observe a partially changing file.
+		if immutable {
+			// Standalone snapshot validation must not create WAL/SHM sidecars or
+			// observe a partially changing file.
 			query.Add("immutable", "1")
 		}
 	}

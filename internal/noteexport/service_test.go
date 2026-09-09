@@ -107,6 +107,70 @@ func TestServiceExportPDFAndCorrectsDifferentExtension(t *testing.T) {
 	}
 }
 
+func TestServiceExportStructuredFormatsUseCanonicalSnapshot(t *testing.T) {
+	current := note.Note{
+		ID:       "0123456789abcdef0123456789abcdef",
+		Title:    "=タイトル",
+		Content:  "@本文",
+		Revision: 9,
+	}
+	for _, format := range []Format{FormatJSON, FormatCSV} {
+		t.Run(string(format), func(t *testing.T) {
+			input := Input{
+				NoteID:           current.ID,
+				ExpectedRevision: current.Revision,
+				Title:            "stale title",
+				Markdown:         current.Content,
+				Format:           format,
+			}
+			path := filepath.Join(t.TempDir(), "selected-name")
+			result, err := NewService(&stubNoteReader{note: current}, nil).Export(context.Background(), path, input)
+			if err != nil || result.Error != nil {
+				t.Fatalf("Export() = %#v, %v", result, err)
+			}
+			if result.ExportedName != "selected-name."+string(format) {
+				t.Fatalf("exported name = %q", result.ExportedName)
+			}
+			content, err := os.ReadFile(path + "." + string(format))
+			if err != nil {
+				t.Fatalf("read export: %v", err)
+			}
+			output := string(content)
+			if format == FormatJSON {
+				if !strings.Contains(output, `"title": "=タイトル"`) || !strings.Contains(output, `"content": "@本文"`) {
+					t.Fatalf("JSON does not contain canonical snapshot:\n%s", output)
+				}
+			} else {
+				if !strings.Contains(output, "'=タイトル") || !strings.Contains(output, "'@本文") {
+					t.Fatalf("CSV formula cells are not neutralized:\n%s", output)
+				}
+				if strings.Contains(output, "stale title") {
+					t.Fatalf("dialog-only title leaked into CSV:\n%s", output)
+				}
+			}
+		})
+	}
+
+	t.Run("txt", func(t *testing.T) {
+		input := Input{
+			NoteID:           current.ID,
+			ExpectedRevision: current.Revision,
+			Markdown:         current.Content,
+			TextContent:      "plain\ntext",
+			Format:           FormatTXT,
+		}
+		path := filepath.Join(t.TempDir(), "selected-name")
+		result, err := NewService(&stubNoteReader{note: current}, nil).Export(context.Background(), path, input)
+		if err != nil || result.Error != nil {
+			t.Fatalf("TXT Export() = %#v, %v", result, err)
+		}
+		content, err := os.ReadFile(path + ".txt")
+		if err != nil || string(content) != "plain\ntext" {
+			t.Fatalf("TXT content = %q, err = %v", content, err)
+		}
+	})
+}
+
 func TestServiceExportRejectsInvalidOrChangedSnapshotWithoutWriting(t *testing.T) {
 	baseNote := note.Note{
 		ID:       "0123456789abcdef0123456789abcdef",

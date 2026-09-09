@@ -250,3 +250,59 @@ func writeImportSource(t *testing.T, directory string, name string, content stri
 func importString(value string) *string {
 	return &value
 }
+
+func TestLegacySourceLimitsContinueWithoutCreatingEmptyNotebook(t *testing.T) {
+	for _, extension := range []string{"txt", "md", "html", "htm"} {
+		t.Run(extension, func(t *testing.T) {
+			dir := t.TempDir()
+			bad := writeImportSource(t, dir, "large."+extension, strings.Repeat("x", int(MaxSourceBytes)+1))
+			good := writeImportSource(t, dir, "good.txt", "valid")
+			name := "new notebook"
+			writer := &fakeNoteWriter{}
+			result := NewService(writer).Import(context.Background(), []string{bad}, Input{NewNotebookName: &name})
+			if result.Error != nil || len(result.Failures) != 1 || result.Failures[0].Code != FailureCodeTooLarge || len(writer.createdNotebooks) != 0 || len(writer.createdNotes) != 0 {
+				t.Fatalf("invalid source mutated destination: %#v", result)
+			}
+			result = NewService(writer).Import(context.Background(), []string{bad, good}, Input{NewNotebookName: &name})
+			if result.Error != nil || len(result.Failures) != 1 || len(result.Imported) != 1 || len(writer.createdNotebooks) != 1 {
+				t.Fatalf("later valid source skipped: %#v", result)
+			}
+		})
+	}
+}
+func TestSourceReadBoundaries(t *testing.T) {
+	for _, ext := range []string{"txt", "md", "html", "htm", "csv", "json"} {
+		for _, delta := range []int64{-1, 0, 1} {
+			t.Run(fmt.Sprintf("%s/%d", ext, delta), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "input."+ext)
+				file, err := os.Create(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = file.Truncate(sourceByteLimit(path) + delta); err != nil {
+					t.Fatal(err)
+				}
+				if err = file.Close(); err != nil {
+					t.Fatal(err)
+				}
+				_, err = readSourceFile(path)
+				if delta > 0 && !errors.Is(err, errSourceTooLarge) {
+					t.Fatalf("limit not enforced: %v", err)
+				}
+				if delta <= 0 && err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+func TestHTMLConvertedContentCheckedBeforeNotebook(t *testing.T) {
+	writer := &fakeNoteWriter{}
+	// Markdown escaping expands the visible text beyond the body limit.
+	path := writeImportSource(t, t.TempDir(), "large.html", "<p>"+strings.Repeat("*", int(MaxSourceBytes)/2+1)+"</p>")
+	name := "new"
+	result := NewService(writer).Import(context.Background(), []string{path}, Input{NewNotebookName: &name})
+	if result.Error != nil || len(result.Failures) != 1 || len(writer.createdNotebooks) != 0 {
+		t.Fatalf("expanded body was persisted: %#v", result)
+	}
+}

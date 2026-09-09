@@ -81,6 +81,18 @@ func (service *Service) Export(ctx context.Context, path string, input Input) (R
 		if pdfError != nil {
 			return Result{Error: pdfError}, nil
 		}
+	case FormatJSON:
+		content, err = renderJSON(current)
+		if err != nil {
+			return NewErrorResult(ErrorCodeRenderFailed, "JSONを生成できませんでした。", "format", false), nil
+		}
+	case FormatCSV:
+		content, err = renderCSV(current)
+		if err != nil {
+			return NewErrorResult(ErrorCodeRenderFailed, "CSVを生成できませんでした。", "format", false), nil
+		}
+	case FormatTXT:
+		content = []byte(input.TextContent)
 	default:
 		return NewErrorResult(ErrorCodeInvalidFormat, "エクスポート形式を確認できません。", "format", false), nil
 	}
