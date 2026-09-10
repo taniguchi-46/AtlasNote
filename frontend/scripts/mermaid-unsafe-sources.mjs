@@ -1,0 +1,30 @@
+// Shared by Node and real-browser regression checks. Never render these directly.
+export const unsafeSources = [
+  ...['img', '"img"', "'img'", '"\\u0069mg"', '"\\x69mg"'].flatMap(key =>
+    ['https://example.test/p.png', '/p.png', '../p.png', 'p.png', '//example.test/p.png', 'data:image/png;base64,AA==']
+      .map(url => `flowchart TD\n A@{ ${key}: "${url}" }`)),
+  'flowchart TD\n A@{\n "img": >-\n  p.png\n }',
+  'flowchart TD\n A@{ shape: rect }',
+  'flowchart TD\n A@{ "icon": "logos:github" }',
+  '%%{init: {"themeCSS":"@import url(https://example.test/a.css)"}}%%\nflowchart TD\n A-->B',
+  '%%{config: {}}%%\nflowchart TD\n A-->B',
+  '---\nconfig:\n theme: dark\n---\nflowchart TD\n A-->B',
+  'flowchart TD; A-->B; click A "../p"',
+  'flowchart TD\n click A call handler()',
+  'flowchart TD\n callback: handler',
+  'flowchart TD\rA-->B\rclick A handler',
+  '---\rconfig:\r theme: dark\r---\rflowchart TD\rA-->B',
+  'sequenceDiagram\n participant A\n properties A: {"icon":"../p.svg"}',
+  String.raw`sequenceDiagram; participant A; properties A: {"\u0069con":"../p.svg"}`,
+  'sequenceDiagram\n participant A\n details A: existing-element',
+  'sequenceDiagram properties A: {"icon":"../p.svg"}\n A->>B:hi',
+  'sequenceDiagram properties A: {"\\u0069con":"../p.svg"}\n A->>B:hi',
+  'flowchart TD\n A-->B\n style A fill:url(../p.svg)',
+  String.raw`flowchart TD; A-->B; style A fill:u\72l(../p.svg)`,
+  'flowchart TD\n A-->B\n classDef x fill:red; @import "../p.css"',
+  'flowchart TD\n A["<img src=../p.png>"]',
+  'flowchart TD\n A["![image](../p.png)"]',
+  'mindmap\n root\n  ::icon(fa fa-book)',
+  'architecture-beta\n service api(logos:aws-lambda)[API]',
+  'flowchart TD\n link A "https://example.test"',
+]

@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-08-29
+最終更新: 2026-09-10
 
 ## 現在のフェーズ
 
@@ -31,6 +31,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - Pre-Phase 5「自動バックアップ・バックアップ復元」。アクティブ保存空間のSQLite・Markdownを設定されたアーカイブルートへ24時間間隔で世代保存し、manifestのSHA-256とSQLite integrityを検証する。設定画面の既定ON切替、最大10世代の自動バックアップ、最大3世代の復元前安全用バックアップ、プレビュー確認トークン、stage／pending marker、起動時swap・rollback、同期復旧との競合防止を実装した。詳細は`docs/development/backup-restore.md`を正とする（2026-08-28）
 - Pre-Phase 5「物理保存場所選択」。データルートとバックアップ保存領域のOSフォルダ選択、空の既定領域での初回`setup-required`、既存領域の引き継ぎ、再起動時の非破壊移行、環境変数固定時のUI制限を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は`docs/development/storage-locations.md`を正とする（2026-08-29）
 - MermaidコードフェンスのRich表示を実装した。既存の`codeBlock`とMarkdown serializerを維持し、`language: "mermaid"`だけをNodeViewで編集可能なソースと図の併記として表示する。Mermaidは遅延読込・固定安全設定・入力上限・SVG専用サニタイズ・外部リソース拒否を適用し、生成物を保存しない。AI回答プレビューとHTML／PDFエクスポートの図化は対象外。詳細は`docs/development/mermaid.md`を正とする（2026-09-05、手動UI受け入れ未完了）
+- MermaidレビューのHigh 2件を修正した。SVG名前空間を外部URLと区別し、YAML／JSONメタデータ・sequence画像プロパティを描画前に拒否する。NodeViewの遅延応答／Blob破棄、実Chromiumのlight／dark画像読み込み、禁止入力54件のAPI・画像取得0件、関連保存回帰、Frontend typecheck／build、Wails buildを確認した。`@{...}`拡張メタデータ全体の拒否を含む制約・再現手順は`docs/development/mermaid.md`へ記録した。Wails実画面全体の手動受け入れは未完了（2026-09-10）。
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト

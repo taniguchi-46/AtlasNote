@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import ts from 'typescript'
+import { unsafeSources } from './mermaid-unsafe-sources.mjs'
 
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'mermaidRenderer.ts')
@@ -70,6 +71,8 @@ assert.equal(validateMermaidSource('flowchart TD\n  A@{ img: "https://example.te
 assert.equal(validateMermaidSource('flowchart TD\n  A@{ icon: "fa:user" }')?.code, 'unsafe-syntax')
 assert.equal(validateMermaidSource('flowchart TD\n  link A "https://example.test"')?.code, 'unsafe-syntax')
 assert.equal(validateMermaidSource('flowchart TD\n  A --> B'), null)
+assert.equal(validateMermaidSource(String.raw`flowchart TD; A[\Input\] --> B{Ready?}`), null)
+assert.equal(validateMermaidSource('flowchart TD\n A-->B\n style A fill:#fff,stroke:#333'), null)
 
 const initializedConfigs = []
 const parsedSources = []
@@ -99,6 +102,8 @@ const success = await renderMermaidDiagram('flowchart TD\n  A --> B', {
 })
 assert.equal(success.ok, true)
 assert.match(success.svg, /^<svg\b/)
+assert.equal(new DOMParser().parseFromString(success.svg, 'image/svg+xml')
+  .documentElement.namespaceURI, 'http://www.w3.org/2000/svg')
 assert.equal(success.altText, '開始から終了 — 処理の流れ')
 assert.equal(initializedConfigs[0].startOnLoad, false)
 assert.equal(initializedConfigs[0].securityLevel, 'strict')
@@ -136,6 +141,23 @@ const unsafeOutput = await renderMermaidDiagram('flowchart TD\n  A --> B', {
 assert.equal(unsafeOutput.ok, false)
 assert.equal(unsafeOutput.code, 'unsafe-output')
 
+const urlOutput = await renderMermaidDiagram('flowchart TD\n A-->B', {
+  mermaid: {
+    ...fakeMermaid,
+    async render() {
+      return { svg: String.raw`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10"><style>rect{fill:u\72l(../p.svg)}</style><rect width="10" height="10" fill="url(../p.svg)" style="fill:u\72l(../p.svg)"/><path style="marker-end:url(#arrow)"/></svg>` }
+    },
+  },
+})
+assert.equal(urlOutput.ok, true)
+const sanitizedXml = new DOMParser().parseFromString(urlOutput.svg, 'image/svg+xml')
+assert.equal(sanitizedXml.documentElement.namespaceURI, 'http://www.w3.org/2000/svg')
+assert.equal(sanitizedXml.querySelector('rect').hasAttribute('fill'), false)
+assert.equal(sanitizedXml.querySelector('rect').hasAttribute('style'), false)
+assert.equal(sanitizedXml.querySelector('style'), null)
+assert.equal(sanitizedXml.querySelector('path').getAttribute('style'), 'marker-end:url(#arrow)')
+assert.equal(sanitizedXml.documentElement.hasAttribute('xmlns:xlink'), false)
+
 const queueEvents = []
 const queueIds = []
 const queueApi = {
@@ -159,6 +181,21 @@ assert.deepEqual(queueEvents, ['start:slow', 'end:slow', 'start:fast', 'end:fast
 assert.notEqual(queueIds[0], queueIds[1])
 
 const realMermaid = (await import('mermaid')).default
+let imageAttempts = 0
+globalThis.Image = class {
+  constructor() { imageAttempts++; throw new Error('Image acquisition forbidden in test') }
+}
+const forbiddenCalls = []
+const guardedApi = Object.fromEntries(['initialize', 'parse', 'render'].map(name => [name, (...args) => {
+  forbiddenCalls.push(name)
+  return realMermaid[name](...args)
+}]))
+for (const input of unsafeSources) {
+  assert.equal(validateMermaidSource(input)?.code, 'unsafe-syntax', input)
+  assert.equal((await renderMermaidDiagram(input, { mermaid: guardedApi })).code, 'unsafe-syntax', input)
+}
+assert.deepEqual(forbiddenCalls, [], 'unsafe input must not reach Mermaid initialization/parse/render')
+assert.equal(imageAttempts, 0)
 const real = await renderMermaidDiagram('flowchart TD\n  A[Start] --> B[End]', {
   theme: 'light',
   mermaid: realMermaid,
@@ -166,6 +203,16 @@ const real = await renderMermaidDiagram('flowchart TD\n  A[Start] --> B[End]', {
 assert.equal(real.ok, true)
 assert.match(real.svg, /^<svg\b/)
 assert.doesNotMatch(real.svg, /<foreignObject\b|<script\b/i)
+
+for (const input of [
+  'flowchart TD\n A[Click here] --> B[Ready]',
+  'sequenceDiagram\n A->>B: callback returned',
+  String.raw`flowchart TD; A[\Input\] --> B{Ready?}`,
+  'flowchart TD\n A-->B\n style A fill:#fff,stroke:#333',
+]) {
+  assert.equal(validateMermaidSource(input), null, input)
+  assert.equal((await renderMermaidDiagram(input, { mermaid: realMermaid })).ok, true, input)
+}
 
 await rm(outDir, { recursive: true, force: true })
 console.log('Mermaid renderer tests passed')

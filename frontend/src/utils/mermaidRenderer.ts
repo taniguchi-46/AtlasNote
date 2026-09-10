@@ -48,15 +48,22 @@ const ERROR_MESSAGES: Record<MermaidRenderErrorCode, string> = {
 }
 
 const UNSUPPORTED_SYNTAX = [
-  /%%\s*\{\s*(?:init|initialize|config)/i,
-  /^\uFEFF?\s*---\s*(?:\r?\n|$)/,
-  /(^|\r?\n)\s*click(?:\s+|$)/im,
-  /(^|\r?\n)\s*callback(?:\s+|:)/im,
-  /(?:^|[\s{])(?:img|image)\s*:\s*["'`]?\s*(?:https?:|data:|file:|\/\/)/i,
-  /(?:^|[\s{])(?:href|xlink:href|src)\s*[:=]\s*["'`]?\s*(?:https?:|data:|file:|\/\/)/i,
-  /(^|\r?\n)\s*link(?:Style)?\b[^\r\n]*(?:https?:|data:|file:|\/\/)/im,
-  /\b(?:iconify|icon\s*pack|icon\s*:)/i,
+  // Reject configuration/metadata containers, not selected keys or URL schemes.
+  // Mermaid interprets YAML/JSON escapes and can fetch images during render().
+  /%%\s*\{/,
+  /^\uFEFF?\s*---\s*(?:[\r\n]|$)/,
+  /@\s*\{/,
+  /(?:^|[;\r\n])\s*(?:sequenceDiagram\s+)?(?:click|callback|properties|details|links?)\b/i,
+  /\b(?:iconify|icon\s*pack|icon\s*[:(])/i,
+  /\b(?:service|group)\s+[\w-]+\s*\([^)]*:/i,
+  /(?:https?:|data:|file:|javascript:|\/\/)/i,
+  /\burl\s*\(|@import|!\[/i,
+  /<\/?[a-z][^>]*>/i,
+  // CSS escapes/comments can hide url(), @import and property names.
+  /(?:^|[;\r\n])\s*(?:style|classDef|linkStyle)\b[^\r\n]*(?:\\|\/\*)/i,
 ]
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 
 let mermaidPromise: Promise<MermaidApi> | null = null
 let renderQueue: Promise<void> = Promise.resolve()
@@ -181,6 +188,13 @@ function sanitizeSvg(svg: string) {
       const name = attribute.name.toLowerCase()
       const value = attribute.value.trim()
 
+      // Namespace declarations identify XML elements; they are not fetch URLs.
+      // Only the canonical default SVG namespace is needed in this image.
+      if (name === 'xmlns' || name.startsWith('xmlns:')) {
+        if (name !== 'xmlns' || value !== SVG_NAMESPACE) element.removeAttribute(attribute.name)
+        continue
+      }
+
       if (
         name.startsWith('on')
         || name === 'href'
@@ -188,6 +202,7 @@ function sanitizeSvg(svg: string) {
         || name === 'src'
         || name === 'srcset'
         || /^(?:https?:|data:|file:|javascript:|\/\/)/i.test(value)
+        || /\\|\/\*/.test(value)
         || !hasOnlyInternalSvgUrls(value)
       ) {
         element.removeAttribute(attribute.name)
@@ -199,6 +214,7 @@ function sanitizeSvg(svg: string) {
     const css = style.textContent ?? ''
     if (
       /@import/i.test(css)
+      || /\\|\/\*/.test(css)
       || /(?:https?:|data:|file:|javascript:|\/\/)/i.test(css)
       || !hasOnlyInternalSvgUrls(css)
     ) {
@@ -207,6 +223,13 @@ function sanitizeSvg(svg: string) {
   }
 
   if (root.querySelector('script,foreignObject,image,iframe,object,embed,a')) {
+    throwFailure('unsafe-output')
+  }
+
+  root.setAttribute('xmlns', SVG_NAMESPACE)
+  const serialized = root.outerHTML
+  const xml = new DOMParser().parseFromString(serialized, 'image/svg+xml')
+  if (xml.querySelector('parsererror') || xml.documentElement.namespaceURI !== SVG_NAMESPACE) {
     throwFailure('unsafe-output')
   }
 
@@ -219,7 +242,7 @@ function sanitizeSvg(svg: string) {
     .slice(0, 240) || 'Mermaid図'
 
   return {
-    svg: root.outerHTML,
+    svg: serialized,
     altText,
   }
 }
