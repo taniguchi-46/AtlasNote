@@ -62,6 +62,9 @@ jobs:
       - name: Run serializer tests
         run: npm --prefix frontend run test:serializer
 
+      - name: Run Mermaid renderer tests
+        run: npm --prefix frontend run test:mermaid
+
       - name: Run autosave concurrency tests
         run: npm --prefix frontend run test:auto-save
 

@@ -80,6 +80,11 @@ const cases = [
     expected: '```ts\nconst a = 1\n```',
   },
   {
+    name: 'mermaid code block',
+    input: doc(codeBlock('mermaid', 'flowchart TD\n  A[Start] --> B[End]')),
+    expected: '```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```',
+  },
+  {
     name: 'empty paragraph and multiline code fence',
     input: doc([
       paragraph([]),

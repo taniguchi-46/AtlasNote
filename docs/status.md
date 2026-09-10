@@ -1,6 +1,6 @@
 # プロジェクト状況
 
-最終更新: 2026-09-09
+最終更新: 2026-09-11
 
 Priority 2の追加レビュー3件を修正した。両保存先が利用不能な復旧時の候補選択、複数Store間の診断記録の保持、OS原因別の日本語理由／対処を回帰テストで確認した。続くPriority 4では、構造化ノート入出力とWindowsアンインストール時の任意追加削除を実装した。`go test ./... -count=1`、Frontendのtypecheck、保存場所setup・note delete・storage spaces・backups・operation loggerのテストが成功。診断履歴のA→B→A・保持上限・起動後の破損／リンク・ロック競合もtemp fixtureで成功した。OS理由分類部分はLinux／macOS向けテストバイナリのクロスコンパイルまで確認し、他OSでの実行・手動UI・インストーラー再検証は今回未実施。commit／pushは再レビュー後に行う。
 
@@ -40,6 +40,8 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - 2026-09-06に、保存場所移行のデータstage・分離バックアップstage・同一targetルートのバックアップstage・source読み取り拒否をWindowsの実共有ハンドルで検証した。共有中はowned marker・stage・保留マーカーを保持し、ハンドル解放後に再試行して完了すること、誤ったバックアップ残骸検査パスを修正したことを確認した。marker不一致、look-alike sibling、marker linkも変更なしで拒否する。
 - 2026-09-06に、同一／分離アーカイブルートのApp統合テストで、自動バックアップからの復元を再起動で適用し、復元されたノートのrevisionを基準にtrash後のrevisionで完全削除できること、他ノート・自動バックアップ・復元安全用バックアップ・保留マーカーが保持されることを確認した。Frontendの実Pinia Storeテストでは、trash後のstale lock応答がrevisionを巻き戻さず、最新のlock応答だけを反映することも確認した。
 - 2026-09-09に、構造化JSON／CSVの全件検証付き複数ノートインポート、JSON／CSV／TXTのcanonical snapshotエクスポート、CSV数式セル無害化を実装した。Windowsアンインストールでは、既定OFFの追加削除ページから、現在ユーザーの既知のWebViewデータとCredential Store参照だけを削除できる保守コマンドを追加し、通常起動・migration・ノート／バックアップ／保存場所管理情報の削除を行わないことをfixture／mockとNSISコンパイルで確認した。
+- MermaidコードフェンスのRich表示を実装した。既存の`codeBlock`とMarkdown serializerを維持し、`language: "mermaid"`だけをNodeViewで編集可能なソースと図の併記として表示する。Mermaidは遅延読込・固定安全設定・入力上限・SVG専用サニタイズ・外部リソース拒否を適用し、生成物を保存しない。AI回答プレビューとHTML／PDFエクスポートの図化は対象外。詳細は`docs/development/mermaid.md`を正とする（2026-09-05、手動UI受け入れ未完了）
+- MermaidレビューのHigh 2件を修正した。SVG名前空間を外部URLと区別し、YAML／JSONメタデータ・sequence画像プロパティを描画前に拒否する。NodeViewの遅延応答／Blob破棄、実Chromiumのlight／dark画像読み込み、禁止入力54件のAPI・画像取得0件、関連保存回帰、Frontend typecheck／build、Wails buildを確認した。`@{...}`拡張メタデータ全体の拒否を含む制約・再現手順は`docs/development/mermaid.md`へ記録した。Wails実画面全体の手動受け入れは未完了（2026-09-10）。
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -175,6 +177,7 @@ npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
+npm --prefix frontend run test:mermaid
 npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger

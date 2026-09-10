@@ -509,7 +509,7 @@ import {
   DropdownMenuRoot,
   DropdownMenuTrigger,
 } from 'reka-ui'
-import { Editor, EditorContent } from '@tiptap/vue-3'
+import { Editor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
 import {
   DOMParser as ProseMirrorDOMParser,
   DOMSerializer as ProseMirrorDOMSerializer,
@@ -578,6 +578,7 @@ import {
   continueMarkdownList,
   createMarkdownLineBreakTracker,
 } from '../utils/markdownListContinuation'
+import MermaidCodeBlockView from './MermaidCodeBlockView.vue'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -589,6 +590,12 @@ const CustomTableHeader = TableHeader.extend({
 
 const lowlight = createLowlight(common)
 const agentEditorHighlightPluginKey = new PluginKey<DecorationSet>('agentEditorHighlight')
+
+const MermaidCodeBlock = CodeBlockLowlight.extend({
+  addNodeView() {
+    return VueNodeViewRenderer(MermaidCodeBlockView)
+  },
+})
 
 type AgentEditorHighlightPluginMeta = {
   range: AgentEditorBlockRange | null
@@ -723,7 +730,7 @@ const editor = new Editor({
     TaskItem.configure({
       nested: true,
     }),
-    CodeBlockLowlight.configure({
+    MermaidCodeBlock.configure({
       lowlight,
     }),
   ],
