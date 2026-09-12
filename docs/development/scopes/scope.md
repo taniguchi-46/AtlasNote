@@ -349,9 +349,10 @@ Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書ス�
 
 - 自動バックアップとバックアップ復元を実装済み。詳細は [`../backup-restore.md`](../backup-restore.md) を正とする。
 
-### Mermaid対応（2026-09-05実装）
+### Mermaid対応（2026-09-12実装）
 
-- 通常ノートのRichエディタで` ```mermaid `コードフェンスを編集可能なソースと図の併記として表示する。Markdownモードではコードフェンスをそのまま編集する。
+- 通常ノートのRichエディタで` ```mermaid `コードフェンスを図のみとして表示し、「編集」ダイアログでソースとプレビューを扱う。Markdownモードではコードフェンスをそのまま編集する。
 - Markdown本文、既存の`codeBlock`ノード、serializer、自動保存、同期、バックアップは変更しない。生成SVGは表示時だけ作成し、保存しない。
+- fenced/raw/HTMLのMermaid貼り付け、動的長のフェンスによるコピー、ソース置換のUndo・autosave、通常のコード・表の挙動維持を実装した。
 - `securityLevel: "strict"`、外部画像・外部アイコン・click／callback・init／frontmatter設定の拒否、SVG専用サニタイズを適用する。
 - AI回答プレビューとHTML／PDFエクスポートへの図の埋め込みは対象外とする。詳細は [`../mermaid.md`](../mermaid.md) を正とする。

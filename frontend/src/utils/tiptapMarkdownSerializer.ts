@@ -120,7 +120,16 @@ function serializeListItem(node: JSONContent, marker = '-', context: SerializeCo
 function serializeCodeBlock(node: JSONContent, context: SerializeContext = {}) {
   const language = typeof node.attrs?.language === 'string' ? node.attrs.language : ''
   const code = serializeInlineChildren(node.content, context)
-  return `\`\`\`${language}\n${code}\n\`\`\``
+  const fence = '`'.repeat(Math.max(3, longestBacktickRun(code) + 1))
+  return `${fence}${language}\n${code}\n${fence}`
+}
+
+function longestBacktickRun(source: string) {
+  let longest = 0
+  for (const match of source.matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length)
+  }
+  return longest
 }
 
 function serializeImage(node: JSONContent) {

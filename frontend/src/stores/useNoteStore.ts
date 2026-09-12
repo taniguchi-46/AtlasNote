@@ -55,6 +55,11 @@ export type AgentEditorHighlight = {
   changeKind: 'replace' | 'delete'
 }
 
+type DeletionDraftCheckpoint = {
+  draftVersion: number
+  selectionGeneration: number
+}
+
 function createInitialNoteContent(firstLineStyle: EditorFirstLineStyle) {
   const markers: Record<EditorFirstLineStyle, string> = {
     heading1: '# ',
@@ -125,6 +130,9 @@ export const useNoteStore = defineStore('notes', () => {
   const notificationStore = useNotificationStore()
   const appStore = useAppStore()
   const errorContext = ref<NoteErrorContext | null>(null)
+  const deletionPreparationCounts = ref<Record<string, number>>({})
+  const deletionSelectionGenerations = new Map<string, number>()
+  const latestDraftVersions = new Map<string, number>()
   const savingRequests = createRequestCounter((count) => {
     isSaving.value = count > 0
   })
@@ -266,22 +274,29 @@ export const useNoteStore = defineStore('notes', () => {
     // ノートを連続で高速に切り替えた際、過去のリクエストのレスポンスが遅延して到着し、
     // 表示すべき最新のノートが古いノートで上書きされてしまう競合（レースコンディション）を防ぐ。
     // begin() で取得した isLatestRequest() が false を返す場合は処理を中断する。
+    if (isNoteDeletionPreparing(id)) return false
+
     const isLatestRequest = noteSelectionRequests.begin()
+    const deletionGeneration = deletionSelectionGenerations.get(id) ?? 0
     noteLockStatusRequests.begin()
     const targetLabel = summaries.value.find((note) => note.id === id)?.title ?? 'ノート'
     const accessAllowed = await useContentLockStore().requestAccess({ type: 'note', id }, targetLabel)
-    if (!isLatestRequest() || !accessAllowed) return false
+    if (
+      !isLatestRequest()
+      || !isNoteSelectionCurrent(id, deletionGeneration)
+      || !accessAllowed
+    ) return false
 
     clearAgentEditorHighlight()
     await flushPendingDraft()
-    if (!isLatestRequest()) return false
+    if (!isLatestRequest() || !isNoteSelectionCurrent(id, deletionGeneration)) return false
 
     isLoading.value = true
     error.value = null
     autoTitleNoteId.value = null
     try {
       const selectedNote = await getNote(id)
-      if (isLatestRequest()) {
+      if (isLatestRequest() && isNoteSelectionCurrent(id, deletionGeneration)) {
         activeNote.value = selectedNote
         return true
       }
@@ -399,6 +414,49 @@ export const useNoteStore = defineStore('notes', () => {
     clearAgentEditorHighlight()
   }
 
+  function isNoteDeletionPreparing(noteId: string) {
+    return (deletionPreparationCounts.value[noteId] ?? 0) > 0
+  }
+
+  function beginDeletionPreparation(noteIds: string[]) {
+    const nextCounts = { ...deletionPreparationCounts.value }
+    for (const noteId of noteIds) {
+      nextCounts[noteId] = (nextCounts[noteId] ?? 0) + 1
+      deletionSelectionGenerations.set(
+        noteId,
+        (deletionSelectionGenerations.get(noteId) ?? 0) + 1,
+      )
+    }
+    deletionPreparationCounts.value = nextCounts
+  }
+
+  function endDeletionPreparation(noteIds: string[]) {
+    const nextCounts = { ...deletionPreparationCounts.value }
+    for (const noteId of noteIds) {
+      const nextCount = (nextCounts[noteId] ?? 0) - 1
+      if (nextCount > 0) {
+        nextCounts[noteId] = nextCount
+      } else {
+        delete nextCounts[noteId]
+      }
+    }
+    deletionPreparationCounts.value = nextCounts
+  }
+
+  function isNoteSelectionCurrent(noteId: string, generation: number) {
+    return !isNoteDeletionPreparing(noteId)
+      && (deletionSelectionGenerations.get(noteId) ?? 0) === generation
+  }
+
+  function closeActiveNoteIfTarget(noteId: string) {
+    if (activeNote.value?.id !== noteId) return
+
+    noteLockStatusRequests.begin()
+    autoTitleNoteId.value = null
+    activeNote.value = null
+    clearAgentEditorHighlight(noteId)
+  }
+
   function getPersistedRevision(noteId: string) {
     if (activeNote.value?.id === noteId) return activeNote.value.revision
     return summaries.value.find((note) => note.id === noteId)?.revision ?? null
@@ -508,6 +566,10 @@ export const useNoteStore = defineStore('notes', () => {
       content,
       draftVersion: ++nextDraftVersion,
     }
+    // A deletion preparation may still be flushing the final editor event.
+    // Keep recording the per-note version so a later event can cancel the
+    // deletion instead of being silently saved after the note is removed.
+    latestDraftVersions.set(noteId, snapshot.draftVersion)
     const current = getDraft(noteId)
     if (current?.status === 'conflicted') {
       replaceDraft(noteId, {
@@ -669,6 +731,8 @@ export const useNoteStore = defineStore('notes', () => {
 
   async function persistNote(id: string, input: note.UpdateInput) {
     return noteOperations.enqueue(id, async () => {
+      if (isNoteDeletionPreparing(id)) return null
+
       const updated = await persistNoteNow(id, input)
       if (updated) applyPersistedNote(updated)
       return updated
@@ -688,6 +752,7 @@ export const useNoteStore = defineStore('notes', () => {
       || !current
       || current.id !== noteId
       || current.isTrashed
+      || isNoteDeletionPreparing(noteId)
       || current.revision !== expectedRevision
       || activeDraft.value
     ) {
@@ -702,6 +767,7 @@ export const useNoteStore = defineStore('notes', () => {
         !latest
         || latest.id !== noteId
         || latest.isTrashed
+        || isNoteDeletionPreparing(noteId)
         || latest.revision !== expectedRevision
         || activeDraft.value
       ) {
@@ -750,6 +816,7 @@ export const useNoteStore = defineStore('notes', () => {
       || !current
       || current.id !== noteId
       || current.isTrashed
+      || isNoteDeletionPreparing(noteId)
       || current.revision !== proposal.baseRevision
       || activeDraft.value
     ) return 'conflict'
@@ -760,6 +827,7 @@ export const useNoteStore = defineStore('notes', () => {
         !latest
         || latest.id !== noteId
         || latest.isTrashed
+        || isNoteDeletionPreparing(noteId)
         || latest.revision !== proposal.baseRevision
         || activeDraft.value
       ) return 'conflict'
@@ -826,8 +894,58 @@ export const useNoteStore = defineStore('notes', () => {
     return true
   }
 
+  function uniqueNoteIds(ids: string[]) {
+    return [...new Set(ids.filter((id) => id.length > 0))]
+  }
+
+  async function flushDraftBeforeDeletion(noteId: string): Promise<DeletionDraftCheckpoint | null> {
+    const saved = await autoSave.flush(noteId)
+    if (saved && !getDraft(noteId)) {
+      return {
+        draftVersion: latestDraftVersions.get(noteId) ?? 0,
+        selectionGeneration: deletionSelectionGenerations.get(noteId) ?? 0,
+      }
+    }
+
+    setErrorContext({ code: 'NOTE_DELETE_DRAFT_SAVE_FAILED' })
+    error.value = '未保存の変更を保存できないため、ノートを削除しませんでした'
+    return null
+  }
+
+  function assertDeletionDraftCheckpoint(
+    noteId: string,
+    checkpoint: DeletionDraftCheckpoint,
+  ) {
+    const isCurrent = isNoteDeletionPreparing(noteId)
+      && (deletionSelectionGenerations.get(noteId) ?? 0) === checkpoint.selectionGeneration
+      && (latestDraftVersions.get(noteId) ?? 0) === checkpoint.draftVersion
+      && !getDraft(noteId)
+    if (isCurrent) return
+
+    setErrorContext({ code: 'NOTE_DELETE_DRAFT_SAVE_FAILED' })
+    error.value = '削除前に追加された未保存の変更を保持するため、ノートを削除しませんでした'
+    throw new Error(error.value)
+  }
+
+  async function withDeletionPreparation<Result>(
+    noteIds: string[],
+    operation: () => Promise<Result>,
+  ) {
+    beginDeletionPreparation(noteIds)
+    try {
+      return await operation()
+    } finally {
+      endDeletionPreparation(noteIds)
+    }
+  }
+
   async function trashNote(id: string) {
-    await saveNote(id, { isTrashed: true })
+    try {
+      await trashNotes([id])
+      return true
+    } catch {
+      return false
+    }
   }
 
   async function restoreNote(id: string) {
@@ -842,6 +960,10 @@ export const useNoteStore = defineStore('notes', () => {
     try {
       return await updateNotesSequentially(ids, async (id) => {
         await noteOperations.enqueue(id, async () => {
+          if (isNoteDeletionPreparing(id)) {
+            throw new Error('ノートの削除処理中は更新できません')
+          }
+
           const updated = await updateNote(id, {
             ...input,
             expectedRevision: requirePersistedRevision(id),
@@ -859,7 +981,39 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function trashNotes(ids: string[]) {
-    await updateNotes(ids, { isTrashed: true })
+    const targetIds = uniqueNoteIds(ids)
+    if (targetIds.length === 0) return []
+
+    const endSaving = savingRequests.begin()
+    error.value = null
+    try {
+      return await withDeletionPreparation(targetIds, async () => updateNotesSequentially(
+        targetIds,
+        async (id) => {
+          const checkpoint = await flushDraftBeforeDeletion(id)
+          if (!checkpoint) {
+            throw new Error(error.value ?? '未保存の変更を保存できないため、ノートを削除しませんでした')
+          }
+
+          await noteOperations.enqueue(id, async () => {
+            assertDeletionDraftCheckpoint(id, checkpoint)
+            const updated = await updateNote(id, {
+              isTrashed: true,
+              expectedRevision: requirePersistedRevision(id),
+            })
+            discardDraft(id)
+            applyPersistedNote(updated)
+            closeActiveNoteIfTarget(id)
+          })
+        },
+      ))
+    } catch (e) {
+      setErrorContext({ code: 'NOTES_BATCH_UPDATE_FAILED' })
+      error.value = e instanceof Error ? e.message : 'ノートの一括更新に失敗しました'
+      throw e
+    } finally {
+      endSaving()
+    }
   }
 
   async function restoreNotes(ids: string[]) {
@@ -874,42 +1028,34 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function permanentlyDeleteNote(id: string) {
-    error.value = null
-    try {
-      await noteOperations.enqueue(
-        id,
-        () => deleteNote(id, requirePersistedRevision(id)),
-      )
-      discardDraft(id)
-      summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
-      if (activeNote.value?.id === id) activeNote.value = null
-    } catch (e) {
-      const isRevisionConflict = e instanceof NoteRevisionConflictError
-      setErrorContext({
-        code: isRevisionConflict ? e.code : 'NOTE_DELETE_FAILED',
-        action: isRevisionConflict
-          ? undefined
-          : { label: '再試行', run: () => permanentlyDeleteNote(id) },
-      })
-      error.value = e instanceof Error ? e.message : 'ノートの削除に失敗しました'
-      throw e
-    }
+    await permanentlyDeleteNotes([id])
   }
 
   async function permanentlyDeleteNotes(ids: string[]) {
-    if (ids.length === 0) return
+    const targetIds = uniqueNoteIds(ids)
+    if (targetIds.length === 0) return []
 
     const endSaving = savingRequests.begin()
     error.value = null
     let deletedIds: string[] = []
     try {
-      deletedIds = await deleteNotesSequentially(
-        ids,
-        (id) => noteOperations.enqueue(
-          id,
-          () => deleteNote(id, requirePersistedRevision(id)),
-        ),
-      )
+      deletedIds = await withDeletionPreparation(targetIds, async () => deleteNotesSequentially(
+        targetIds,
+        async (id) => {
+          const checkpoint = await flushDraftBeforeDeletion(id)
+          if (!checkpoint) {
+            throw new Error(error.value ?? '未保存の変更を保存できないため、ノートを削除しませんでした')
+          }
+
+          await noteOperations.enqueue(id, async () => {
+            assertDeletionDraftCheckpoint(id, checkpoint)
+            await deleteNote(id, requirePersistedRevision(id))
+            discardDraft(id)
+            summaries.value = summaries.value.filter((n: note.Summary) => n.id !== id)
+            closeActiveNoteIfTarget(id)
+          })
+        },
+      ))
     } catch (e) {
       setErrorContext({ code: 'NOTES_BATCH_DELETE_FAILED' })
       if (e instanceof NoteDeleteError) deletedIds = e.deletedIds
@@ -919,9 +1065,7 @@ export const useNoteStore = defineStore('notes', () => {
       const idSet = new Set(deletedIds)
       deletedIds.forEach(discardDraft)
       summaries.value = summaries.value.filter((n: note.Summary) => !idSet.has(n.id))
-      if (activeNote.value && idSet.has(activeNote.value.id)) {
-        activeNote.value = null
-      }
+      deletedIds.forEach(closeActiveNoteIfTarget)
       endSaving()
     }
   }
@@ -959,6 +1103,7 @@ export const useNoteStore = defineStore('notes', () => {
     saveFeedbackVersion,
     lastSavedNoteId,
     agentEditorHighlight,
+    isNoteDeletionPreparing,
     pinnedNotes,
     favoriteNotes,
     trashedNotes,

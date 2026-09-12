@@ -120,9 +120,10 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - Windowsアンインストール時に、既定OFFの「端末の表示設定・キャッシュ」と「この利用者のAtlas Note用認証情報」の追加削除を選択できるようにした。保守コマンドは通常起動・DB migrationから分離し、現在ユーザーのSID／プロファイル／AppData、アプリ実行中のmutex、保存空間のlock、リンク／junction／reparse point、保留中の移行・復旧を確認してから、allowlist対象だけを処理する。
 - ノート、バックアップ、保存空間、復旧workspace、保存場所設定・管理情報は削除対象外とし、silent uninstallや更新経路では追加削除を行わない。更新配布、ダウンロード、署名、Release workflow、追加OS対応は対象外とする。
 
-### Mermaid
+### Mermaid対応（2026-09-12実装済み）
 
-- Mermaid対応
+- 既存`codeBlock`のMermaidソースをRichでは図のみとして表示し、編集ダイアログからソースを検証付きで更新する。Markdown、同期、バックアップへ生成SVGを保存しない。
+- fenced/raw/HTML貼り付け、動的フェンスのコピー、Tiptap transaction・Undo・autosave、通常コード・表の挙動維持を実装した。詳細は [`../mermaid.md`](../mermaid.md) を正とする。
 
 ## HTML変換ルール（確定）
 

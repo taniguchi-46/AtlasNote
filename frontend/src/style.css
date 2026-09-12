@@ -841,6 +841,14 @@ body.is-pane-resizing * {
   flex-shrink: 0;
 }
 
+.editor-format-controls {
+  display: contents;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .format-btn {
   display: grid;
   place-items: center;
@@ -1035,6 +1043,7 @@ body.is-pane-resizing * {
 }
 
 .ProseMirror pre.code-block-node-view {
+  position: relative;
   white-space: normal;
 }
 
@@ -1043,16 +1052,61 @@ body.is-pane-resizing * {
   white-space: pre-wrap !important;
 }
 
+.ProseMirror pre.code-block-node-view > [data-node-view-content].mermaid-code-block-source {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  white-space: pre-wrap !important;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
 .ProseMirror .mermaid-code-block-preview {
   box-sizing: border-box;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin: 0;
+  padding: 0;
   color: var(--text-secondary);
   font-family: var(--editor-font-family);
   font-size: 13px;
   line-height: 1.5;
   white-space: normal;
+}
+
+.ProseMirror .mermaid-code-block-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ProseMirror .mermaid-code-block-edit {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ProseMirror .mermaid-code-block-edit:hover:not(:disabled),
+.ProseMirror .mermaid-code-block-edit:focus-visible {
+  border-color: var(--brand-primary);
+}
+
+.ProseMirror .mermaid-code-block-edit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .ProseMirror .mermaid-code-block-image {

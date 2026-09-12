@@ -95,6 +95,10 @@ const pendingListResponses = []
 const pendingGetResponses = []
 let deferListResponses = false
 let deferGetResponses = false
+let deferUpdateResponses = false
+const pendingUpdateResponses = []
+let nextUpdateFailure = null
+const updateFailures = new Map()
 
 export class NoteRevisionConflictError extends Error {
   constructor(conflict) {
@@ -110,8 +114,12 @@ export function resetBackend(seed = []) {
   for (const key of Object.keys(calls)) calls[key].length = 0
   pendingListResponses.length = 0
   pendingGetResponses.length = 0
+  pendingUpdateResponses.length = 0
   deferListResponses = false
   deferGetResponses = false
+  deferUpdateResponses = false
+  nextUpdateFailure = null
+  updateFailures.clear()
 }
 
 export function snapshotNote(id) {
@@ -121,6 +129,9 @@ export function snapshotNote(id) {
 
 export function setDeferredListResponses(enabled) { deferListResponses = enabled }
 export function setDeferredGetResponses(enabled) { deferGetResponses = enabled }
+export function setDeferredUpdateResponses(enabled) { deferUpdateResponses = enabled }
+export function setNextUpdateFailure(failure) { nextUpdateFailure = failure }
+export function setUpdateFailure(id, failure) { updateFailures.set(id, failure) }
 
 export function resolveListResponse(index, items) {
   const pending = pendingListResponses[index]
@@ -138,6 +149,26 @@ export function resolveGetResponse(index, item) {
   const pending = pendingGetResponses[index]
   if (!pending) throw new Error('pending note response was not found')
   pending.resolve(structuredClone(item))
+}
+
+export function resolveUpdateResponse(index) {
+  const pending = pendingUpdateResponses[index]
+  if (!pending) throw new Error('pending update response was not found')
+  const current = notes.get(pending.id)
+  if (!current) throw new Error('note not found')
+  const updated = {
+    ...current,
+    ...(pending.input.title !== undefined ? { title: pending.input.title } : {}),
+    ...(pending.input.content !== undefined ? { content: pending.input.content } : {}),
+    ...(pending.input.isFavorite !== undefined ? { isFavorite: pending.input.isFavorite } : {}),
+    ...(pending.input.isPinned !== undefined ? { isPinned: pending.input.isPinned } : {}),
+    ...(pending.input.isTrashed !== undefined ? { isTrashed: pending.input.isTrashed } : {}),
+    revision: current.revision + 1,
+    updatedAt: new Date(Date.parse(current.updatedAt) + 1000).toISOString(),
+  }
+  notes.set(pending.id, updated)
+  pendingUpdateResponses.splice(index, 1)
+  pending.resolve(structuredClone(updated))
 }
 
 export async function listNotesPage(input) {
@@ -163,6 +194,20 @@ export async function updateNote(id, input) {
   calls.updateNote.push({ id, input: structuredClone(input) })
   const current = notes.get(id)
   if (!current) throw new Error('note not found')
+  const failure = updateFailures.has(id) ? updateFailures.get(id) : nextUpdateFailure
+  if (failure) {
+    if (updateFailures.has(id)) updateFailures.delete(id)
+    else nextUpdateFailure = null
+    if (failure === 'conflict') {
+      throw new NoteRevisionConflictError({
+        code: 'NOTE_REVISION_CONFLICT',
+        noteId: id,
+        expectedRevision: input.expectedRevision,
+        actualRevision: current.revision,
+      })
+    }
+    throw new Error('update failed')
+  }
   if (input.expectedRevision !== current.revision) {
     throw new NoteRevisionConflictError({
       code: 'NOTE_REVISION_CONFLICT',
@@ -170,6 +215,9 @@ export async function updateNote(id, input) {
       expectedRevision: input.expectedRevision,
       actualRevision: current.revision,
     })
+  }
+  if (deferUpdateResponses) {
+    return new Promise((resolve) => pendingUpdateResponses.push({ id, input, resolve }))
   }
   const updated = {
     ...current,
@@ -263,8 +311,13 @@ try {
   const storeMock = await import(pathToFileURL(path.join(outDir, 'mock-note-stores.mjs')).href)
   const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
   await testActualStoreTrashThenEmptyTrash(noteMock, storeMock, useNoteStore)
+  await testActualStoreDraftFlushBeforeDeletion(noteMock, storeMock, useNoteStore)
+  await testActualStoreFailedDraftPreventsDeletion(noteMock, storeMock, useNoteStore)
+  await testActualStoreKeepsDraftAddedAfterFlush(noteMock, storeMock, useNoteStore)
+  await testActualStoreBatchDeleteKeepsPartialSuccess(noteMock, storeMock, useNoteStore)
   await testActualStoreLockResponseOrdering(noteMock, storeMock, useNoteStore)
   await testActualStoreSelectionAndListOrdering(noteMock, storeMock, useNoteStore)
+  await testActualStoreDeletionDoesNotCancelOtherSelection(noteMock, storeMock, useNoteStore)
   console.log('note delete tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
@@ -331,8 +384,7 @@ async function testActualStoreTrashThenEmptyTrash(noteMock, storeMock, useNoteSt
   await waitFor(() => storeMock.calls.refreshTarget.length === 1)
 
   await store.trashNotes([original.id])
-  assert.equal(store.activeNote.revision, original.revision + 1)
-  assert.equal(store.activeNote.isTrashed, true)
+  assert.equal(store.activeNote, null)
   assert.equal(store.summaries[0].revision, original.revision + 1)
   assert.equal(store.summaries[0].isTrashed, true)
 
@@ -345,6 +397,154 @@ async function testActualStoreTrashThenEmptyTrash(noteMock, storeMock, useNoteSt
   assert.equal(store.summaries.some((summary) => summary.id === original.id), false)
   assert.equal(store.activeNote, null)
   storeMock.setDeferredLockResponses(false)
+}
+
+async function testActualStoreDraftFlushBeforeDeletion(noteMock, storeMock, useNoteStore) {
+  const original = createTestNote('draft-delete-note', 4, false)
+  noteMock.resetBackend([original])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const store = useNoteStore()
+
+  await store.fetchNotes()
+  assert.equal(await store.selectNote(original.id), true)
+  store.scheduleDraft(original.id, 'draft title', 'draft content')
+
+  assert.equal(await store.trashNote(original.id), true)
+  assert.equal(store.activeNote, null)
+  assert.equal(store.getDraft(original.id), null)
+  assert.deepEqual(noteMock.calls.updateNote, [
+    {
+      id: original.id,
+      input: {
+        title: 'draft title',
+        content: 'draft content',
+        expectedRevision: original.revision,
+      },
+    },
+    {
+      id: original.id,
+      input: {
+        isTrashed: true,
+        expectedRevision: original.revision + 1,
+      },
+    },
+  ])
+  assert.equal(noteMock.snapshotNote(original.id).isTrashed, true)
+
+  const trashed = noteMock.snapshotNote(original.id)
+  noteMock.resetBackend([{ ...trashed, revision: trashed.revision, isTrashed: true }])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const permanentStore = useNoteStore()
+  await permanentStore.fetchNotes()
+  assert.equal(await permanentStore.selectNote(original.id), true)
+  permanentStore.scheduleDraft(original.id, 'permanent draft title', 'permanent draft content')
+
+  await permanentStore.permanentlyDeleteNote(original.id)
+  assert.equal(permanentStore.activeNote, null)
+  assert.equal(permanentStore.getDraft(original.id), null)
+  assert.deepEqual(noteMock.calls.updateNote, [
+    {
+      id: original.id,
+      input: {
+        title: 'permanent draft title',
+        content: 'permanent draft content',
+        expectedRevision: trashed.revision,
+      },
+    },
+  ])
+  assert.deepEqual(noteMock.calls.deleteNote, [
+    { id: original.id, expectedRevision: trashed.revision + 1 },
+  ])
+  assert.equal(noteMock.snapshotNote(original.id), null)
+}
+
+async function testActualStoreFailedDraftPreventsDeletion(noteMock, storeMock, useNoteStore) {
+  const original = createTestNote('failed-draft-delete-note', 2, false)
+  noteMock.resetBackend([original])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const store = useNoteStore()
+
+  await store.fetchNotes()
+  assert.equal(await store.selectNote(original.id), true)
+  store.scheduleDraft(original.id, 'unsaved title', 'unsaved content')
+  noteMock.setNextUpdateFailure('error')
+
+  assert.equal(await store.trashNote(original.id), false)
+  assert.equal(noteMock.snapshotNote(original.id).isTrashed, false)
+  assert.equal(store.activeNote.id, original.id)
+  assert.equal(store.getDraft(original.id).status, 'failed')
+  assert.equal(noteMock.calls.updateNote.length, 1)
+  assert.equal(noteMock.calls.updateNote[0].input.isTrashed, undefined)
+  assert.equal(noteMock.calls.deleteNote.length, 0)
+
+  noteMock.resetBackend([original])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const conflictStore = useNoteStore()
+  await conflictStore.fetchNotes()
+  assert.equal(await conflictStore.selectNote(original.id), true)
+  conflictStore.scheduleDraft(original.id, 'conflicted title', 'conflicted content')
+  noteMock.setNextUpdateFailure('conflict')
+
+  assert.equal(await conflictStore.trashNote(original.id), false)
+  assert.equal(noteMock.snapshotNote(original.id).isTrashed, false)
+  assert.equal(conflictStore.activeNote.id, original.id)
+  assert.equal(conflictStore.getDraft(original.id).status, 'conflicted')
+  assert.equal(noteMock.calls.deleteNote.length, 0)
+}
+
+async function testActualStoreKeepsDraftAddedAfterFlush(noteMock, storeMock, useNoteStore) {
+  const original = createTestNote('late-draft-delete-note', 3, false)
+  noteMock.resetBackend([original])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const store = useNoteStore()
+
+  await store.fetchNotes()
+  assert.equal(await store.selectNote(original.id), true)
+
+  noteMock.setDeferredUpdateResponses(true)
+  const queuedUpdate = store.persistNote(original.id, { isPinned: true })
+  await waitFor(() => noteMock.calls.updateNote.length === 1)
+
+  const deletion = store.trashNote(original.id)
+  await waitFor(() => store.isNoteDeletionPreparing(original.id))
+  store.scheduleDraft(original.id, 'late title', 'late content')
+  noteMock.resolveUpdateResponse(0)
+
+  await queuedUpdate
+  assert.equal(await deletion, false)
+  assert.equal(noteMock.snapshotNote(original.id).isTrashed, false)
+  assert.equal(noteMock.calls.updateNote.length, 1)
+  assert.deepEqual(store.getDraft(original.id).content, 'late content')
+  assert.equal(store.getDraft(original.id).title, 'late title')
+
+  store.discardDraft(original.id)
+  noteMock.setDeferredUpdateResponses(false)
+}
+
+async function testActualStoreBatchDeleteKeepsPartialSuccess(noteMock, storeMock, useNoteStore) {
+  const firstNote = createTestNote('partial-delete-first', 1, false)
+  const secondNote = createTestNote('partial-delete-second', 1, false)
+  noteMock.resetBackend([firstNote, secondNote])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const store = useNoteStore()
+
+  await store.fetchNotes()
+  noteMock.setUpdateFailure(secondNote.id, 'error')
+
+  await assert.rejects(
+    store.trashNotes([firstNote.id, secondNote.id]),
+    /update failed/,
+  )
+  assert.equal(noteMock.snapshotNote(firstNote.id).isTrashed, true)
+  assert.equal(noteMock.snapshotNote(secondNote.id).isTrashed, false)
+  assert.equal(store.summaries.find((item) => item.id === firstNote.id).isTrashed, true)
+  assert.equal(store.summaries.find((item) => item.id === secondNote.id).isTrashed, false)
 }
 
 async function testActualStoreLockResponseOrdering(noteMock, storeMock, useNoteStore) {
@@ -409,6 +609,33 @@ async function testActualStoreSelectionAndListOrdering(noteMock, storeMock, useN
   assert.equal(await newerSelection, true)
   noteMock.resolveGetResponse(0, firstNote)
   assert.equal(await olderSelection, false)
+  assert.equal(store.activeNote.id, secondNote.id)
+  noteMock.setDeferredGetResponses(false)
+}
+
+async function testActualStoreDeletionDoesNotCancelOtherSelection(noteMock, storeMock, useNoteStore) {
+  const firstNote = createTestNote('delete-selection-note', 1, false)
+  const secondNote = createTestNote('surviving-selection-note', 1, false)
+  noteMock.resetBackend([firstNote, secondNote])
+  storeMock.resetStores()
+  setActivePinia(createPinia())
+  const store = useNoteStore()
+
+  await store.fetchNotes()
+  noteMock.setDeferredGetResponses(true)
+  const deletingSelection = store.selectNote(firstNote.id)
+  await waitFor(() => noteMock.calls.getNote.length === 1)
+  const survivingSelection = store.selectNote(secondNote.id)
+  await waitFor(() => noteMock.calls.getNote.length === 2)
+
+  await store.trashNotes([firstNote.id])
+  assert.equal(store.isNoteDeletionPreparing(firstNote.id), false)
+  assert.equal(store.summaries.find((summary) => summary.id === firstNote.id).isTrashed, true)
+
+  noteMock.resolveGetResponse(1, secondNote)
+  assert.equal(await survivingSelection, true)
+  noteMock.resolveGetResponse(0, firstNote)
+  assert.equal(await deletingSelection, false)
   assert.equal(store.activeNote.id, secondNote.id)
   noteMock.setDeferredGetResponses(false)
 }

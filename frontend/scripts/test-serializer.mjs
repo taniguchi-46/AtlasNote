@@ -85,6 +85,11 @@ const cases = [
     expected: '```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```',
   },
   {
+    name: 'code fence grows around backticks in source',
+    input: doc(codeBlock('ts', 'const fence = ```')),
+    expected: '````ts\nconst fence = ```\n````',
+  },
+  {
     name: 'empty paragraph and multiline code fence',
     input: doc([
       paragraph([]),

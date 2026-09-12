@@ -16,8 +16,10 @@ const lockSettingsPath = path.join(rootDir, 'src', 'components', 'ContentLockSet
 const unlockDialogPath = path.join(rootDir, 'src', 'components', 'ContentUnlockDialog.vue')
 const noteStorePath = path.join(rootDir, 'src', 'stores', 'useNoteStore.ts')
 const appPath = path.join(rootDir, 'src', 'App.vue')
+const beforeLockPath = path.join(rootDir, 'src', 'utils', 'contentLockBeforeLock.ts')
 const outDir = path.join(rootDir, '.tmp', 'content-lock-store-test')
 const outFile = path.join(outDir, 'useContentLockStore.mjs')
+const beforeLockOut = path.join(outDir, 'contentLockBeforeLock.mjs')
 
 await mkdir(outDir, { recursive: true })
 const source = (await readFile(storePath, 'utf8'))
@@ -26,6 +28,10 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
 })
 await writeFile(outFile, compiled.outputText, 'utf8')
+const beforeLockSource = await readFile(beforeLockPath, 'utf8')
+await writeFile(beforeLockOut, ts.transpileModule(beforeLockSource, {
+  compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+}).outputText, 'utf8')
 await writeFile(path.join(outDir, 'mock-content-locks.mjs'), `
 export const calls = { list: 0, status: [], enable: [], unlock: [], lockNow: [], lockTargets: [], required: [], change: [], disable: [], spaces: 0 }
 let locks = []
@@ -33,6 +39,14 @@ let requiredLocks = new Map()
 let failingStatusKeys = new Set()
 let deferStatusResponses = false
 const pendingStatusResponses = []
+let batchFailure = null
+let batchThrow = false
+export function setBatchFailure(value) { batchFailure = value }
+export function setBatchThrow(value) { batchThrow = value }
+let lockNowFailure = null
+let deferLockNow = false
+let throwLockNow = false
+const pendingLockNow = []
 let statuses = {
   'space:main': { protected: false, locked: false, explicitLock: false },
   'note:note-1': { protected: false, locked: false, explicitLock: false },
@@ -64,6 +78,14 @@ export function setStatusFailure(target, enabled) {
   else failingStatusKeys.delete(key)
 }
 export function setDeferredStatusResponses(enabled) { deferStatusResponses = enabled }
+export function setLockNowFailure(error) { lockNowFailure = error ? structuredClone(error) : null }
+export function setDeferredLockNow(enabled) { deferLockNow = enabled }
+export function setLockNowThrow(enabled) { throwLockNow = enabled }
+export function resolveLockNow() {
+  const resolve = pendingLockNow.shift()
+  if (!resolve) throw new Error('pending lockNow request was not found')
+  resolve()
+}
 export function resolveStatusResponse(index, status) {
   const pending = pendingStatusResponses[index]
   if (!pending) throw new Error('pending status response was not found')
@@ -91,6 +113,9 @@ export async function unlockContentLock(input) {
 }
 export async function lockContentNow(target) {
   calls.lockNow.push(target)
+  if (deferLockNow) await new Promise((resolve) => pendingLockNow.push(resolve))
+  if (throwLockNow) throw new Error('lock API failed')
+  if (lockNowFailure) return { removed: false, unlocked: false, restartRequired: false, error: structuredClone(lockNowFailure) }
   const key = target.type + ':' + target.id
   statuses[key] = { protected: true, locked: true, explicitLock: true, source: target.type }
   locks = locks.map((lock) => lock.targetType === target.type && lock.targetId === target.id ? { ...lock, unlocked: false } : lock)
@@ -98,6 +123,8 @@ export async function lockContentNow(target) {
 }
 export async function lockContentTargetsNow(targets) {
   calls.lockTargets.push(structuredClone(targets))
+  if (batchThrow) throw new Error('batch API failed')
+  if (batchFailure) return { locks: [], error: structuredClone(batchFailure) }
   const keys = new Set(targets.map((target) => target.type + ':' + target.id))
   const locked = locks
     .filter((lock) => keys.has(lock.targetType + ':' + lock.targetId) && lock.unlocked)
@@ -167,6 +194,8 @@ try {
   assert.match(noteListSource, /ロック設定の読み込みが完了していません/, 'note shared Save must not fail silently')
   assert.match(appSource, /StorageSpaceUnlockScreen/, 'locked startup must render an unlock screen')
   assert.match(appSource, /setBeforeLock/, 'locking must flush pending drafts before key removal')
+  assert.match(appSource, /createContentLockBeforeLock/, 'locking must flush editor input before drafts')
+  assert.match(appSource, /flushEditorInput/, 'the app lock hook must include the active editor bridge')
   assert.match(appSource, /ContentUnlockDialog/, 'the normal workspace must host the shared unlock dialog')
   assert.match(appSource, /createContentLockAutoLock/, 'the app must schedule fixed-time content locks')
   assert.match(lockSettingsSource, /contentLockAutoLockMinutes/, 'lock settings must expose the auto-lock duration')
@@ -177,6 +206,7 @@ try {
   setActivePinia(createPinia())
   const mock = await import(pathToFileURL(path.join(outDir, 'mock-content-locks.mjs')).href)
   const { useContentLockStore } = await import(pathToFileURL(outFile).href)
+  const { createContentLockBeforeLock } = await import(pathToFileURL(beforeLockOut).href)
   const store = useContentLockStore()
   const noteTarget = { type: 'note', id: 'note-1' }
 
@@ -220,23 +250,124 @@ try {
   store.clearLastChangedTarget()
   assert.equal(store.lastChangedTarget, null)
 
+  const lockOrder = []
   let flushes = 0
-  store.setBeforeLock(async () => { flushes += 1; return true })
-  const locked = await store.lockNow(noteTarget)
+  let editorInputLocked = false
+  let editorEditable = true
+  const editorBridge = {
+    flushEditorInput: () => {
+      lockOrder.push('editor-input')
+      return true
+    },
+    setContentLockPending: (pending) => {
+      editorInputLocked = pending
+      editorEditable = !pending
+      lockOrder.push(pending ? 'input-lock' : 'input-unlock')
+      return true
+    },
+  }
+  let releaseDraftFlush
+  let draftFlushStarted = false
+  const draftFlush = new Promise((resolve) => { releaseDraftFlush = resolve })
+  store.setBeforeLock(createContentLockBeforeLock(
+    () => editorBridge,
+    async () => {
+      lockOrder.push('draft-flush')
+      flushes += 1
+      draftFlushStarted = true
+      await draftFlush
+      return true
+    },
+  ))
+  mock.setDeferredLockNow(true)
+  const lockPromise = store.lockNow(noteTarget)
+  await Promise.resolve()
+  assert.equal(draftFlushStarted, true, 'the product store must await the real draft flush before the lock API')
+  assert.equal(editorInputLocked, true, 'the editor input guard must start before the draft flush')
+  assert.equal(mock.calls.lockNow.length, 0, 'the lock API must wait for the held draft flush')
+  releaseDraftFlush()
+  await waitFor(() => mock.calls.lockNow.length === 1)
+  assert.equal(mock.calls.lockNow.length, 1, 'the lock API must start after the draft flush')
+  assert.equal(editorInputLocked, true, 'the editor input guard must cover the lock API wait')
+  mock.resolveLockNow()
+  const locked = await lockPromise
   assert.equal(locked.error, undefined)
   assert.equal(flushes, 1)
-  assert.deepEqual(store.lastLockedTarget, noteTarget)
-  store.clearLastLockedTarget()
-  assert.equal(store.lastLockedTarget, null)
+  assert.deepEqual(lockOrder.slice(0, 3), ['editor-input', 'input-lock', 'draft-flush'],
+    'editor input must flush and lock before draft persistence')
+  assert.equal(editorInputLocked, false, 'a completed request must release its own guard')
+  assert.equal(editorInputLocked, false)
+  assert.equal(editorEditable, true)
+
+  let releaseConcurrentFlush
+  let concurrentFlushes = 0
+  const concurrentFlush = new Promise((resolve) => { releaseConcurrentFlush = resolve })
+  store.setBeforeLock(createContentLockBeforeLock(
+    () => editorBridge,
+    async () => {
+      concurrentFlushes += 1
+      await concurrentFlush
+      return true
+    },
+  ))
+  const firstConcurrentLock = store.lockNow(noteTarget)
+  await waitFor(() => concurrentFlushes === 1)
+  const secondConcurrentLock = await store.lockNow(noteTarget)
+  assert.equal(secondConcurrentLock.error.code, 'CONTENT_LOCK_UNAVAILABLE', 'a concurrent lock must be rejected before it can touch the editor guard')
+  assert.equal(concurrentFlushes, 1)
+  assert.equal(editorInputLocked, true, 'a rejected concurrent lock must not release the active input guard')
+  releaseConcurrentFlush()
+  await waitFor(() => mock.calls.lockNow.length === 2)
+  mock.resolveLockNow()
+  const firstConcurrentResult = await firstConcurrentLock
+  assert.equal(firstConcurrentResult.error, undefined)
+  assert.equal(editorInputLocked, false)
+
+  mock.setDeferredLockNow(false)
+  store.setBeforeLock(createContentLockBeforeLock(
+    () => editorBridge,
+    async () => false,
+  ))
+  const failedSave = await store.lockNow(noteTarget)
+  assert.equal(failedSave.error.code, 'CONTENT_LOCK_UNAVAILABLE')
+  assert.equal(mock.calls.lockNow.length, 2, 'a failed draft flush must not call the lock API')
+  assert.equal(editorInputLocked, false, 'a failed draft flush must restore editor input')
+  assert.equal(editorEditable, true)
+
+  store.setBeforeLock(createContentLockBeforeLock(
+    () => editorBridge,
+    async () => { throw new Error('draft flush failed') },
+  ))
+  const thrownFlush = await store.lockTargetsNow([noteTarget])
+  assert.equal(thrownFlush.error.code, 'CONTENT_LOCK_UNAVAILABLE', 'a draft flush exception must preserve the unavailable result')
+  assert.equal(mock.calls.lockTargets.length, 0, 'a draft flush exception must not call the batch lock API')
+  assert.equal(editorInputLocked, false, 'a draft flush exception must restore editor input')
+  assert.equal(editorEditable, true)
+
+  mock.setLockNowFailure({ code: 'CONTENT_LOCK_FAILED', message: 'lock failed' })
+  store.setBeforeLock(createContentLockBeforeLock(
+    () => editorBridge,
+    async () => true,
+  ))
+  const failedApi = await store.lockNow(noteTarget)
+  assert.equal(failedApi.error.code, 'CONTENT_LOCK_FAILED')
+  assert.equal(editorInputLocked, false, 'a failed lock API must restore editor input')
+  assert.equal(editorEditable, true)
+  mock.setLockNowFailure(null)
+
+  mock.setLockNowThrow(true)
+  const thrownApi = await store.lockNow(noteTarget)
+  assert.equal(thrownApi.error.code, 'CONTENT_LOCK_UNAVAILABLE')
+  assert.equal(editorInputLocked, false, 'an exception from the lock API must restore editor input')
+  assert.equal(editorEditable, true)
+  mock.setLockNowThrow(false)
 
   await store.unlock(noteTarget, 'correct horse battery staple')
   const batchLocked = await store.lockTargetsNow([noteTarget, noteTarget])
   assert.equal(batchLocked.error, undefined)
   assert.equal(mock.calls.lockTargets.length, 1)
   assert.deepEqual(mock.calls.lockTargets[0], [noteTarget], 'auto-lock must de-duplicate due targets')
-  assert.deepEqual(store.lastLockedTargets, [noteTarget])
-  store.clearLastLockedTargets()
-  assert.equal(store.lastLockedTargets, null)
+  assert.equal(editorInputLocked, false)
 
   let failedFlushes = 0
   store.setBeforeLock(async () => { failedFlushes += 1; return false })
@@ -273,7 +404,134 @@ try {
   assert.equal(store.statuses['note:note-1'].protected, false)
   assert.equal(mock.calls.disable.length, 1)
 
+  // Execute the product App refresh function, not a copy of its guard logic.
+  const refreshSource = appSource.slice(
+    appSource.indexOf('async function handleLockedTargets('),
+    appSource.indexOf('function handleOpenNoteImport('),
+  )
+  const refreshJS = ts.transpileModule(refreshSource, {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  assert.match(appSource, /setAfterLock\(handleLockedTargets\)/)
+  assert.doesNotMatch(appSource, /lastLockedTargets?|setContentLockPending\(false\)/,
+    'App must not keep a second asynchronous notification/guard-release path')
+  assert.match(appSource, /onBeforeUnmount\(\(\) => \{\s*contentLockStore.setBeforeLock\(null\)\s*contentLockStore.setAfterLock\(null\)/)
+
+  for (const firstKind of ['single', 'batch']) {
+    for (const refreshFails of [false, true]) {
+      const raceStore = useContentLockStore(createPinia())
+      const b = { type: 'note', id: 'race-b' }
+      const a = { type: 'note', id: 'race-a' }
+      await raceStore.enable(b, 'test passphrase', true)
+      let guarded = false
+      let saveCount = 0
+      let releaseRefresh
+      let refreshStarted = false
+      const refreshGate = new Promise((resolve) => { releaseRefresh = resolve })
+      const warnings = []
+      const raceEditor = {
+        flushEditorInput: () => true,
+        setContentLockPending: (pending) => { guarded = pending; return true },
+      }
+      const appRefresh = new Function(
+        'contentLockStore', 'noteStore', 'startupStatus', 'getStartupStatus',
+        'appStore', 'searchStore', 'notificationStore',
+        refreshJS + '\nreturn handleLockedTargets',
+      )(raceStore, {
+        refreshActiveNoteLockStatus: async () => {},
+        fetchNotes: async () => {
+          refreshStarted = true
+          await refreshGate
+          if (refreshFails) throw new Error('view unavailable')
+        },
+      }, { value: null }, async () => ({ ready: true }),
+      { sidebarSection: 'notes' }, { isActive: false }, { notify: (...args) => warnings.push(args) })
+      raceStore.setBeforeLock(createContentLockBeforeLock(() => raceEditor, async () => {
+        saveCount += 1
+        return true
+      }))
+      raceStore.setAfterLock(appRefresh)
+      const first = firstKind === 'single' ? raceStore.lockNow(b) : raceStore.lockTargetsNow([b, b])
+      await waitFor(() => refreshStarted)
+      assert.equal(raceStore.isBusy, true, 'API success must retain busy during App refresh')
+      assert.equal(guarded, true)
+      const callsBefore = mock.calls.lockNow.length + mock.calls.lockTargets.length
+      assert.ok((await raceStore.lockNow(a)).error)
+      assert.ok((await raceStore.lockTargetsNow([a])).error)
+      assert.equal(saveCount, 1, 'later locks must not acquire a guard or begin saving')
+      assert.equal(mock.calls.lockNow.length + mock.calls.lockTargets.length, callsBefore)
+      assert.equal(guarded, true, 'duplicate rejection must preserve the first guard')
+      if (firstKind === 'batch' && refreshFails) {
+        raceStore.setBeforeLock(null)
+        raceStore.setAfterLock(null)
+        assert.equal(guarded, true, 'unregistering during refresh cannot release an active request')
+      }
+      releaseRefresh()
+      assert.equal((await first).error, undefined, 'view failure cannot undo successful key removal')
+      assert.equal(warnings.length, refreshFails ? 1 : 0)
+      assert.equal(guarded, false)
+      assert.equal(raceStore.isBusy, false)
+
+      // After the old refresh settles, every subsequent failure unwinds its own guard.
+      for (const failure of ['save', 'save-throw', 'api', 'api-throw', 'empty', 'success']) {
+        raceStore.setBeforeLock(createContentLockBeforeLock(() => raceEditor, async () => {
+          if (failure === 'save-throw') throw new Error('save unavailable')
+          return failure !== 'save'
+        }))
+        mock.setBatchFailure(failure === 'api' ? { code: 'CONTENT_LOCK_FAILED', message: 'failed' } : null)
+        mock.setBatchThrow(failure === 'api-throw')
+        if (failure === 'success') await raceStore.enable(a, 'test passphrase', true)
+        const result = await raceStore.lockTargetsNow([a])
+        assert.equal(Boolean(result.error), !['empty', 'success'].includes(failure), failure)
+        if (failure === 'empty') assert.deepEqual(result.locks, [])
+        assert.equal(guarded, false, failure + ' must restore editing')
+        assert.equal(raceStore.isBusy, false, failure + ' must restore busy')
+      }
+      mock.setBatchFailure(null)
+      mock.setBatchThrow(false)
+      raceStore.setAfterLock(async () => { throw new Error('unexpected refresh exception') })
+      assert.equal((await raceStore.lockNow(a)).error, undefined)
+      assert.equal(raceStore.error.code, 'CONTENT_LOCK_AFTER_LOCK_REFRESH_FAILED')
+      assert.equal(guarded, false, 'an unexpected callback exception must release input')
+      assert.equal(raceStore.isBusy, false)
+    }
+  }
+
+  // Unmount removes future callbacks, but the captured editor is still released
+  // when an already-running API settles. A replacement editor is never touched.
+  const detachedStore = useContentLockStore(createPinia())
+  let originalGuarded = false
+  let replacementTouches = 0
+  let currentEditor = {
+    flushEditorInput: () => true,
+    setContentLockPending: (pending) => { originalGuarded = pending; return true },
+  }
+  detachedStore.setBeforeLock(createContentLockBeforeLock(() => currentEditor, async () => true))
+  detachedStore.setAfterLock(async () => { throw new Error('must have been unregistered') })
+  mock.setDeferredLockNow(true)
+  const detachedCalls = mock.calls.lockNow.length
+  const detachedLock = detachedStore.lockNow(noteTarget)
+  await waitFor(() => mock.calls.lockNow.length > detachedCalls)
+  detachedStore.setBeforeLock(null)
+  detachedStore.setAfterLock(null)
+  currentEditor = { flushEditorInput: () => true, setContentLockPending: () => { replacementTouches += 1; return true } }
+  mock.resolveLockNow()
+  assert.equal((await detachedLock).error, undefined)
+  assert.equal(originalGuarded, false)
+  assert.equal(replacementTouches, 0)
+  assert.equal(detachedStore.isBusy, false)
+  mock.setDeferredLockNow(false)
+
   console.log('content lock store tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
+}
+
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1000
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error('condition was not reached')
 }

@@ -26,6 +26,7 @@
             v-model="localTitle"
             class="title-input"
             :class="{ 'is-waiting-title': isWaitingForFirstLineTitle }"
+            :disabled="isEditorInputLocked"
             type="text"
             placeholder="タイトル"
             @input="handleTitleInput"
@@ -57,12 +58,16 @@
             <span>保存競合・下書き保持中</span>
             <button
               type="button"
-              :disabled="noteStore.isLoading"
+              :disabled="isEditorInputLocked || noteStore.isLoading"
               @click="handleReloadConflict"
             >
               {{ noteStore.isLoading ? '再読込中...' : '最新版を再読込' }}
             </button>
-            <button type="button" @click="handleCopyConflict">コピー保存</button>
+            <button
+              type="button"
+              :disabled="isEditorInputLocked"
+              @click="handleCopyConflict"
+            >コピー保存</button>
           </div>
           <div
             v-else-if="saveFailed"
@@ -70,8 +75,16 @@
             role="status"
           >
             <span>保存失敗</span>
-            <button type="button" @click="handleRetrySave">再試行</button>
-            <button type="button" @click="handleDiscardDraft">破棄</button>
+            <button
+              type="button"
+              :disabled="isEditorInputLocked"
+              @click="handleRetrySave"
+            >再試行</button>
+            <button
+              type="button"
+              :disabled="isEditorInputLocked"
+              @click="handleDiscardDraft"
+            >破棄</button>
           </div>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
 
@@ -92,6 +105,7 @@
 
           <button
             class="mode-segment"
+            :disabled="isEditorInputLocked"
             type="button"
             :title="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
             :aria-label="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
@@ -118,7 +132,7 @@
               <button
                 class="icon-btn"
                 type="button"
-                :disabled="noteExportStore.isBusy"
+                :disabled="noteExportStore.isBusy || isEditorInputLocked"
                 :title="noteExportStore.isBusy ? 'エクスポート中...' : 'ノートをエクスポート'"
                 aria-label="ノートをエクスポート"
                 :aria-busy="noteExportStore.isBusy"
@@ -135,35 +149,35 @@
               >
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy"
+                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
                   @select="handleExportNote('html')"
                 >
                   HTMLとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy"
+                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
                   @select="handleExportNote('pdf')"
                 >
                   PDFとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy"
+                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
                   @select="handleExportNote('json')"
                 >
                   JSONとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy"
+                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
                   @select="handleExportNote('csv')"
                 >
                   CSVとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy"
+                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
                   @select="handleExportNote('txt')"
                 >
                   TXTとしてエクスポート
@@ -174,6 +188,7 @@
 
           <button
             class="icon-btn"
+            :disabled="isEditorInputLocked"
             type="button"
             :title="noteStore.activeNote.isFavorite ? 'お気に入りを外す' : 'お気に入りに追加'"
             @click="noteStore.toggleFavorite(noteStore.activeNote.id)"
@@ -182,6 +197,7 @@
           </button>
           <button
             class="icon-btn"
+            :disabled="isEditorInputLocked"
             type="button"
             :title="noteStore.activeNote.isPinned ? 'ピン留めを外す' : 'ピン留め'"
             @click="noteStore.togglePinned(noteStore.activeNote.id)"
@@ -190,9 +206,10 @@
           </button>
           <button
             class="icon-btn danger"
+            :disabled="isEditorInputLocked"
             type="button"
             title="ゴミ箱へ移動"
-            @click="noteStore.trashNote(noteStore.activeNote.id)"
+            @click="handleTrashActiveNote"
           >
             <Trash2Icon :size="18" />
           </button>
@@ -200,6 +217,10 @@
       </div>
 
       <div class="editor-format-bar" @mousedown.prevent>
+        <fieldset
+          class="editor-format-controls"
+          :disabled="isEditorInputLocked"
+        >
         <button
           class="format-btn"
           :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('bold') }"
@@ -321,7 +342,7 @@
         <NoteLinkPopover
           v-if="noteStore.activeNote"
           :note-id="noteStore.activeNote.id"
-          :disabled="noteStore.activeNote.isTrashed"
+          :disabled="noteStore.activeNote.isTrashed || isEditorInputLocked"
           @opened="rememberRichSelection"
           @select="insertNoteLink"
         />
@@ -389,6 +410,7 @@
             <Trash2Icon :size="15" />
           </button>
         </template>
+        </fieldset>
       </div>
 
       <AIWorkspace
@@ -431,6 +453,7 @@
               ref="markdownTextarea"
               v-model="localMarkdown"
               class="markdown-textarea"
+              :disabled="isEditorInputLocked"
               placeholder="ここにMarkdownで内容を入力してください..."
               title="Ctrl / Cmd + クリックでノートリンクを開く"
               @beforeinput="handleMarkdownBeforeInput"
@@ -451,11 +474,11 @@
         <div class="editor-statusbar-left">
           <NoteTagAddPopover
             :note-id="noteStore.activeNote.id"
-            :disabled="noteStore.activeNote.isTrashed"
+            :disabled="noteStore.activeNote.isTrashed || isEditorInputLocked"
           />
           <NoteTags
             :note-id="noteStore.activeNote.id"
-            :disabled="noteStore.activeNote.isTrashed"
+            :disabled="noteStore.activeNote.isTrashed || isEditorInputLocked"
           />
           <NoteBacklinks :note-id="noteStore.activeNote.id" />
           <span>{{ charCount }} 文字</span>
@@ -515,7 +538,7 @@ import {
   DOMSerializer as ProseMirrorDOMSerializer,
   type Node as ProseMirrorNode,
 } from '@tiptap/pm/model'
-import { Plugin, PluginKey, type Selection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, type Selection } from '@tiptap/pm/state'
 import {
   history as createRichHistoryPlugin,
   redo as redoRichHistory,
@@ -578,6 +601,16 @@ import {
   continueMarkdownList,
   createMarkdownLineBreakTracker,
 } from '../utils/markdownListContinuation'
+import {
+  createMermaidFence,
+} from '../utils/mermaidClipboard'
+import {
+  flushMermaidEditorInputs,
+  setMermaidEditorInputsLocked,
+  type MermaidEditorInputFlusher,
+  type MermaidEditorSessionStorage,
+} from '../utils/mermaidEditorSession'
+import { handleMermaidPaste } from '../utils/mermaidPaste'
 import MermaidCodeBlockView from './MermaidCodeBlockView.vue'
 
 const CustomTableCell = TableCell.extend({
@@ -592,6 +625,15 @@ const lowlight = createLowlight(common)
 const agentEditorHighlightPluginKey = new PluginKey<DecorationSet>('agentEditorHighlight')
 
 const MermaidCodeBlock = CodeBlockLowlight.extend({
+  addStorage() {
+    return {
+      ...this.parent?.(),
+      noteId: null as string | null,
+      generation: 0,
+      mermaidEditorFlushers: new Set<MermaidEditorInputFlusher>(),
+      mermaidEditorInputLockers: new Set(),
+    }
+  },
   addNodeView() {
     return VueNodeViewRenderer(MermaidCodeBlockView)
   },
@@ -620,6 +662,14 @@ const conflictDetail = computed(() => {
   return `保存元 revision ${conflict.expectedRevision} / 最新 revision ${conflict.actualRevision}`
 })
 const saveFailed = computed(() => noteStore.activeDraft?.status === 'failed')
+const isActiveNoteDeletionPreparing = computed(() => {
+  const noteId = noteStore.activeNote?.id
+  return noteId ? noteStore.isNoteDeletionPreparing(noteId) : false
+})
+const isContentLockPending = ref(false)
+const isEditorInputLocked = computed(() => (
+  isActiveNoteDeletionPreparing.value || isContentLockPending.value
+))
 const aiWorkspaceToggleLabel = computed(() => {
   const placement = settingsStore.aiWorkspacePlacement === 'right' ? '右側' : '下側'
   return `AIワークスペースを${isAIWorkspaceOpen.value ? '閉じる' : '開く'}（${placement}）`
@@ -695,7 +745,7 @@ const agentEditorHighlightPlugin = new Plugin<DecorationSet>({
   },
 })
 
-const editor = new Editor({
+const editor: Editor = new Editor({
   extensions: [
     StarterKit.configure({
       codeBlock: false,
@@ -735,9 +785,41 @@ const editor = new Editor({
     }),
   ],
   editorProps: {
-    clipboardTextSerializer(_content, view) {
-      const table = findRichTableNode(view.state.selection)
-      return table ? createTiptapTableClipboardPayload(table).plainText : ''
+    clipboardTextSerializer(content, view) {
+      const selection = view.state.selection
+      const mermaidSource = findRichMermaidSource(selection)
+      if (mermaidSource !== null && isSelectionInsideMermaid(selection)) {
+        return createMermaidFence(mermaidSource)
+      }
+
+      if (selectionContainsMermaid(selection)) {
+        return serializeTiptapJsonToMarkdown({
+          type: 'doc',
+          content: content.content.toJSON() as JSONContent[],
+        })
+      }
+
+      const table = findRichTableNode(selection)
+      if (table) return createTiptapTableClipboardPayload(table).plainText
+
+      return ''
+    },
+    handlePaste(view, event): boolean {
+      return handleMermaidPaste({
+        editor,
+        view,
+        event,
+        parseMarkdown: (markdown) => editor.schema.nodeFromJSON(
+          parseRichHtmlToJson(parseMarkdownToRichHtml(markdown)),
+        ),
+        onError: (error) => {
+          logOperationFailure({
+            noteId: noteStore.activeNote?.id,
+            stage: 'note-editor.mermaid-paste',
+            errorCategory: error instanceof Error ? error.name : 'paste-failed',
+          })
+        },
+      })
     },
     handleClick(_view, _pos, event) {
       const target = event.target
@@ -795,10 +877,26 @@ const editor = new Editor({
 editor.registerPlugin(createRichHistoryPlugin({ depth: 100, newGroupDelay: 500 }))
 editor.registerPlugin(agentEditorHighlightPlugin)
 
+function updateMermaidEditorContext(noteId: string | null) {
+  if (editor.isDestroyed) return
+
+  const storage = (editor.storage as {
+    codeBlock?: {
+      noteId?: string | null
+      generation?: number
+    }
+  }).codeBlock
+  if (!storage) return
+
+  storage.noteId = noteId
+  storage.generation = (storage.generation ?? 0) + 1
+}
+
 watch(
   () => noteStore.activeNote,
   (note) => {
     if (!note) {
+      updateMermaidEditorContext(null)
       noteStore.clearAgentEditorHighlight()
       activeNoteId = null
       savedRichSelection = null
@@ -869,6 +967,25 @@ watch(
 watch(editMode, () => {
   void nextTick(() => renderAgentEditorHighlight())
 })
+
+watch(
+  isActiveNoteDeletionPreparing,
+  (preparing) => {
+    if (!editor.isDestroyed) editor.setEditable(!preparing && !isContentLockPending.value)
+    if (!preparing || !noteStore.activeNote) return
+
+    // A list or sidebar delete can start while the editor still owns the
+    // latest input event. Snapshot it synchronously before the store flushes.
+    if (editMode.value === 'wysiwyg') {
+      applyRichEditorToMarkdown()
+    } else {
+      updateMarkdownSelection()
+      scheduleAutoSave(localMarkdown.value)
+      markdownTextarea.value?.blur()
+    }
+  },
+  { immediate: true, flush: 'sync' },
+)
 
 watch(
   markdownTextarea,
@@ -952,6 +1069,22 @@ function handleTitleSave() {
 function handleTitleInput() {
   disableAutoTitleFromContent()
   scheduleAutoSave(localMarkdown.value)
+}
+
+async function handleTrashActiveNote() {
+  const note = noteStore.activeNote
+  if (!note || isActiveNoteDeletionPreparing.value) return
+
+  if (editMode.value === 'wysiwyg') {
+    applyRichEditorToMarkdown()
+  } else {
+    updateMarkdownSelection()
+    scheduleAutoSave(localMarkdown.value)
+    markdownTextarea.value?.blur()
+  }
+
+  await nextTick()
+  await noteStore.trashNote(note.id)
 }
 
 function toggleAIWorkspace() {
@@ -1159,6 +1292,7 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
 
   if (mode === 'markdown') {
     applyRichEditorToMarkdown()
+    updateMermaidEditorContext(null)
     editMode.value = 'markdown'
     resetMarkdownEditHistory(localMarkdown.value)
     resetRichEditorToEmpty()
@@ -1181,7 +1315,69 @@ function toggleEditMode() {
   setEditMode(editMode.value === 'markdown' ? 'wysiwyg' : 'markdown')
 }
 
-defineExpose({ toggleAIWorkspace, toggleEditMode })
+let contentLockPreviousEditable: boolean | null = null
+
+function setContentLockPending(pending: boolean): boolean {
+  if (editor.isDestroyed) return false
+  if (pending === isContentLockPending.value) return true
+
+  if (pending) {
+    contentLockPreviousEditable = editor.isEditable
+    if (!setMermaidEditorInputsLocked(
+      (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
+      true,
+    )) {
+      setMermaidEditorInputsLocked(
+        (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
+        false,
+      )
+      contentLockPreviousEditable = null
+      return false
+    }
+
+    isContentLockPending.value = true
+    editor.setEditable(false)
+    return true
+  }
+
+  const unlocked = setMermaidEditorInputsLocked(
+    (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
+    false,
+  )
+  isContentLockPending.value = false
+  const previousEditable = contentLockPreviousEditable
+  contentLockPreviousEditable = null
+  editor.setEditable((previousEditable ?? true) && !isActiveNoteDeletionPreparing.value)
+  return unlocked
+}
+
+function flushEditorInput(): boolean {
+  if (editMode.value !== 'wysiwyg' || editor.isDestroyed) return true
+
+  const storage = (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock
+  if (!flushMermaidEditorInputs(storage)) {
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.flush-before-lock',
+      errorCategory: 'mermaid-input-flush-failed',
+    })
+    return false
+  }
+
+  try {
+    applyRichEditorToMarkdown()
+    return true
+  } catch {
+    logOperationFailure({
+      noteId: noteStore.activeNote?.id,
+      stage: 'note-editor.flush-before-lock',
+      errorCategory: 'rich-content-snapshot-failed',
+    })
+    return false
+  }
+}
+
+defineExpose({ toggleAIWorkspace, toggleEditMode, flushEditorInput, setContentLockPending })
 
 function replaceRichEditorContent(content: JSONContent) {
   editor.unregisterPlugin('history')
@@ -1208,6 +1404,7 @@ function resetRichEditorToEmpty() {
 }
 
 function setEditorFromMarkdown(markdown: string): boolean {
+  updateMermaidEditorContext(noteStore.activeNote?.id ?? null)
   isApplyingContent.value = true
   try {
     const html = parseMarkdownToRichHtml(markdown)
@@ -1673,6 +1870,62 @@ function findRichTableNode(selection: Selection): JSONContent | null {
   }
 
   return null
+}
+
+function findRichCodeBlockNode(selection: Selection): ProseMirrorNode | null {
+  return findRichCodeBlockRange(selection)?.node ?? null
+}
+
+function findRichMermaidSource(selection: Selection): string | null {
+  const codeBlock = findRichCodeBlockNode(selection)
+  if (!codeBlock) return null
+
+  const language = String(codeBlock.attrs.language ?? '').trim().toLowerCase()
+  return language === 'mermaid' ? codeBlock.textContent : null
+}
+
+function findRichCodeBlockRange(selection: Selection) {
+  if (selection instanceof NodeSelection) {
+    return selection.node.type.name === 'codeBlock'
+      ? { node: selection.node, from: selection.from, to: selection.to }
+      : null
+  }
+
+  const { $from } = selection
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth)
+    if (node.type.name === 'codeBlock') {
+      return { node, from: $from.before(depth), to: $from.after(depth) }
+    }
+  }
+
+  return null
+}
+
+function isMermaidCodeBlock(node: ProseMirrorNode) {
+  return node.type.name === 'codeBlock'
+    && String(node.attrs.language ?? '').trim().toLowerCase() === 'mermaid'
+}
+
+function isSelectionInsideMermaid(selection: Selection) {
+  const range = findRichCodeBlockRange(selection)
+  return Boolean(range && isMermaidCodeBlock(range.node)
+    && selection.from >= range.from
+    && selection.to <= range.to)
+}
+
+function selectionContainsMermaid(selection: Selection) {
+  if (isSelectionInsideMermaid(selection)) return true
+
+  let contains = false
+  editor.state.doc.nodesBetween(selection.from, selection.to, (node) => {
+    if (isMermaidCodeBlock(node)) {
+      contains = true
+      return false
+    }
+    return !contains
+  })
+  return contains
 }
 
 function serializeRichTableToHtml(table: JSONContent) {

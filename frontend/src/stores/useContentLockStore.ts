@@ -18,13 +18,17 @@ import {
   type ContentLockTarget,
   type StorageSpaceLockStatus,
 } from '../api/contentLocks'
+import type {
+  ContentLockBeforeLockResult,
+  ContentLockPreparation,
+} from '../utils/contentLockBeforeLock'
 
 const unavailableError: ContentLockError = {
   code: 'CONTENT_LOCK_UNAVAILABLE',
   message: 'ロックを利用できませんでした。データは変更していません。',
 }
 
-type BeforeLock = () => Promise<boolean>
+type BeforeLock = () => Promise<ContentLockBeforeLockResult>
 
 type ContentLockAccessRequest = {
   target: ContentLockTarget
@@ -63,16 +67,44 @@ export const useContentLockStore = defineStore('content-locks', () => {
   const isBusy = ref(false)
   const error = ref<ContentLockError | null>(null)
   const lastChangedTarget = ref<ContentLockTarget | null>(null)
-  const lastLockedTarget = ref<ContentLockTarget | null>(null)
-  const lastLockedTargets = ref<ContentLockTarget[] | null>(null)
   // Timestamps live only in the renderer session. They never contain a
   // passphrase or key and intentionally reset when the app is restarted.
   const unlockedAt = ref<Record<string, number>>({})
   const unlockVersion = ref(0)
   const accessRequest = ref<ContentLockAccessRequest | null>(null)
   const statusRequestVersions = new Map<string, number>()
+  let afterLock: ((targets: ContentLockTarget[]) => Promise<void>) | null = null
   let beforeLock: BeforeLock | null = null
   let accessRequestResolver: ((allowed: boolean) => void) | null = null
+
+  async function prepareBeforeLock() {
+    if (!beforeLock) {
+      return { allowed: true, preparation: null as ContentLockPreparation | null }
+    }
+
+    const result = await beforeLock()
+    if (result === false) {
+      return { allowed: false, preparation: null as ContentLockPreparation | null }
+    }
+    if (result === true) {
+      return { allowed: true, preparation: null as ContentLockPreparation | null }
+    }
+
+    if (result.ok !== true) {
+      return { allowed: false, preparation: null as ContentLockPreparation | null }
+    }
+
+    return { allowed: true, preparation: result }
+  }
+
+  function finishBeforeLock(preparation: ContentLockPreparation | null) {
+    try {
+      preparation?.finish()
+    } catch {
+      // Releasing the renderer-side input guard must not turn a completed
+      // lock mutation into an unhandled promise rejection.
+    }
+  }
 
   const lockByTarget = computed(() => new Map(locks.value.map((lock) => [
     `${lock.targetType}:${lock.targetId}`,
@@ -182,10 +214,13 @@ export const useContentLockStore = defineStore('content-locks', () => {
     target: ContentLockTarget,
     operation: () => Promise<ContentLockMutationResult>,
     notifyChange = true,
+    busyAlreadyHeld = false,
   ) {
-    if (isBusy.value) return failureResult(unavailableError)
-    isBusy.value = true
-    error.value = null
+    if (!busyAlreadyHeld && isBusy.value) return failureResult(unavailableError)
+    if (!busyAlreadyHeld) {
+      isBusy.value = true
+      error.value = null
+    }
     try {
       const result = await operation()
       if (result.error) {
@@ -203,7 +238,7 @@ export const useContentLockStore = defineStore('content-locks', () => {
       error.value = unavailableError
       return failureResult(unavailableError)
     } finally {
-      isBusy.value = false
+      if (!busyAlreadyHeld) isBusy.value = false
     }
   }
 
@@ -229,13 +264,29 @@ export const useContentLockStore = defineStore('content-locks', () => {
   }
 
   async function lockNow(target: ContentLockTarget) {
-    if (beforeLock && !(await beforeLock())) return failureResult(unavailableError)
-    const result = await runMutation(target, () => lockContentNow(target), false)
-    if (!result.error) {
-      forgetUnlocked(target)
-      lastLockedTarget.value = { ...target }
+    if (isBusy.value) return failureResult(unavailableError)
+
+    isBusy.value = true
+    error.value = null
+    let preparation: ContentLockPreparation | null = null
+    try {
+      const prepared = await prepareBeforeLock()
+      if (!prepared.allowed) return failureResult(unavailableError)
+      preparation = prepared.preparation
+
+      const result = await runMutation(target, () => lockContentNow(target), false, true)
+      if (!result.error) {
+        forgetUnlocked(target)
+        await refreshAfterLock([target])
+      }
+      return result
+    } catch {
+      error.value = unavailableError
+      return failureResult(unavailableError)
+    } finally {
+      finishBeforeLock(preparation)
+      isBusy.value = false
     }
-    return result
   }
 
   async function changePassphrase(target: ContentLockTarget, currentPassphrase: string, newPassphrase: string) {
@@ -266,30 +317,35 @@ export const useContentLockStore = defineStore('content-locks', () => {
     if (pendingTargets.length === 0) return { locks: [] as ContentLock[] }
     if (isBusy.value) return failureListResult(unavailableError)
 
-    if (beforeLock) {
-      try {
-        if (!(await beforeLock())) {
-          const saveError: ContentLockError = {
-            code: 'CONTENT_LOCK_SAVE_FAILED',
-            message: '保存に失敗したため自動ロックを保留しました。保存後に再試行します。',
-          }
-          error.value = saveError
-          return failureListResult(saveError)
-        }
-      } catch {
-        error.value = unavailableError
-        return failureListResult(unavailableError)
-      }
-    }
-
     isBusy.value = true
     error.value = null
+    let preparation: ContentLockPreparation | null = null
+    try {
+      const prepared = await prepareBeforeLock()
+      if (!prepared.allowed) {
+        const saveError: ContentLockError = {
+          code: 'CONTENT_LOCK_SAVE_FAILED',
+          message: '保存に失敗したため自動ロックを保留しました。保存後に再試行します。',
+        }
+        error.value = saveError
+        isBusy.value = false
+        return failureListResult(saveError)
+      }
+      preparation = prepared.preparation
+    } catch {
+      finishBeforeLock(preparation)
+      error.value = unavailableError
+      isBusy.value = false
+      return failureListResult(unavailableError)
+    }
+
     try {
       const result = await lockContentTargetsNow(pendingTargets)
       if (result.error) {
         error.value = result.error
         return result
       }
+
       const lockedTargets = (result.locks ?? []).map(targetForLock)
       await Promise.all([
         refresh(),
@@ -297,12 +353,13 @@ export const useContentLockStore = defineStore('content-locks', () => {
         lockedTargets.some((target) => target.type === 'space') ? refreshSpaceStatuses() : Promise.resolve(true),
       ])
       for (const target of lockedTargets) forgetUnlocked(target)
-      if (lockedTargets.length > 0) lastLockedTargets.value = lockedTargets
+      if (lockedTargets.length > 0) await refreshAfterLock(lockedTargets)
       return result
     } catch {
       error.value = unavailableError
       return failureListResult(unavailableError)
     } finally {
+      finishBeforeLock(preparation)
       isBusy.value = false
     }
   }
@@ -372,16 +429,25 @@ export const useContentLockStore = defineStore('content-locks', () => {
     finishAccessRequest(false)
   }
 
-  function setBeforeLock(handler: BeforeLock) {
+  function setBeforeLock(handler: BeforeLock | null) {
     beforeLock = handler
   }
 
-  function clearLastLockedTarget() {
-    lastLockedTarget.value = null
+  function setAfterLock(handler: ((targets: ContentLockTarget[]) => Promise<void>) | null) {
+    afterLock = handler
   }
 
-  function clearLastLockedTargets() {
-    lastLockedTargets.value = null
+  async function refreshAfterLock(targets: ContentLockTarget[]) {
+    try {
+      await afterLock?.(targets)
+    } catch {
+      // The keys have already been removed. A view refresh failure must not
+      // report the successful mutation as failed or retain its input guard.
+      error.value = {
+        code: 'CONTENT_LOCK_AFTER_LOCK_REFRESH_FAILED',
+        message: 'ロック後の表示を更新できませんでした。',
+      }
+    }
   }
 
   function clearLastChangedTarget() {
@@ -403,8 +469,6 @@ export const useContentLockStore = defineStore('content-locks', () => {
     isBusy,
     error,
     lastChangedTarget,
-    lastLockedTarget,
-    lastLockedTargets,
     unlockedAt,
     unlockVersion,
     accessRequest,
@@ -421,9 +485,8 @@ export const useContentLockStore = defineStore('content-locks', () => {
     unlockAccess,
     cancelAccessRequest,
     setBeforeLock,
+    setAfterLock,
     clearLastChangedTarget,
-    clearLastLockedTarget,
-    clearLastLockedTargets,
     clearError,
   }
 })

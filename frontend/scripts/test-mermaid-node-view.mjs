@@ -19,17 +19,22 @@ try {
   const compiled = compileScript(descriptor, { id: 'mermaid-test', inlineTemplate: true }).content
     .replace("from '@tiptap/vue-3'", "from './mocks.mjs'")
     .replace("from '../stores/useAppStore'", "from './mocks.mjs'")
+    .replace("from '../stores/useNoteStore'", "from './mocks.mjs'")
     .replace("from '../utils/mermaidRenderer'", "from './mocks.mjs'")
+    .replace("from './MermaidEditDialog.vue'", "from './mocks.mjs'")
   await writeFile(path.join(outDir, 'view.mjs'), ts.transpileModule(compiled, {
     compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
   }).outputText)
   await writeFile(path.join(outDir, 'mocks.mjs'), `
 import { h, reactive } from 'vue'
-export const nodeViewProps = { node: Object }
+export const nodeViewProps = { node: Object, editor: Object, extension: Object, getPos: Function }
 export const NodeViewWrapper = (_, { slots }) => h('pre', slots.default?.())
 export const NodeViewContent = () => h('code')
+export const MermaidEditDialog = { render: () => null }
+export default MermaidEditDialog
 export const store = reactive({ theme: 'light' })
 export const useAppStore = () => store
+export const useNoteStore = () => ({ isNoteDeletionPreparing: () => false })
 export const pending = []
 export const renderMermaidDiagram = (source, options) => new Promise((resolve, reject) => {
   pending.push({ source, options, resolve, reject })
@@ -40,7 +45,12 @@ export const renderMermaidDiagram = (source, options) => new Promise((resolve, r
   const created = [], revoked = []
   URL.createObjectURL = () => { const url = `blob:test-${created.length}`; created.push(url); return url }
   URL.revokeObjectURL = url => revoked.push(url)
-  const props = reactive({ node: { attrs: { language: 'mermaid' }, textContent: 'first' } })
+  const props = reactive({
+    node: { attrs: { language: 'mermaid' }, textContent: 'first' },
+    editor: { isDestroyed: false, isEditable: true },
+    extension: { storage: { noteId: 'node-view-test', generation: 1 } },
+    getPos: () => 0,
+  })
   const host = document.createElement('div')
   document.body.append(host)
   const app = createApp({ render: () => h(View, props) })

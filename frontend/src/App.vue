@@ -183,6 +183,7 @@ import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
 import { logOperationFailure } from './utils/operationLogger'
 import { createContentLockAutoLock } from './utils/contentLockAutoLock'
+import { createContentLockBeforeLock } from './utils/contentLockBeforeLock'
 import { prepareBackupOperation } from './services/backupLifecycle'
 import { prepareStorageSpaceSwitch } from './services/storageSpaceSwitch'
 import {
@@ -203,6 +204,8 @@ type AppTopBarExpose = { focusSearch: () => void }
 type NoteEditorExpose = {
   toggleAIWorkspace: () => void
   toggleEditMode: () => void
+  flushEditorInput: () => boolean
+  setContentLockPending: (pending: boolean) => boolean
 }
 
 const noteStore = useNoteStore()
@@ -224,7 +227,11 @@ const noteExportStore = useNoteExportStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
 
-contentLockStore.setBeforeLock(() => noteStore.flushAllDirtyNotes())
+contentLockStore.setBeforeLock(createContentLockBeforeLock(
+  () => noteEditorRef.value,
+  () => noteStore.flushAllDirtyNotes(),
+))
+contentLockStore.setAfterLock(handleLockedTargets)
 syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
@@ -547,24 +554,6 @@ async function handleNoteImportCompleted(result: NoteImportResult) {
   })
 }
 
-watch(() => contentLockStore.lastLockedTarget, async (target) => {
-  if (!target) return
-  try {
-    await handleLockedTargets([target])
-  } finally {
-    contentLockStore.clearLastLockedTarget()
-  }
-})
-
-watch(() => contentLockStore.lastLockedTargets, async (targets) => {
-  if (!targets) return
-  try {
-    await handleLockedTargets(targets)
-  } finally {
-    contentLockStore.clearLastLockedTargets()
-  }
-})
-
 function missingNoteIds(status: StartupStatus | null) {
   return status?.missingNotes.map((note) => note.id) ?? []
 }
@@ -839,6 +828,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  contentLockStore.setBeforeLock(null)
+  contentLockStore.setAfterLock(null)
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('focus', checkContentLockAutoLock)
   window.removeEventListener('keydown', handleGlobalShortcut, true)
