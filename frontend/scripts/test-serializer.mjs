@@ -96,7 +96,22 @@ const cases = [
       codeBlock('', 'line one\nline two'),
       paragraph([]),
     ]),
-    expected: '```\nline one\nline two\n```',
+    expected: '&nbsp;\n\n```\nline one\nline two\n```\n\n&nbsp;',
+  },
+  {
+    name: 'only empty paragraph remains an empty document',
+    input: doc(paragraph([])),
+    expected: '',
+  },
+  {
+    name: 'consecutive empty paragraphs',
+    input: doc([
+      paragraph([text('before')]),
+      paragraph([]),
+      paragraph([]),
+      paragraph([text('after')]),
+    ]),
+    expected: 'before\n\n&nbsp;\n\n&nbsp;\n\nafter',
   },
   {
     name: 'url with query and fragment',

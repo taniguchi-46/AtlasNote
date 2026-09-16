@@ -15,6 +15,7 @@ const beforeLockOut = path.join(outDir, 'contentLockBeforeLock.mjs')
 const pasteOut = path.join(outDir, 'mermaidPaste.mjs')
 const dialogOut = path.join(outDir, 'MermaidEditDialog.mjs')
 const nodeViewOut = path.join(outDir, 'MermaidCodeBlockView.mjs')
+let restoreEmptyParagraphs = () => {}
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://atlasnote.test/',
 })
@@ -75,7 +76,11 @@ try {
   await writeFile(path.join(outDir, 'component-mocks.mjs'), componentMocksSource(), 'utf8')
 
   const { createMermaidFence, readMermaidClipboardPayload } = await import(pathToFileURL(clipboardOut))
-  const { serializeTiptapJsonToMarkdown } = await import(pathToFileURL(serializerOut))
+  const {
+    restoreSerializedEmptyParagraphs,
+    serializeTiptapJsonToMarkdown,
+  } = await import(pathToFileURL(serializerOut))
+  restoreEmptyParagraphs = restoreSerializedEmptyParagraphs
   const { flushMermaidEditorInputs, setMermaidEditorInputsLocked } = await import(pathToFileURL(sessionOut))
   const { createContentLockBeforeLock } = await import(pathToFileURL(beforeLockOut))
   const { handleMermaidPaste } = await import(pathToFileURL(pasteOut))
@@ -111,6 +116,31 @@ try {
   )
   assert.equal(mixedDocument.child(1).attrs.language, 'mermaid')
   assert.equal(mixedDocument.child(1).textContent, 'flowchart TD\n  A[開始] --> B[終了]')
+
+  const emptyParagraphMarkdown = '前置段落\n\n&nbsp;\n\n&nbsp;\n\n後置段落'
+  const emptyParagraphDocument = createMarkdownDocument(
+    editor,
+    emptyParagraphMarkdown,
+    ProseMirrorDOMParser,
+  )
+  assert.deepEqual(
+    Array.from({ length: emptyParagraphDocument.childCount }, (_, index) => ({
+      type: emptyParagraphDocument.child(index).type.name,
+      childCount: emptyParagraphDocument.child(index).childCount,
+    })),
+    [
+      { type: 'paragraph', childCount: 1 },
+      { type: 'paragraph', childCount: 0 },
+      { type: 'paragraph', childCount: 0 },
+      { type: 'paragraph', childCount: 1 },
+    ],
+    'serialized empty paragraphs are restored as empty Rich paragraphs',
+  )
+  assert.equal(
+    serializeTiptapJsonToMarkdown(emptyParagraphDocument.toJSON()),
+    emptyParagraphMarkdown,
+    'empty paragraphs survive Markdown to Rich to Markdown round-trip',
+  )
 
   editor.commands.setContent(mixedDocument.toJSON(), { emitUpdate: false })
   const mixedSerialized = serializeTiptapJsonToMarkdown(editor.getJSON())
@@ -794,6 +824,7 @@ function createMarkdownDocument(editor, markdown, ProseMirrorDOMParser) {
   const html = editor.storage.markdown.parser.parse(markdown)
   const container = document.createElement('div')
   container.innerHTML = html
+  restoreEmptyParagraphs(container)
   return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container)
 }
 

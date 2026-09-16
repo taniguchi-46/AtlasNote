@@ -1,7 +1,28 @@
 import type { JSONContent } from '@tiptap/core'
 
+export const EMPTY_PARAGRAPH_MARKDOWN = '&nbsp;'
+
 export function serializeTiptapJsonToMarkdown(node?: JSONContent): string {
-  return serializeNode(node).trimEnd()
+  const content = node?.type === 'doc' ? (node.content ?? []) : []
+  const isEmptyDocument = content.length === 0
+    || (content.length === 1 && isEmptyParagraph(content[0]))
+
+  return (isEmptyDocument ? '' : serializeNode(node)).trimEnd()
+}
+
+export function restoreSerializedEmptyParagraphs(container: HTMLElement) {
+  const emptyParagraphCharacter = '\u00a0'
+
+  container.querySelectorAll('p').forEach((paragraph) => {
+    if (paragraph.childNodes.length !== 1) return
+
+    const child = paragraph.firstChild
+    if (child?.nodeType !== Node.TEXT_NODE || child.textContent !== emptyParagraphCharacter) {
+      return
+    }
+
+    paragraph.textContent = ''
+  })
 }
 
 type SerializeContext = {
@@ -15,7 +36,7 @@ function serializeNode(node?: JSONContent, context: SerializeContext = {}): stri
     case 'doc':
       return serializeBlockChildren(node.content)
     case 'paragraph':
-      return serializeInlineChildren(node.content, context)
+      return serializeParagraph(node, context)
     case 'heading':
       return serializeHeading(node, context)
     case 'blockquote':
@@ -122,6 +143,17 @@ function serializeCodeBlock(node: JSONContent, context: SerializeContext = {}) {
   const code = serializeInlineChildren(node.content, context)
   const fence = '`'.repeat(Math.max(3, longestBacktickRun(code) + 1))
   return `${fence}${language}\n${code}\n${fence}`
+}
+
+function serializeParagraph(node: JSONContent, context: SerializeContext = {}) {
+  const text = serializeInlineChildren(node.content, context)
+  if (text.length > 0 || context.tableCell) return text
+
+  return EMPTY_PARAGRAPH_MARKDOWN
+}
+
+function isEmptyParagraph(node?: JSONContent) {
+  return node?.type === 'paragraph' && serializeInlineChildren(node.content).length === 0
 }
 
 function longestBacktickRun(source: string) {

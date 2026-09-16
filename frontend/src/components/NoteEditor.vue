@@ -624,7 +624,10 @@ import {
   createTiptapTableClipboardPayload,
   writeTableClipboard,
 } from '../utils/tableClipboard'
-import { serializeTiptapJsonToMarkdown } from '../utils/tiptapMarkdownSerializer'
+import {
+  restoreSerializedEmptyParagraphs,
+  serializeTiptapJsonToMarkdown,
+} from '../utils/tiptapMarkdownSerializer'
 import {
   createAgentEditorTextHighlight,
   findChangedTopLevelBlockRange,
@@ -2069,6 +2072,7 @@ function parseMarkdownToRichHtml(markdown: string): string {
 function parseRichHtmlToJson(html: string) {
   const container = document.createElement('div')
   container.innerHTML = html
+  restoreSerializedEmptyParagraphs(container)
   preserveSoftBreaks(container)
   normalizeTableCells(container)
   return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container).toJSON()
