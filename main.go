@@ -1,11 +1,12 @@
 package main
 
 import (
-	"context"
 	"embed"
-	"errors"
+	"encoding/json"
 	"os"
+	"strings"
 
+	backendapp "atlasnote/internal/app"
 	"atlasnote/internal/appcleanup"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -14,6 +15,23 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed wails.json
+var wailsConfigBytes []byte
+
+type wailsConfig struct {
+	Info struct {
+		ProductVersion string `json:"productVersion"`
+	} `json:"info"`
+}
+
+func applicationProductVersion() string {
+	var config wailsConfig
+	if err := json.Unmarshal(wailsConfigBytes, &config); err != nil || strings.TrimSpace(config.Info.ProductVersion) == "" {
+		return "unknown"
+	}
+	return config.Info.ProductVersion
+}
 
 func main() {
 	if handled, exitCode := runMaintenanceCommand(os.Args[1:]); handled {
@@ -28,8 +46,8 @@ func main() {
 		return
 	}
 	defer applicationLock.Release()
-	app := NewApp()
-	app.recordApplicationUser = appcleanup.RecordApplicationUser
+	app := backendapp.New(applicationProductVersion())
+	app.SetRecordApplicationUser(appcleanup.RecordApplicationUser)
 
 	err = wails.Run(&options.App{
 		Title:            "Atlas Note",
@@ -42,27 +60,17 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 13, G: 17, B: 23, A: 255},
-		OnStartup:        app.startup,
+		OnStartup:        app.Startup,
 		// OnBeforeCloseをフックすることで、ユーザーが「×」ボタンでウィンドウを閉じようとした際に、
 		// 未保存の入力データをDBやファイルに保存し終わるまでアプリの終了を待機させる。
-		OnBeforeClose: app.beforeClose,
-		OnShutdown:    app.shutdown,
+		OnBeforeClose: app.BeforeClose,
+		OnShutdown:    app.Shutdown,
 		// フロントエンド（JS/TS）からGoのメソッドを呼び出せるようにバインディングを登録する。
 		Bind: []interface{}{
 			app,
 		},
 	})
-	if err := finishApplication(app, err, applicationLock.Release); err != nil {
+	if err := backendapp.FinishApplication(app, err, applicationLock.Release); err != nil {
 		reportMaintenanceFailure("Atlas Noteの終了または自動再起動に失敗しました。手動で起動し直してください。")
 	}
-}
-
-// Also closes resources if Wails fails before its OnShutdown callback.
-func finishApplication(app *App, runErr error, release func() error) error {
-	app.shutdown(context.Background())
-	err := errors.Join(runErr, app.shutdownErr, release())
-	if err != nil {
-		return err
-	}
-	return app.launchRestartIfRequested()
 }

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -142,9 +142,39 @@ type StorageSpaceLockStatusResult struct {
 }
 
 func NewApp() *App {
-	app := &App{diagnostics: newAppDiagnosticsStore()}
+	return newApp("unknown")
+}
+
+func newApp(productVersion string) *App {
+	app := &App{diagnostics: newAppDiagnosticsStore(productVersion)}
 	app.initialize(context.Background())
 	return app
+}
+
+// New creates the Wails application service.
+func New(productVersion string) *App {
+	return newApp(productVersion)
+}
+
+// SetRecordApplicationUser configures optional application-user registration
+// used by the executable's maintenance flow.
+func (a *App) SetRecordApplicationUser(record func() error) {
+	a.recordApplicationUser = record
+}
+
+// Startup is the Wails lifecycle callback.
+func (a *App) Startup(ctx context.Context) {
+	a.startup(ctx)
+}
+
+// Shutdown is the Wails lifecycle callback.
+func (a *App) Shutdown(ctx context.Context) {
+	a.shutdown(ctx)
+}
+
+// BeforeClose is the Wails lifecycle callback.
+func (a *App) BeforeClose(ctx context.Context) bool {
+	return a.beforeClose(ctx)
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -180,6 +210,21 @@ func (a *App) shutdown(ctx context.Context) {
 		a.shutdownErr = errors.Join(a.shutdownErr, a.dataLock.Release())
 		a.dataLock = nil
 	}
+}
+
+// FinishApplication closes resources if Wails fails before OnShutdown and
+// starts a requested replacement process only after cleanup succeeds.
+func FinishApplication(app *App, runErr error, release func() error) error {
+	return finishApplication(app, runErr, release)
+}
+
+func finishApplication(app *App, runErr error, release func() error) error {
+	app.shutdown(context.Background())
+	err := errors.Join(runErr, app.shutdownErr, release())
+	if err != nil {
+		return err
+	}
+	return app.launchRestartIfRequested()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

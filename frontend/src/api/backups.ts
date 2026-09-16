@@ -5,7 +5,7 @@ import {
   GetBackupStatus,
   ListBackups,
   PreviewBackupRestore,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type BackupError = {
   code: string

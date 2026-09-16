@@ -4,7 +4,7 @@ import {
   DeleteAllAICredentials,
   GetAISettings,
   TestAIConnection,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export type AIProviderID = 'openrouter' | 'gemini'

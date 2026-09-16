@@ -6,7 +6,7 @@ import {
   GetStorageLocationStatus,
   RetryPendingStorageLocationMigration,
   SelectStorageLocation,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type StorageLocationStatus = {
   dataRoot?: string

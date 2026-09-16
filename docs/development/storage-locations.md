@@ -83,9 +83,9 @@ OS原因を確実に判定できる読み書きエラーは、アクセス拒否
 ## 実装と確認
 
 - 設定・検査・移行: `internal/config/storage_locations*.go`
-- Wails API: `storage_locations_api.go`
+- Wails API: `internal/app/storage_locations_api.go`
 - フロントAPI / Store / UI: `frontend/src/api/storageLocations.ts`、`frontend/src/stores/useStorageLocationStore.ts`、`frontend/src/components/StorageLocation*.vue`
-- 回帰テスト: `internal/config/storage_locations_test.go`、`internal/config/storage_locations_validation_test.go`、`storage_locations_app_test.go`、`storage_locations_candidate_test.go`、`internal/diagnostics/store_test.go`、`internal/backup/service_test.go`
+- 回帰テスト: `internal/config/storage_locations_test.go`、`internal/config/storage_locations_validation_test.go`、`internal/app/storage_locations_app_test.go`、`internal/app/storage_locations_candidate_test.go`、`internal/diagnostics/store_test.go`、`internal/backup/service_test.go`
 
 ```text
 go test ./internal/config ./internal/diagnostics ./internal/backup . -count=1

@@ -160,8 +160,8 @@ import {
   reinspectRecovery,
   type StartupStatus,
 } from './api/startup'
-import { ToggleAlwaysOnTop } from '../wailsjs/go/main/App'
-import { CancelClose, CompleteClose, RestartApp } from '../wailsjs/go/main/App'
+import { ToggleAlwaysOnTop } from '../wailsjs/go/app/App'
+import { CancelClose, CompleteClose, RestartApp } from '../wailsjs/go/app/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { useNoteStore } from './stores/useNoteStore'
 import { useAppStore } from './stores/useAppStore'

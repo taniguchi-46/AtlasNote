@@ -4,7 +4,7 @@ import {
 	ListNotebooks,
 	UpdateNotebook,
 	DeleteNotebook,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type NotebookDeleteMode = 'trashNotes' | 'keepNotes'
 

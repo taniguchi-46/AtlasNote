@@ -42,6 +42,7 @@ Go Backend
 | Composables | UI ロジック、Wails API 呼び出し、入力状態の再利用可能な処理 |
 | Pinia | ノート選択、検索条件、同期状態などのフロントエンド状態管理 |
 | Wails Bridge | TypeScript から Go のアプリケーションサービスを呼び出す境界 |
+| `internal/app` | `App`、Wails 公開 API、起動・終了ライフサイクルを集約するアプリケーション境界 |
 | Go Application Services | ユースケース単位の処理、トランザクション、入力検証 |
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |

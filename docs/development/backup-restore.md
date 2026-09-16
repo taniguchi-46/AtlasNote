@@ -65,7 +65,7 @@ App統合では、同一アーカイブルートと分離アーカイブルー�
 ## 実装とテスト
 
 - Go実装: `internal/backup/`、SQLiteスナップショット: `internal/database/backup.go`
-- Wails API: `app.go`
+- Wails API: `internal/app/app.go`
 - フロントエンド: `frontend/src/api/backups.ts`、`frontend/src/stores/useBackupStore.ts`、`frontend/src/components/BackupSettingsPanel.vue`
 - 自動テスト: `backup_restore_app_test.go`、`internal/backup/*_test.go`、`internal/database/backup_test.go`、`frontend/scripts/test-backups.mjs`、`frontend/scripts/test-note-delete.mjs`
 

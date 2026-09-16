@@ -4,7 +4,7 @@ import {
   GetStartupStatus,
   OpenInstalledApps,
   ReinspectRecovery,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 import type { StorageSpace } from './storageSpaces'
 import type { StorageLocationError, StorageLocationStatus } from './storageLocations'
 

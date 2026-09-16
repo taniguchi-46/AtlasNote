@@ -1,5 +1,5 @@
 import type { note } from '../../wailsjs/go/models'
-import { SearchNotes } from '../../wailsjs/go/main/App'
+import { SearchNotes } from '../../wailsjs/go/app/App'
 
 export type { note }
 

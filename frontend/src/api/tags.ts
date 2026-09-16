@@ -6,7 +6,7 @@ import {
 	ListTags,
 	SetNoteTags,
 	UpdateTag,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type { note }
 

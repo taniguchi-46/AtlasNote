@@ -1,4 +1,4 @@
-import { ImportNotes } from '../../wailsjs/go/main/App'
+import { ImportNotes } from '../../wailsjs/go/app/App'
 
 export type NoteImportTitleMode = 'auto' | 'filename' | 'heading' | 'metadata'
 

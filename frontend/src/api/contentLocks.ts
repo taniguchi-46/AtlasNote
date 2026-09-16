@@ -9,7 +9,7 @@ import {
   LockContentNow as lockContentNowRPC,
   LockContentTargetsNow as lockContentTargetsNowRPC,
   UnlockContentLock as unlockContentLockRPC,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type ContentLockTargetType = 'space' | 'notebook' | 'note'
 

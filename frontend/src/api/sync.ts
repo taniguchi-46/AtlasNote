@@ -9,7 +9,7 @@ import {
   ResolveSyncConflict,
   SyncNow,
   TestSyncConfiguration,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type SyncStatus =
   | 'disabled'

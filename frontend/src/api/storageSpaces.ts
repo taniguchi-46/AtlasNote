@@ -2,7 +2,7 @@ import {
   CreateStorageSpace,
   ListStorageSpaces,
   SelectStorageSpace,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type StorageSpace = {
   id: string

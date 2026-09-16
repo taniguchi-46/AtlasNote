@@ -6,7 +6,7 @@ import {
   GetNote,
   UpdateNote,
   DeleteNote,
-} from '../../wailsjs/go/main/App'
+} from '../../wailsjs/go/app/App'
 
 export type { note }
 

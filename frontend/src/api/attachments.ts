@@ -1,4 +1,4 @@
-import * as WailsApp from '../../wailsjs/go/main/App'
+import * as WailsApp from '../../wailsjs/go/app/App'
 
 export type NoteAttachment = {
   id: string
