@@ -310,6 +310,7 @@ try {
   const noteMock = await import(pathToFileURL(path.join(outDir, 'mock-notes.mjs')).href)
   const storeMock = await import(pathToFileURL(path.join(outDir, 'mock-note-stores.mjs')).href)
   const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
+  await testActualStoreTypingDuringSave(noteMock, storeMock, useNoteStore)
   await testActualStoreTrashThenEmptyTrash(noteMock, storeMock, useNoteStore)
   await testActualStoreDraftFlushBeforeDeletion(noteMock, storeMock, useNoteStore)
   await testActualStoreFailedDraftPreventsDeletion(noteMock, storeMock, useNoteStore)
@@ -397,6 +398,54 @@ async function testActualStoreTrashThenEmptyTrash(noteMock, storeMock, useNoteSt
   assert.equal(store.summaries.some((summary) => summary.id === original.id), false)
   assert.equal(store.activeNote, null)
   storeMock.setDeferredLockResponses(false)
+}
+
+async function testActualStoreTypingDuringSave(noteMock, storeMock, useNoteStore) {
+  for (const switchNote of [false, true]) {
+    const original = createTestNote('typing-note', 4, false)
+    const other = createTestNote('other-note', 1, false)
+    noteMock.resetBackend([original, other])
+    storeMock.resetStores()
+    setActivePinia(createPinia())
+    const store = useNoteStore()
+    await store.fetchNotes()
+    await store.selectNote(original.id)
+    noteMock.setDeferredUpdateResponses(true)
+
+    store.scheduleDraft(original.id, 'first title', 'first content')
+    const saving = store.flushPendingDraft()
+    await waitFor(() => noteMock.calls.updateNote.length === 1)
+    store.scheduleDraft(original.id, 'latest title', 'latest content')
+    if (switchNote) {
+      store.clearActiveNote()
+      await store.selectNote(other.id)
+    }
+    noteMock.resolveUpdateResponse(0)
+    await waitFor(() => noteMock.calls.updateNote.length === 2)
+
+    assert.equal(noteMock.calls.updateNote[1].input.expectedRevision, 5)
+    assert.equal(store.summaries.find((item) => item.id === original.id).revision, 5)
+    assert.equal(store.activeNote.id, switchNote ? other.id : original.id)
+    assert.equal(store.getDraft(original.id).content, 'latest content')
+    assert.equal(store.getDraft(original.id).title, 'latest title')
+    assert.equal(store.saveFeedbackVersion, 0)
+    noteMock.resolveUpdateResponse(0)
+    assert.equal(await saving, true)
+    assert.equal(store.getDraft(original.id), null)
+    assert.equal(noteMock.snapshotNote(original.id).content, 'latest content')
+    assert.equal(noteMock.snapshotNote(original.id).revision, 6)
+    assert.equal(store.activeNote.id, switchNote ? other.id : original.id)
+
+    // An actual external revision change must still block saving and retain the draft.
+    await store.selectNote(original.id)
+    noteMock.resetBackend([{ ...noteMock.snapshotNote(original.id), revision: 7 }, other])
+    store.scheduleDraft(original.id, 'conflicting title', 'unsaved content')
+    assert.equal(await store.flushPendingDraft(), false)
+    assert.equal(store.getDraft(original.id).status, 'conflicted')
+    assert.equal(store.getDraft(original.id).content, 'unsaved content')
+    assert.equal(noteMock.snapshotNote(original.id).content, 'latest content')
+    store.discardDraft(original.id)
+  }
 }
 
 async function testActualStoreDraftFlushBeforeDeletion(noteMock, storeMock, useNoteStore) {

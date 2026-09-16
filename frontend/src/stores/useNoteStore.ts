@@ -528,7 +528,10 @@ export const useNoteStore = defineStore('notes', () => {
     delayMs: 1000,
     save: persistDraftSnapshot,
     execute: noteOperations.enqueue,
-    shouldApply: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
+    // Every successful write advances the persisted CAS revision, even when
+    // typing has produced a newer draft. That draft remains separate and only
+    // isCurrent/onSaved may clear it; dropping this result causes self-conflicts.
+    shouldApply: () => true,
     isCurrent: (snapshot) => getDraft(snapshot.noteId)?.draftVersion === snapshot.draftVersion,
     applyResult: (snapshot, updated) => {
       const applyToActiveNote = activeNote.value?.id === snapshot.noteId
