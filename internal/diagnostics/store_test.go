@@ -55,6 +55,31 @@ func TestStoreRecordOnceReusesDiagnosticID(t *testing.T) {
 	}
 }
 
+func TestStoreRecordFailureNormalizesEnums(t *testing.T) {
+	store := NewStore("", Metadata{})
+	known := store.RecordFailure(FailureInput{
+		Operation:     "frontend",
+		Phase:         "runtime",
+		Role:          "frontend",
+		Stage:         "note-editor.mermaid-paste",
+		ErrorCategory: "parse-failed",
+	})
+	if known.Code != FailureCodeOperation || known.Operation != "frontend" || known.Phase != "runtime" || known.Role != "frontend" || known.Stage != "note-editor.mermaid-paste" || known.Reason != "parse-failed" {
+		t.Fatalf("known failure enums = %#v", known)
+	}
+
+	unknown := store.RecordFailure(FailureInput{
+		Operation:     "frontend/secret",
+		Phase:         "runtime/secret",
+		Role:          "frontend/secret",
+		Stage:         "stage/secret",
+		ErrorCategory: "category/secret",
+	})
+	if unknown.Operation != "frontend" || unknown.Phase != "runtime" || unknown.Role != "frontend" || unknown.Stage != "unknown-stage" || unknown.Reason != "unknown-category" {
+		t.Fatalf("unknown failure enums = %#v", unknown)
+	}
+}
+
 func TestStoreFallsBackToMemoryForCorruptOrLockedStorage(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, diagnosticsFile), []byte("not-json"), 0o600); err != nil {

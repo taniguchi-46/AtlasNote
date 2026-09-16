@@ -87,6 +87,21 @@
             >破棄</button>
           </div>
           <span v-else-if="savedMessage" class="saved-indicator">保存済み</span>
+          <div
+            v-if="imagePasteError"
+            class="attachment-paste-indicator"
+            role="status"
+            aria-live="polite"
+          >
+            <span>{{ imagePasteError }}</span>
+            <button
+              v-if="pendingImagePaste"
+              type="button"
+              :disabled="isEditorInputLocked || pendingImagePaste?.noteId !== noteStore.activeNote.id"
+              @click="retryImagePaste"
+            >再試行</button>
+            <button type="button" @click="discardPendingImagePaste">閉じる</button>
+          </div>
 
           <button
             v-if="settingsStore.aiEnabled"
@@ -107,7 +122,7 @@
             class="mode-segment"
             :disabled="isEditorInputLocked"
             type="button"
-            :title="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
+            title="モード切り替え"
             :aria-label="editMode === 'markdown' ? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"
             @click="toggleEditMode"
           >
@@ -132,10 +147,10 @@
               <button
                 class="icon-btn"
                 type="button"
-                :disabled="noteExportStore.isBusy || isEditorInputLocked"
-                :title="noteExportStore.isBusy ? 'エクスポート中...' : 'ノートをエクスポート'"
+                :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
+                :title="noteExportStore.isBusy || isAttachmentExporting ? 'エクスポート中...' : 'ノートをエクスポート'"
                 aria-label="ノートをエクスポート"
-                :aria-busy="noteExportStore.isBusy"
+                :aria-busy="noteExportStore.isBusy || isAttachmentExporting"
               >
                 <DownloadIcon :size="18" />
               </button>
@@ -149,38 +164,45 @@
               >
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
                   @select="handleExportNote('html')"
                 >
                   HTMLとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
                   @select="handleExportNote('pdf')"
                 >
                   PDFとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
                   @select="handleExportNote('json')"
                 >
                   JSONとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
                   @select="handleExportNote('csv')"
                 >
                   CSVとしてエクスポート
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   class="note-export-menu-item"
-                  :disabled="noteExportStore.isBusy || isEditorInputLocked"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
                   @select="handleExportNote('txt')"
                 >
                   TXTとしてエクスポート
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  class="note-export-menu-item"
+                  :disabled="noteExportStore.isBusy || isAttachmentExporting || isEditorInputLocked"
+                  @select="handleExportAttachments"
+                >
+                  添付ファイルをZIPで保存
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenuPortal>
@@ -339,6 +361,16 @@
           <TerminalIcon :size="15" />
         </button>
 
+        <button
+          class="format-btn"
+          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('horizontalRule') }"
+          type="button"
+          title="水平線"
+          @click="toggleHorizontalRule"
+        >
+          <MinusIcon :size="15" />
+        </button>
+
         <NoteLinkPopover
           v-if="noteStore.activeNote"
           :note-id="noteStore.activeNote.id"
@@ -461,6 +493,7 @@
               @keydown="handleMarkdownKeydown"
               @compositionstart="handleMarkdownCompositionStart"
               @compositionend="handleMarkdownCompositionEnd"
+              @paste="handleMarkdownPaste"
               @scroll="syncMarkdownHighlightLayer"
               @click="handleMarkdownClick"
               @keyup="updateMarkdownSelection"
@@ -506,6 +539,7 @@ import {
   ItalicIcon,
   ListIcon,
   ListOrderedIcon,
+  MinusIcon,
   PanelBottomCloseIcon,
   PanelBottomOpenIcon,
   PanelRightCloseIcon,
@@ -571,6 +605,19 @@ import NoteBacklinks from './NoteBacklinks.vue'
 import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { createPdfBase64FromHtml, createPlainTextFromHtml } from '../utils/noteExportDocument'
 import type { NoteExportFormat, NoteExportInput } from '../api/noteExport'
+import {
+  saveNoteAttachment,
+  saveNoteAttachments,
+  type NoteAttachment,
+} from '../api/attachments'
+import {
+  encodeBase64,
+  getClipboardImage,
+  readClipboardImage,
+  type ClipboardImagePayload,
+} from '../utils/attachmentClipboard'
+import { createAttachmentObjectURL } from '../utils/attachmentImage'
+import { isManagedAttachmentReference } from '../utils/attachmentReference'
 import { logOperationFailure } from '../utils/operationLogger'
 import {
   createTableClipboardPayload,
@@ -639,6 +686,87 @@ const MermaidCodeBlock = CodeBlockLowlight.extend({
   },
 })
 
+const ManagedImage = Image.extend({
+  addNodeView() {
+    return ({ node }) => {
+      let currentNode = node
+      let objectURL: string | null = null
+      let loadGeneration = 0
+      const dom = document.createElement('img')
+      dom.className = 'note-attachment-image'
+      dom.draggable = false
+
+      const revokeObjectURL = () => {
+        if (!objectURL) return
+        URL.revokeObjectURL(objectURL)
+        objectURL = null
+      }
+
+      const applyAttributes = (nextNode: ProseMirrorNode) => {
+        const alt = typeof nextNode.attrs.alt === 'string' ? nextNode.attrs.alt : ''
+        if (alt) dom.alt = alt
+        else dom.removeAttribute('alt')
+        const title = typeof nextNode.attrs.title === 'string' ? nextNode.attrs.title : ''
+        if (title) dom.title = title
+        else dom.removeAttribute('title')
+      }
+
+      const loadSource = (source: string) => {
+        const generation = ++loadGeneration
+        revokeObjectURL()
+        if (!source) {
+          dom.removeAttribute('src')
+          return
+        }
+        if (!isManagedAttachmentReference(source)) {
+          dom.src = source
+          return
+        }
+
+        dom.removeAttribute('src')
+        void createAttachmentObjectURL(source, noteStore.activeNote?.id).then((nextObjectURL) => {
+          if (generation !== loadGeneration) {
+            if (nextObjectURL) URL.revokeObjectURL(nextObjectURL)
+            return
+          }
+          if (!nextObjectURL) return
+          objectURL = nextObjectURL
+          dom.src = nextObjectURL
+        }).catch(() => {
+          if (generation === loadGeneration) dom.removeAttribute('src')
+        })
+      }
+
+      applyAttributes(node)
+      loadSource(typeof node.attrs.src === 'string' ? node.attrs.src : '')
+
+      return {
+        dom,
+        update(nextNode: ProseMirrorNode) {
+          if (nextNode.type !== currentNode.type) return false
+          const sourceChanged = nextNode.attrs.src !== currentNode.attrs.src
+          currentNode = nextNode
+          applyAttributes(nextNode)
+          if (sourceChanged) {
+            loadSource(typeof nextNode.attrs.src === 'string' ? nextNode.attrs.src : '')
+          }
+          return true
+        },
+        selectNode() {
+          dom.classList.add('ProseMirror-selectednode')
+        },
+        deselectNode() {
+          dom.classList.remove('ProseMirror-selectednode')
+        },
+        destroy() {
+          loadGeneration += 1
+          revokeObjectURL()
+        },
+      }
+    }
+  },
+})
+
 type AgentEditorHighlightPluginMeta = {
   range: AgentEditorBlockRange | null
   isDeletion: boolean
@@ -652,6 +780,8 @@ const settingsStore = useSettingsStore()
 
 const localTitle = ref('')
 const savedMessage = ref(false)
+const isAttachmentExporting = ref(false)
+const imagePasteError = ref('')
 const isAIWorkspaceOpen = ref(true)
 const aiWorkspaceToggle = ref<HTMLButtonElement | null>(null)
 const saveConflicted = computed(() => noteStore.activeDraft?.status === 'conflicted')
@@ -689,9 +819,38 @@ const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
 const markdownSelectionVersion = ref(0)
+let imagePasteGeneration = 0
 let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
 let activeNoteId: string | null = null
+type PendingImagePaste = {
+  noteId: string
+  payload: ClipboardImagePayload
+  attachment: NoteAttachment | null
+}
+type RichImagePasteContext = {
+  noteId: string
+  doc: ProseMirrorNode
+  from: number
+  to: number
+  generation: number
+}
+type MarkdownImagePasteContext = {
+  noteId: string
+  content: string
+  start: number
+  end: number
+  generation: number
+}
+
+class StaleImagePasteError extends Error {
+  constructor() {
+    super('stale-image-paste')
+    this.name = 'StaleImagePasteError'
+  }
+}
+
+const pendingImagePaste = ref<PendingImagePaste | null>(null)
 let savedRichSelection: { from: number; to: number } | null = null
 let markdownHighlightResizeObserver: ResizeObserver | null = null
 let lastScrolledAgentHighlightKey = ''
@@ -769,7 +928,7 @@ const editor: Editor = new Editor({
         return context.defaultValidate(url)
       },
     }),
-    Image,
+    ManagedImage,
     Table.configure({
       resizable: true,
     }),
@@ -805,6 +964,13 @@ const editor: Editor = new Editor({
       return ''
     },
     handlePaste(view, event): boolean {
+      const clipboardImage = getClipboardImage(event)
+      if (clipboardImage) {
+        event.preventDefault()
+        void handleRichImagePaste(clipboardImage)
+        return true
+      }
+
       return handleMermaidPaste({
         editor,
         view,
@@ -854,9 +1020,11 @@ const editor: Editor = new Editor({
     },
   },
   onSelectionUpdate() {
+    invalidateImagePasteOperations()
     editorStateVersion.value += 1
   },
   onUpdate({ editor }) {
+    invalidateImagePasteOperations()
     editorStateVersion.value += 1
 
     if (editMode.value !== 'wysiwyg') return
@@ -895,6 +1063,7 @@ function updateMermaidEditorContext(noteId: string | null) {
 watch(
   () => noteStore.activeNote,
   (note) => {
+    invalidateImagePasteOperations()
     if (!note) {
       updateMermaidEditorContext(null)
       noteStore.clearAgentEditorHighlight()
@@ -965,8 +1134,15 @@ watch(
 )
 
 watch(editMode, () => {
+  invalidateImagePasteOperations()
   void nextTick(() => renderAgentEditorHighlight())
 })
+
+watch(
+  isEditorInputLocked,
+  () => invalidateImagePasteOperations(),
+  { flush: 'sync' },
+)
 
 watch(
   isActiveNoteDeletionPreparing,
@@ -1013,6 +1189,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  invalidateImagePasteOperations()
   noteStore.clearAgentEditorHighlight(activeNoteId ?? undefined)
   void noteStore.flushPendingDraft()
   markdownHighlightResizeObserver?.disconnect()
@@ -1098,7 +1275,7 @@ function focusAIWorkspaceToggle() {
 
 async function handleExportNote(format: NoteExportFormat) {
   const selectedNote = noteStore.activeNote
-  if (!selectedNote || noteExportStore.isBusy) return
+  if (!selectedNote || noteExportStore.isBusy || isAttachmentExporting.value) return
 
   const selectedNoteId = selectedNote.id
   const result = await noteExportStore.runPrepared(async () => {
@@ -1226,6 +1403,321 @@ async function handleExportNote(format: NoteExportFormat) {
     source: 'note-export',
     code: 'NOTE_EXPORT_COMPLETED',
   })
+}
+
+function invalidateImagePasteOperations() {
+  imagePasteGeneration += 1
+}
+
+function captureRichImagePasteContext(): RichImagePasteContext | null {
+  const noteId = noteStore.activeNote?.id
+  if (!noteId || isEditorInputLocked.value || editor.isDestroyed || editMode.value !== 'wysiwyg') {
+    return null
+  }
+
+  invalidateImagePasteOperations()
+
+  return {
+    noteId,
+    doc: editor.state.doc,
+    from: editor.state.selection.from,
+    to: editor.state.selection.to,
+    generation: imagePasteGeneration,
+  }
+}
+
+function captureMarkdownImagePasteContext(): MarkdownImagePasteContext | null {
+  const noteId = noteStore.activeNote?.id
+  const textarea = markdownTextarea.value
+  if (!noteId || !textarea || isEditorInputLocked.value || editMode.value !== 'markdown') {
+    return null
+  }
+
+  updateMarkdownSelection()
+  invalidateImagePasteOperations()
+  return {
+    noteId,
+    content: localMarkdown.value,
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+    generation: imagePasteGeneration,
+  }
+}
+
+function isRichImagePasteContextCurrent(context: RichImagePasteContext) {
+  if (isEditorInputLocked.value || context.generation !== imagePasteGeneration) return false
+  if (editor.isDestroyed || editMode.value !== 'wysiwyg') return false
+  if (noteStore.activeNote?.id !== context.noteId) return false
+  if (!editor.state.doc.eq(context.doc)) return false
+  return editor.state.selection.from === context.from && editor.state.selection.to === context.to
+}
+
+function isMarkdownImagePasteContextCurrent(context: MarkdownImagePasteContext) {
+  if (isEditorInputLocked.value || context.generation !== imagePasteGeneration) return false
+  if (editMode.value !== 'markdown' || noteStore.activeNote?.id !== context.noteId) return false
+  if (localMarkdown.value !== context.content) return false
+  const textarea = markdownTextarea.value
+  if (!textarea) return false
+  return textarea.selectionStart === context.start && textarea.selectionEnd === context.end
+}
+
+async function persistImageAttachment(pending: PendingImagePaste) {
+  if (pending.attachment) return pending.attachment
+  if (isEditorInputLocked.value || noteStore.activeNote?.id !== pending.noteId) {
+    throw new StaleImagePasteError()
+  }
+
+  const accessAllowed = await contentLockStore.requestAccess(
+    { type: 'note', id: pending.noteId },
+    noteStore.activeNote.title,
+  )
+  if (!accessAllowed) throw new Error('content-lock-access-denied')
+  if (isEditorInputLocked.value || noteStore.activeNote?.id !== pending.noteId) {
+    throw new StaleImagePasteError()
+  }
+
+  return saveNoteAttachment({
+    noteId: pending.noteId,
+    kind: 'image',
+    mimeType: pending.payload.mimeType,
+    name: pending.payload.name,
+    data: encodeBase64(pending.payload.data),
+  })
+}
+
+function imagePasteErrorMessage(error: unknown) {
+  if (error instanceof StaleImagePasteError) {
+    return 'ノートまたは本文が変わったため、画像を挿入しませんでした。再試行できます。'
+  }
+  if (error instanceof Error && error.message === 'content-lock-access-denied') {
+    return '保護されたノートの画像貼り付けにはロック解除が必要です。'
+  }
+  return '画像を保存できませんでした。本文は変更していません。'
+}
+
+function retainImagePasteFailure(pending: PendingImagePaste | null, error: unknown) {
+  if (pending) pendingImagePaste.value = pending
+  imagePasteError.value = imagePasteErrorMessage(error)
+  if (!(error instanceof StaleImagePasteError)) {
+    const noteId = pending?.noteId ?? noteStore.activeNote?.id
+    logOperationFailure({
+      noteId,
+      stage: 'note-editor.image-paste',
+      errorCategory: 'paste-failed',
+    })
+  }
+  notificationStore.notify(imagePasteError.value, {
+    kind: error instanceof StaleImagePasteError ? 'warning' : 'error',
+    source: 'note-editor',
+    code: 'NOTE_EDITOR_IMAGE_PASTE_FAILED',
+  })
+}
+
+function clearImagePasteState() {
+  pendingImagePaste.value = null
+  imagePasteError.value = ''
+}
+
+async function insertRichImagePaste(
+  payload: ClipboardImagePayload,
+  context: RichImagePasteContext,
+  existingAttachment: NoteAttachment | null = null,
+) {
+  const pending: PendingImagePaste = {
+    noteId: context.noteId,
+    payload,
+    attachment: existingAttachment,
+  }
+  pendingImagePaste.value = pending
+  try {
+    const attachment = await persistImageAttachment(pending)
+    pending.attachment = attachment
+    if (!isRichImagePasteContextCurrent(context)) throw new StaleImagePasteError()
+    const inserted = editor.chain().focus().setImage({
+      src: attachment.reference,
+      alt: attachment.name,
+      title: attachment.name,
+    }).run()
+    if (!inserted) throw new Error('image-node-insert-failed')
+    clearImagePasteState()
+  } catch (error) {
+    retainImagePasteFailure(pending, error)
+  }
+}
+
+async function handleRichImagePaste(file: File) {
+  const context = captureRichImagePasteContext()
+  if (!context) return
+  try {
+    const payload = await readClipboardImage(file)
+    await insertRichImagePaste(payload, context)
+  } catch (error) {
+    retainImagePasteFailure(null, error)
+  }
+}
+
+async function insertMarkdownImagePaste(
+  payload: ClipboardImagePayload,
+  context: MarkdownImagePasteContext,
+  existingAttachment: NoteAttachment | null = null,
+) {
+  const pending: PendingImagePaste = {
+    noteId: context.noteId,
+    payload,
+    attachment: existingAttachment,
+  }
+  pendingImagePaste.value = pending
+  try {
+    const attachment = await persistImageAttachment(pending)
+    pending.attachment = attachment
+    if (!isMarkdownImagePasteContextCurrent(context)) throw new StaleImagePasteError()
+    const alt = attachment.name.replace(/[\[\]]/g, '_')
+    const markdown = `![${alt}](${attachment.reference})`
+    const replaced = replaceMarkdownRange(
+      context.start,
+      context.end,
+      markdown,
+      context.start + markdown.length,
+      context.start + markdown.length,
+      { guardEditorInput: true },
+    )
+    if (!replaced) throw new StaleImagePasteError()
+    clearImagePasteState()
+  } catch (error) {
+    retainImagePasteFailure(pending, error)
+  }
+}
+
+function handleMarkdownPaste(event: ClipboardEvent) {
+  const clipboardImage = getClipboardImage(event)
+  if (!clipboardImage) return
+
+  event.preventDefault()
+  const context = captureMarkdownImagePasteContext()
+  if (!context) return
+  void (async () => {
+    try {
+      const payload = await readClipboardImage(clipboardImage)
+      await insertMarkdownImagePaste(payload, context)
+    } catch (error) {
+      retainImagePasteFailure(null, error)
+    }
+  })()
+}
+
+async function retryImagePaste() {
+  const pending = pendingImagePaste.value
+  if (!pending || noteStore.activeNote?.id !== pending.noteId || isEditorInputLocked.value) return
+
+  if (editMode.value === 'wysiwyg') {
+    const context = captureRichImagePasteContext()
+    if (context) await insertRichImagePaste(pending.payload, context, pending.attachment)
+    return
+  }
+
+  const context = captureMarkdownImagePasteContext()
+  if (context) await insertMarkdownImagePaste(pending.payload, context, pending.attachment)
+}
+
+function discardPendingImagePaste() {
+  clearImagePasteState()
+}
+
+function isAttachmentExportBusy() {
+  return isAttachmentExporting.value
+}
+
+async function handleExportAttachments() {
+  const selectedNote = noteStore.activeNote
+  if (!selectedNote || noteExportStore.isBusy || isAttachmentExporting.value) return
+
+  const selectedNoteId = selectedNote.id
+  isAttachmentExporting.value = true
+  try {
+    if (editMode.value === 'wysiwyg') {
+      applyRichEditorToMarkdown()
+    }
+    if (
+      localMarkdown.value !== selectedNote.content
+      || getSavableTitle() !== selectedNote.title
+    ) {
+      scheduleAutoSave(localMarkdown.value)
+    }
+
+    const accessAllowed = await contentLockStore.requestAccess(
+      { type: 'note', id: selectedNoteId },
+      selectedNote.title,
+    )
+    if (!accessAllowed || noteStore.activeNote?.id !== selectedNoteId) return
+
+    const saved = await noteStore.flushPendingDraft()
+    if (!saved) {
+      notificationStore.notify('未保存の変更を保存できないため、添付ファイルを保存しませんでした。', {
+        kind: 'warning',
+        source: 'note-export',
+        code: 'NOTE_ATTACHMENTS_EXPORT_DRAFT_SAVE_FAILED',
+      })
+      return
+    }
+
+    const current = noteStore.activeNote
+    if (!current || current.id !== selectedNoteId || noteStore.getDraft(selectedNoteId)) {
+      notificationStore.notify('ノートの保存状態が変わったため、添付ファイルを保存しませんでした。', {
+        kind: 'warning',
+        source: 'note-export',
+        code: 'NOTE_ATTACHMENTS_EXPORT_NOTE_CHANGED',
+      })
+      return
+    }
+
+    let allowPlaintextProtected = false
+    if (current.protected) {
+      allowPlaintextProtected = window.confirm(
+        'このノートの添付画像は保護領域の外へ復号済みの平文ZIPとして保存されます。続行しますか？',
+      )
+      if (!allowPlaintextProtected) return
+    }
+
+    const result = await saveNoteAttachments(
+      selectedNoteId,
+      current.title,
+      current.revision,
+      allowPlaintextProtected,
+    )
+    if (result.cancelled) return
+    if (result.error) {
+      logOperationFailure({
+        noteId: selectedNoteId,
+        stage: 'note-editor.attachments-export',
+        errorCategory: 'runtime',
+      })
+      notificationStore.notify(result.error, {
+        kind: 'error',
+        source: 'note-export',
+        code: 'NOTE_ATTACHMENTS_EXPORT_FAILED',
+      })
+      return
+    }
+
+    notificationStore.notify(`${result.savedName ?? '添付ファイル'}を保存しました。`, {
+      kind: 'success',
+      source: 'note-export',
+      code: 'NOTE_ATTACHMENTS_EXPORT_COMPLETED',
+    })
+  } catch {
+    logOperationFailure({
+      noteId: selectedNoteId,
+      stage: 'note-editor.attachments-export',
+      errorCategory: 'runtime',
+    })
+    notificationStore.notify('添付ファイルを保存できませんでした。', {
+      kind: 'error',
+      source: 'note-export',
+      code: 'NOTE_ATTACHMENTS_EXPORT_FAILED',
+    })
+  } finally {
+    isAttachmentExporting.value = false
+  }
 }
 
 async function handleRetrySave() {
@@ -1377,7 +1869,13 @@ function flushEditorInput(): boolean {
   }
 }
 
-defineExpose({ toggleAIWorkspace, toggleEditMode, flushEditorInput, setContentLockPending })
+defineExpose({
+  toggleAIWorkspace,
+  toggleEditMode,
+  flushEditorInput,
+  setContentLockPending,
+  isAttachmentExportBusy,
+})
 
 function replaceRichEditorContent(content: JSONContent) {
   editor.unregisterPlugin('history')
@@ -1723,6 +2221,15 @@ function toggleCodeBlock() {
   toggleMarkdownCodeBlock()
 }
 
+function toggleHorizontalRule() {
+  if (editMode.value === 'wysiwyg') {
+    editor.chain().focus().setHorizontalRule().run()
+    return
+  }
+
+  insertMarkdownBlock('---')
+}
+
 function rememberRichSelection() {
   if (editMode.value !== 'wysiwyg') return
 
@@ -2065,6 +2572,7 @@ function handleMarkdownKeydown(event: KeyboardEvent) {
 }
 
 function applyMarkdownSnapshot(before: MarkdownEditSnapshot, after: MarkdownEditSnapshot) {
+  invalidateImagePasteOperations()
   pendingMarkdownInput = null
   markdownEditHistory.record(before, after, { group: 'markdown-list', forceNewGroup: true })
   dismissAgentEditorHighlight()
@@ -2094,6 +2602,7 @@ function applyMarkdownHistory(action: 'undo' | 'redo') {
     : markdownEditHistory.redo()
   if (!snapshot) return
 
+  invalidateImagePasteOperations()
   pendingMarkdownInput = null
   dismissAgentEditorHighlight()
   localMarkdown.value = snapshot.content
@@ -2117,6 +2626,7 @@ function applyMarkdownHistory(action: 'undo' | 'redo') {
 }
 
 function handleMarkdownInput(event: Event) {
+  invalidateImagePasteOperations()
   markdownLineBreakTracker.reset()
   const textarea = event.currentTarget as HTMLTextAreaElement
   const after = createMarkdownSnapshot(textarea.value, textarea)
@@ -2174,6 +2684,7 @@ function extractTitleFromFirstMarkdownLine(markdown: string) {
 }
 
 function updateMarkdownSelection() {
+  invalidateImagePasteOperations()
   const textarea = markdownTextarea.value
   if (textarea) {
     lastMarkdownSelection = {
@@ -2361,7 +2872,11 @@ function replaceMarkdownRange(
   text: string,
   selectionStart = start + text.length,
   selectionEnd = selectionStart,
-) {
+  options: { guardEditorInput?: boolean } = {},
+): boolean {
+  if (options.guardEditorInput && isEditorInputLocked.value) return false
+
+  invalidateImagePasteOperations()
   const before = createMarkdownSnapshot()
   dismissAgentEditorHighlight()
   const nextContent = `${localMarkdown.value.slice(0, start)}${text}${localMarkdown.value.slice(end)}`
@@ -2388,6 +2903,7 @@ function replaceMarkdownRange(
     textarea.setSelectionRange(selectionStart, selectionEnd)
     markdownSelectionVersion.value += 1
   })
+  return true
 }
 
 function findMarkdownTableRange() {
@@ -2612,6 +3128,30 @@ function formatDate(iso: string): string {
   color: var(--brand-primary);
 }
 
+.attachment-paste-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(520px, 45vw);
+  color: var(--color-danger, #b42318);
+  font-size: 12px;
+}
+
+.attachment-paste-indicator span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-paste-indicator button {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 11px;
+}
+
 :global(.note-export-menu) {
   z-index: 1100;
   min-width: 210px;
@@ -2708,6 +3248,11 @@ function formatDate(iso: string): string {
 
 .prose-editor :deep(.ProseMirror li) {
   line-height: var(--editor-line-height);
+}
+
+.prose-editor :deep(.note-attachment-image) {
+  max-width: 100%;
+  height: auto;
 }
 
 .prose-editor :deep(.agent-editor-highlight-block) {

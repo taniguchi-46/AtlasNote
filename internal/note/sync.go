@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	SyncEntityNote     = "note"
-	SyncEntityNotebook = "notebook"
-	SyncEntityTag      = "tag"
-	SyncEntityNoteTags = "note-tags"
+	SyncEntityNote       = "note"
+	SyncEntityNotebook   = "notebook"
+	SyncEntityTag        = "tag"
+	SyncEntityNoteTags   = "note-tags"
+	SyncEntityAttachment = "attachment"
 )
 
 // SyncChange is the durable hand-off from a local mutation to the sync
@@ -65,6 +66,23 @@ type SyncNoteTagsPayload struct {
 	TagIDs []string `json:"tagIds"`
 }
 
+// SyncAttachmentPayload contains the attachment manifest record and its
+// plaintext body. Protected-content sync is still rejected by the App; this
+// representation is only for the existing unprotected WebDAV protocol.
+type SyncAttachmentPayload struct {
+	ID        string `json:"id"`
+	NoteID    string `json:"noteId"`
+	Kind      string `json:"kind"`
+	MIMEType  string `json:"mimeType"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	CreatedAt string `json:"createdAt"`
+	Data      string `json:"data"`
+}
+
 type syncApplyContextKey struct{}
 type syncExclusiveContextKey struct{}
 type mutationGateContextKey struct{}
@@ -75,6 +93,14 @@ type mutationGateContextKey struct{}
 func (s *Service) BeginSyncExclusive(ctx context.Context) (context.Context, func()) {
 	s.syncGate.Lock()
 	return context.WithValue(ctx, syncExclusiveContextKey{}, s), s.syncGate.Unlock
+}
+
+// BeginStorageSnapshot blocks the sync/backup writer while a caller reads a
+// consistent filesystem snapshot. It deliberately does not mark the context
+// as a mutation owner; callers must keep this scope read-only.
+func (s *Service) BeginStorageSnapshot(ctx context.Context) (context.Context, func()) {
+	s.syncGate.RLock()
+	return ctx, s.syncGate.RUnlock
 }
 
 func (s *Service) lockMutation(ctx context.Context) (context.Context, func()) {
@@ -99,6 +125,10 @@ func isSyncApply(ctx context.Context) bool {
 
 func SyncEntityKey(entityType string, id string) string {
 	return entityType + ":" + id
+}
+
+func SyncAttachmentEntityKey(noteID string, attachmentID string) string {
+	return SyncEntityAttachment + ":" + noteID + ":" + attachmentID
 }
 
 func marshalSyncPayload(payload any) ([]byte, error) {
@@ -226,6 +256,19 @@ func NewNoteTagsTombstoneChange(changeSetID string, noteID string) SyncChange {
 		EntityType:  SyncEntityNoteTags,
 		Deleted:     true,
 	}
+}
+
+func NewAttachmentSyncChange(changeSetID string, payload SyncAttachmentPayload) (SyncChange, error) {
+	data, err := marshalSyncPayload(payload)
+	if err != nil {
+		return SyncChange{}, err
+	}
+	return SyncChange{
+		ChangeSetID: changeSetID,
+		EntityKey:   SyncAttachmentEntityKey(payload.NoteID, payload.ID),
+		EntityType:  SyncEntityAttachment,
+		ObjectJSON:  data,
+	}, nil
 }
 
 func (r *Repository) SetSyncChangeRecorder(recorder SyncChangeRecorder) {

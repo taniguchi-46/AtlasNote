@@ -34,6 +34,8 @@
 - AI API Key は平文ログや例外メッセージに出さない。
 - Mermaidは既存`codeBlock`のソースを正本とし、Richでは図のみを表示して編集ダイアログからソースを更新する。生成SVGは表示専用の一時データとし、保存・同期・エクスポートのデータモデルへ追加しない。外部リソースを伴う記法は許可しない。
 - WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを [`docs/development/webdav-sync.md`](../development/webdav-sync.md) に従って実装する。
+- 添付画像は `atlasnote-attachment://<noteID>/<attachmentID>` の管理参照だけを本文へ保存し、data URL、ローカル絶対パス、Blob URL、base64本体を永続化しない。保存・読込・ZIP出力は `frontend/src/api/attachments.ts` とGoの添付Store／Wails APIを通し、コンポーネントからファイルシステムへ直接アクセスしない。
+- 画像貼り付けの非同期処理ではノートID、本文、選択範囲、Richドキュメントの世代を再検証し、古い応答で本文を変更しない。保存失敗時は本文を保持し、入力データまたは保存済み添付を再試行状態へ残す。通常の文字・表・Mermaid貼り付け経路を画像処理で上書きしない。
 
 ## UI
 

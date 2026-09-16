@@ -1879,6 +1879,65 @@ func TestAppDisablesSyncWhenContentLocksExist(t *testing.T) {
 	}
 }
 
+func TestAppAllowsSyncWhenAttachmentsExist(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "添付", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatalf("decode test image: %v", err)
+	}
+	if _, err := app.SaveNoteAttachment(SaveNoteAttachmentInput{
+		NoteID: created.ID, Kind: "image", MIMEType: "image/png", Name: "paste.png",
+		Data: base64.StdEncoding.EncodeToString(png),
+	}); err != nil {
+		t.Fatalf("save note attachment: %v", err)
+	}
+	if err := app.ensureSyncAllowed(); err != nil {
+		t.Fatalf("sync guard error = %v, want attachments to remain syncable", err)
+	}
+}
+
+func TestAppDeletesNoteAttachmentsWithNote(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)
+	app := NewApp()
+	app.startup(t.Context())
+	t.Cleanup(func() { app.shutdown(t.Context()) })
+	created, err := app.CreateNote(note.CreateInput{Title: "添付削除", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatalf("decode test image: %v", err)
+	}
+	if _, err := app.SaveNoteAttachment(SaveNoteAttachmentInput{
+		NoteID: created.ID, Kind: "image", MIMEType: "image/png", Name: "paste.png",
+		Data: base64.StdEncoding.EncodeToString(png),
+	}); err != nil {
+		t.Fatalf("save note attachment: %v", err)
+	}
+	if result, err := app.DeleteNote(created.ID, note.DeleteInput{ExpectedRevision: created.Revision}); err != nil {
+		t.Fatalf("delete note: %v", err)
+	} else if !result.Deleted {
+		t.Fatalf("delete note result = %#v", result)
+	}
+	hasAttachments, err := app.attachments.HasAny(t.Context())
+	if err != nil {
+		t.Fatalf("check deleted note attachments: %v", err)
+	}
+	if hasAttachments {
+		t.Fatal("deleted note attachments remain in active storage")
+	}
+}
+
 func TestAppRejectsAISummaryForProtectedNote(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("ATLAS_NOTE_DATA_DIR", dataDir)

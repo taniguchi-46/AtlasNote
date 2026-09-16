@@ -28,6 +28,8 @@ Atlas Note は、単なるメモアプリではなく、知識を蓄積・整理
 - `.agents/`: Agent 固有の行動指針とスキル (`.agents/AGENTS.md` など)。
 - `.codex/`: テンプレート類。
 
+Codex のプロジェクト指示の入口は `AGENTS.md` です。計画・実装・コードレビュー・リファクタリングの4スキルはユーザー共通の `~/.agents/skills/` で管理し、Atlas Note 固有の契約・検証手順は `docs/rules/development-workflows.md` に残しています。`next-phase-review` は `.agents/skills/` 内で管理します。
+
 作業前に `docs/README.md`、`docs/status.md`、`docs/development/scopes/scope.md`、`docs/rules/ai.md` を確認してください。
 
 ---

@@ -30,6 +30,7 @@ var ErrNotebookKeepNotesLocked = errors.New("keeping notes is blocked while cont
 type Service struct {
 	repository          *Repository
 	store               markdownStore
+	attachments         attachmentStore
 	contentLocks        contentLockGuard
 	mu                  sync.Mutex
 	syncGate            sync.RWMutex
@@ -74,6 +75,17 @@ type markdownStore interface {
 	WriteTemp(context.Context, string, string, string) error
 }
 
+// attachmentStore mirrors the note-delete journal boundary without coupling
+// note persistence to the attachment package.
+type attachmentStore interface {
+	CommitDelete(context.Context, string, string) error
+	Delete(context.Context, string) error
+	DeleteStagedExists(context.Context, string, string) (bool, error)
+	Exists(context.Context, string) (bool, error)
+	RestoreDelete(context.Context, string, string) error
+	StageDelete(context.Context, string, string) error
+}
+
 func NewService(repository *Repository, store markdownStore) *Service {
 	return &Service{
 		repository: repository,
@@ -83,6 +95,10 @@ func NewService(repository *Repository, store markdownStore) *Service {
 
 func (s *Service) SetContentLockGuard(guard contentLockGuard) {
 	s.contentLocks = guard
+}
+
+func (s *Service) SetAttachmentStore(store attachmentStore) {
+	s.attachments = store
 }
 
 func (s *Service) beginContentAccess(ctx context.Context) func() {
@@ -708,20 +724,36 @@ func (s *Service) Delete(ctx context.Context, id string, input DeleteInput) erro
 		_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 		return err
 	}
+	if s.attachments != nil {
+		if err := s.attachments.StageDelete(ctx, record.ID, operationID); err != nil {
+			_ = s.store.RestoreDelete(context.Background(), record.ID, operationID)
+			_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
+			return err
+		}
+	}
 	changes := []SyncChange{
 		NewNoteTombstoneChange(operationID, record.ID),
 		NewNoteTagsTombstoneChange(operationID, record.ID),
 	}
 	if err := s.repository.DeleteCASWithSync(ctx, id, input.ExpectedRevision, changes); err != nil {
 		restoreErr := s.store.RestoreDelete(context.Background(), record.ID, operationID)
-		if restoreErr == nil {
+		attachmentRestoreErr := error(nil)
+		if s.attachments != nil {
+			attachmentRestoreErr = s.attachments.RestoreDelete(context.Background(), record.ID, operationID)
+		}
+		if restoreErr == nil && attachmentRestoreErr == nil {
 			_ = s.repository.CompleteStorageOperation(context.Background(), operationID)
 			return err
 		}
-		return fmt.Errorf("delete note record: %w; restore markdown: %v", err, restoreErr)
+		return fmt.Errorf("delete note record: %w; restore markdown: %v; restore attachments: %v", err, restoreErr, attachmentRestoreErr)
 	}
 	if err := s.store.CommitDelete(ctx, record.ID, operationID); err != nil {
 		return fmt.Errorf("commit markdown delete: %w", err)
+	}
+	if s.attachments != nil {
+		if err := s.attachments.CommitDelete(ctx, record.ID, operationID); err != nil {
+			return fmt.Errorf("commit attachment delete: %w", err)
+		}
 	}
 	s.deleteSearchIndexLocked(ctx, record.ID)
 	s.deleteNoteLinkIndexLocked(ctx, record.ID)
@@ -1072,11 +1104,28 @@ func (s *Service) recoverDeleteLocked(ctx context.Context, operation StorageOper
 	if err != nil {
 		return err
 	}
+	attachmentStaged := false
+	attachmentExists := false
+	if s.attachments != nil {
+		attachmentStaged, err = s.attachments.DeleteStagedExists(ctx, operation.NoteID, operation.ID)
+		if err != nil {
+			return err
+		}
+		attachmentExists, err = s.attachments.Exists(ctx, operation.NoteID)
+		if err != nil {
+			return err
+		}
+	}
 
 	if recordExists {
 		if !stagedExists {
 			if !contentExists {
 				return fmt.Errorf("markdown content is missing during delete recovery for note %s", operation.NoteID)
+			}
+			if attachmentStaged {
+				if err := s.attachments.RestoreDelete(ctx, operation.NoteID, operation.ID); err != nil {
+					return err
+				}
 			}
 			return s.repository.CompleteStorageOperation(ctx, operation.ID)
 		}
@@ -1092,6 +1141,17 @@ func (s *Service) recoverDeleteLocked(ctx context.Context, operation StorageOper
 	} else if contentExists {
 		if err := s.store.Delete(ctx, operation.NoteID); err != nil {
 			return err
+		}
+	}
+	if s.attachments != nil {
+		if attachmentStaged {
+			if err := s.attachments.CommitDelete(ctx, operation.NoteID, operation.ID); err != nil {
+				return err
+			}
+		} else if attachmentExists {
+			if err := s.attachments.Delete(ctx, operation.NoteID); err != nil {
+				return err
+			}
 		}
 	}
 

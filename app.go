@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	aiservice "atlasnote/internal/ai"
+	attachmentstore "atlasnote/internal/attachment"
 	backupservice "atlasnote/internal/backup"
 	"atlasnote/internal/config"
 	"atlasnote/internal/contentlock"
@@ -38,6 +39,7 @@ type App struct {
 	notes                       *note.Service
 	noteExporter                *noteexport.Service
 	noteImporter                *noteimport.Service
+	attachments                 *attachmentstore.Store
 	syncService                 *syncservice.Service
 	aiService                   *aiservice.Service
 	backupService               *backupservice.Service
@@ -66,6 +68,8 @@ type App struct {
 	openDirectory               func(context.Context, runtime.OpenDialogOptions) (string, error)
 	exportMu                    sync.Mutex
 	saveExportFile              func(context.Context, runtime.SaveDialogOptions) (string, error)
+	saveDiagnosticsFile         func(context.Context, runtime.SaveDialogOptions) (string, error)
+	saveAttachmentsFile         func(context.Context, runtime.SaveDialogOptions) (string, error)
 	restartExecutable           string
 	startProcess                func(string) error
 	quitApplication             func(context.Context)
@@ -162,6 +166,7 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	a.noteImporter = nil
 	a.noteExporter = nil
+	a.attachments = nil
 	if a.db != nil {
 		a.shutdownErr = errors.Join(a.shutdownErr, a.db.Close())
 		a.db = nil
@@ -1392,6 +1397,12 @@ func (a *App) withContentLockManager(ctx context.Context, target contentlock.Tar
 		return err
 	}
 	manager := contentlock.NewManager(db, store)
+	attachments, err := attachmentstore.NewStore(paths.NotesDir, manager)
+	if err != nil {
+		manager.Close()
+		return err
+	}
+	manager.SetAttachmentStore(attachments)
 	defer manager.Close()
 	if err := manager.Recover(ctx); err != nil {
 		return err
@@ -1422,6 +1433,7 @@ func (a *App) quiesceLockedSpace() {
 	a.notes = nil
 	a.noteImporter = nil
 	a.noteExporter = nil
+	a.attachments = nil
 	a.syncService = nil
 	a.aiService = nil
 	a.backupService = nil
@@ -1464,6 +1476,12 @@ func (a *App) prepareStorageSpace(ctx context.Context, dataDir string) (returnEr
 		return err
 	}
 	manager := contentlock.NewManager(db, store)
+	attachments, err := attachmentstore.NewStore(paths.NotesDir, manager)
+	if err != nil {
+		manager.Close()
+		return err
+	}
+	manager.SetAttachmentStore(attachments)
 	defer manager.Close()
 	return manager.Recover(ctx)
 }
@@ -1692,9 +1710,28 @@ func (a *App) initialize(ctx context.Context) {
 	a.db = db
 	a.markdownStore = store
 	a.contentLocks = contentlock.NewManager(db, store)
+	attachments, err := attachmentstore.NewStore(paths.NotesDir, a.contentLocks)
+	if err != nil {
+		a.contentLocks.Close()
+		a.contentLocks = nil
+		a.attachments = nil
+		a.markdownStore = nil
+		_ = db.Close()
+		a.db = nil
+		_ = a.dataLock.Release()
+		a.dataLock = nil
+		a.statusMu.Lock()
+		a.startupErr = err
+		a.startupPhase = StartupPhaseError
+		a.statusMu.Unlock()
+		return
+	}
+	a.attachments = attachments
+	a.contentLocks.SetAttachmentStore(attachments)
 	if err := a.contentLocks.Recover(ctx); err != nil {
 		a.contentLocks.Close()
 		a.contentLocks = nil
+		a.attachments = nil
 		a.markdownStore = nil
 		_ = db.Close()
 		a.db = nil
@@ -1710,6 +1747,7 @@ func (a *App) initialize(ctx context.Context) {
 	if err != nil {
 		a.contentLocks.Close()
 		a.contentLocks = nil
+		a.attachments = nil
 		a.markdownStore = nil
 		_ = db.Close()
 		a.db = nil
@@ -1731,6 +1769,7 @@ func (a *App) initialize(ctx context.Context) {
 	if err := a.initializeServices(ctx, db, store, paths); err != nil {
 		a.contentLocks.Close()
 		a.contentLocks = nil
+		a.attachments = nil
 		a.markdownStore = nil
 		_ = db.Close()
 		a.db = nil
@@ -1822,8 +1861,14 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	if a.contentLocks != nil {
 		service.SetContentLockGuard(a.contentLocks)
 	}
+	if a.attachments != nil {
+		service.SetAttachmentStore(a.attachments)
+	}
 	credentialManager := syncservice.NewCredentialManager(syncservice.NewKeyringCredentialStore(syncservice.ServiceName))
 	syncService := syncservice.NewService(syncRepository, service, credentialManager)
+	if a.attachments != nil {
+		syncService.SetAttachmentStore(a.attachments)
+	}
 	aiCredentialManager := credential.NewManager(credential.NewKeyringStore(aiservice.CredentialStoreServiceName))
 	aiService := aiservice.NewServiceWithAdapter(aiRepository, aiCredentialManager, aiservice.NewHTTPProviderAdapter())
 	if a.contentLocks != nil {
@@ -1835,6 +1880,12 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	syncService.SetRecoveryDataDir(paths.DataDir)
 	recoveryReport, err := service.Recover(ctx)
 	if err != nil {
+		return err
+	}
+	if a.attachments == nil {
+		return backupservice.ErrUnavailable
+	}
+	if err := a.attachments.Recover(ctx); err != nil {
 		return err
 	}
 	a.notes = service

@@ -39,6 +39,7 @@
             >
               <strong>{{ item.label }}</strong>
               <span>{{ item.category }}</span>
+              <small v-if="item.matchedText">一致: {{ item.matchedText }}</small>
             </button>
             <p v-if="searchResults.length === 0" class="settings-search-empty">
               該当する設定がありません。
@@ -91,27 +92,6 @@
                   v-model="settingsStore.defaultNotebookIcon"
                   allow-user-icon-delete
                 />
-              </div>
-            </div>
-            <div class="settings-section">
-              <h4>AIワークスペース</h4>
-              <div class="setting-group" data-settings-anchor="general.ai-placement" tabindex="-1">
-                <label for="ai-workspace-placement">表示位置</label>
-                <select id="ai-workspace-placement" v-model="settingsStore.aiWorkspacePlacement">
-                  <option value="right">右側</option>
-                  <option value="bottom">下側</option>
-                </select>
-                <p class="setting-help">位置を選択し、表示中の境界をドラッグして幅または高さを調整します。</p>
-              </div>
-              <div class="setting-group" data-settings-anchor="general.ai-agent-permission" tabindex="-1">
-                <label for="ai-agent-edit-permission">Agentの本文編集権限</label>
-                <select id="ai-agent-edit-permission" v-model="settingsStore.aiAgentEditPermission">
-                  <option value="review-required">提案のみ（適用前に確認）</option>
-                  <option value="auto-update">更新可能（生成後に自動適用）</option>
-                </select>
-                <p class="setting-help">
-                  更新可能では、送信した通常のAgent依頼が返した本文1箇所の差分を自動保存します。変更前後はAIタイムラインで確認できます。
-                </p>
               </div>
             </div>
             <div class="settings-section" data-settings-anchor="general.uninstall" tabindex="-1">
@@ -356,9 +336,16 @@ function selectSearchResult(item: SettingsSearchItem) {
   activeTab.value = item.tab
   settingsQuery.value = ''
   void nextTick(() => {
-    const element = document.querySelector<HTMLElement>(
+    let element = document.querySelector<HTMLElement>(
       `[data-settings-anchor="${item.anchor}"]`,
     )
+    const details = element?.closest('details')
+    if (details) {
+      details.open = true
+      element = document.querySelector<HTMLElement>(
+        `[data-settings-anchor="${item.anchor}"]`,
+      )
+    }
     element?.scrollIntoView({ block: 'center' })
     element?.focus({ preventScroll: true })
   })
@@ -483,6 +470,16 @@ function handleOpenChange(open: boolean) {
   flex-shrink: 0;
   color: var(--text-tertiary);
   font-size: 11px;
+}
+
+.settings-search-result small {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-search-empty {

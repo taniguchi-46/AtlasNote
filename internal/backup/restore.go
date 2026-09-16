@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	attachmentstore "atlasnote/internal/attachment"
 	"atlasnote/internal/contentlock"
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
@@ -477,17 +478,26 @@ func prepareRestoreStage(ctx context.Context, stageDir string, manifest Manifest
 	}
 	manager := contentlock.NewManager(db, store)
 	defer manager.Close()
+	attachments, err := attachmentstore.NewStore(filepath.Join(stageDir, "notes"), manager)
+	if err != nil {
+		return err
+	}
+	manager.SetAttachmentStore(attachments)
 	if err := manager.Recover(ctx); err != nil {
 		return fmt.Errorf("recover staged content locks: %w", err)
 	}
 	stageNotes := note.NewService(note.NewRepository(db), store)
 	stageNotes.SetContentLockGuard(manager)
+	stageNotes.SetAttachmentStore(attachments)
 	recoveryReport, err := stageNotes.Recover(ctx)
 	if err != nil {
 		return fmt.Errorf("recover staged notes: %w", err)
 	}
 	if len(recoveryReport.MissingNotes) > 0 {
 		return fmt.Errorf("staged notes are missing: %w", ErrTampered)
+	}
+	if err := attachments.Recover(ctx); err != nil {
+		return fmt.Errorf("recover staged attachments: %w", err)
 	}
 	if err := database.ValidateOpen(ctx, db); err != nil {
 		return fmt.Errorf("validate staged database: %w", err)
@@ -526,7 +536,14 @@ func validateRestoreStageFiles(ctx context.Context, stageDir string, manifest Ma
 	if err := validateManifestTree(ctx, stageDir, manifest, false); err != nil {
 		return err
 	}
-	_, err := database.ValidateSnapshot(ctx, filepath.Join(stageDir, "atlasnote.db"))
+	attachments, err := attachmentstore.NewStore(filepath.Join(stageDir, "notes"), nil)
+	if err != nil {
+		return err
+	}
+	if err := attachments.Recover(ctx); err != nil {
+		return fmt.Errorf("validate staged attachments: %w", err)
+	}
+	_, err = database.ValidateSnapshot(ctx, filepath.Join(stageDir, "atlasnote.db"))
 	return err
 }
 
@@ -768,7 +785,14 @@ func validateInstalledRestore(ctx context.Context, paths RestorePaths) error {
 	if info, err := os.Lstat(paths.NotesDir); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return ErrRestoreApply
 	}
-	_, err := database.ValidateSnapshot(ctx, paths.DatabasePath)
+	attachments, err := attachmentstore.NewStore(paths.NotesDir, nil)
+	if err != nil {
+		return err
+	}
+	if err := attachments.Recover(ctx); err != nil {
+		return err
+	}
+	_, err = database.ValidateSnapshot(ctx, paths.DatabasePath)
 	return err
 }
 

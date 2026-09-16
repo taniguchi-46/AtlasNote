@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	attachmentstore "atlasnote/internal/attachment"
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
@@ -188,6 +189,11 @@ func (s *Service) loadRecoveryContext(ctx context.Context) (recoveryContext, err
 	if err != nil {
 		return recoveryContext{}, err
 	}
+	attachmentChanges, err := s.collectAttachmentSyncChanges(ctx, "")
+	if err != nil {
+		return recoveryContext{}, err
+	}
+	changes = append(changes, attachmentChanges...)
 	fingerprint, err := localChangesFingerprint(changes)
 	if err != nil {
 		return recoveryContext{}, err
@@ -218,6 +224,7 @@ func localChangesFingerprint(changes []note.SyncChange) (string, error) {
 func (s *Service) reuploadLocal(ctx context.Context, recovery recoveryContext) (RecoveryResult, error) {
 	entries := make(map[string]ManifestEntry, len(recovery.localChanges)+len(recovery.remote.entries))
 	items := make([]recoverySyncedItem, 0, len(recovery.localChanges)+len(recovery.remote.entries))
+	deletedNotes := make(map[string]struct{})
 	for _, change := range recovery.localChanges {
 		raw, err := objectDocument(change.EntityType, change.EntityKey, change.ObjectJSON, change.Deleted)
 		if err != nil {
@@ -229,10 +236,20 @@ func (s *Service) reuploadLocal(ctx context.Context, recovery recoveryContext) (
 		}
 		entries[change.EntityKey] = ManifestEntry{EntityKey: change.EntityKey, EntityType: change.EntityType, ObjectHash: hash}
 		items = append(items, recoverySyncedItem{EntityKey: change.EntityKey, EntityType: change.EntityType, ObjectHash: hash, ObjectJSON: string(raw)})
+		if change.EntityType == note.SyncEntityNote && change.Deleted {
+			if noteID, ok := entityIDFromKey(note.SyncEntityNote, change.EntityKey); ok {
+				deletedNotes[noteID] = struct{}{}
+			}
+		}
 	}
 	for key, entry := range recovery.remote.entries {
 		if _, exists := entries[key]; exists {
 			continue
+		}
+		if noteID, _, ok := attachmentIDsFromKey(key); ok {
+			if _, deleted := deletedNotes[noteID]; deleted {
+				continue
+			}
 		}
 		raw, err := s.fetchRemoteObject(ctx, recovery.client, entry)
 		if err != nil {
@@ -367,6 +384,11 @@ func (s *Service) stageRemoteRedownload(ctx context.Context, recovery recoveryCo
 		return RecoveryResult{}, err
 	}
 	stageNotes := note.NewService(note.NewRepository(db), markdownStore)
+	stageAttachments, err := attachmentstore.NewStore(stageNotesDir, nil)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	stageNotes.SetAttachmentStore(stageAttachments)
 	stageRepository := NewRepository(db)
 	orderedEntries, prefetched, err := s.orderRemoteEntries(ctx, recovery.client, recovery.remote)
 	if err != nil {
@@ -381,7 +403,7 @@ func (s *Service) stageRemoteRedownload(ctx context.Context, recovery recoveryCo
 				return RecoveryResult{}, err
 			}
 		}
-		if err := applyRemoteObjectTo(ctx, stageNotes, raw); err != nil {
+		if err := applyRemoteObjectToWithAttachments(ctx, stageNotes, stageAttachments, raw); err != nil {
 			return RecoveryResult{}, err
 		}
 		items = append(items, recoverySyncedItem{EntityKey: entry.EntityKey, EntityType: entry.EntityType, ObjectHash: entry.ObjectHash, ObjectJSON: string(raw)})
@@ -399,6 +421,9 @@ func (s *Service) stageRemoteRedownload(ctx context.Context, recovery recoveryCo
 		return RecoveryResult{}, err
 	}
 	if _, err := stageNotes.Recover(ctx); err != nil {
+		return RecoveryResult{}, err
+	}
+	if err := stageAttachments.Recover(ctx); err != nil {
 		return RecoveryResult{}, err
 	}
 	var integrity string

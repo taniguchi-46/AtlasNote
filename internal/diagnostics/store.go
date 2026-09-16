@@ -53,6 +53,56 @@ type Event struct {
 	VCSRevision   string `json:"vcsRevision"`
 }
 
+// FailureInput is the narrow bridge used by the frontend operation logger.
+// Its values are normalized against fixed enums before they reach Event; no
+// user-provided error text is accepted as a diagnostic reason.
+type FailureInput struct {
+	Operation     string
+	Phase         string
+	Role          string
+	Stage         string
+	ErrorCategory string
+}
+
+const FailureCodeOperation = "OPERATION_FAILED"
+
+var (
+	allowedFailureOperations = map[string]struct{}{
+		"frontend": {},
+	}
+	allowedFailurePhases = map[string]struct{}{
+		"runtime": {},
+	}
+	allowedFailureRoles = map[string]struct{}{
+		"frontend": {},
+	}
+	allowedFailureStages = map[string]struct{}{
+		"app-close":                      {},
+		"note-editor.ai-summary-copy":    {},
+		"note-editor.agent-highlight":    {},
+		"note-editor.attachments-export": {},
+		"note-editor.flush-before-lock":  {},
+		"note-editor.image-paste":        {},
+		"note-editor.markdown-to-rich":   {},
+		"note-editor.mermaid-paste":      {},
+		"note-editor.table-copy":         {},
+		"note-export.markdown-to-html":   {},
+		"note-export.pdf-render":         {},
+		"wails.toggle-always-on-top":     {},
+		"unknown-stage":                  {},
+	}
+	allowedFailureCategories = map[string]struct{}{
+		"flush-or-close":               {},
+		"mermaid-input-flush-failed":   {},
+		"parse-failed":                 {},
+		"render-failed":                {},
+		"rich-content-snapshot-failed": {},
+		"runtime":                      {},
+		"unknown-category":             {},
+		"paste-failed":                 {},
+	}
+)
+
 type envelope struct {
 	Schema int     `json:"schema"`
 	Events []Event `json:"events"`
@@ -122,6 +172,19 @@ func (s *Store) RecordOnce(key string, event Event) Event {
 		return s.Record(event)
 	}
 	return s.record(event, key)
+}
+
+// RecordFailure records only bounded, enum-valued operation metadata. Unknown
+// values intentionally collapse to a fixed fallback rather than being stored.
+func (s *Store) RecordFailure(input FailureInput) Event {
+	return s.Record(Event{
+		Operation: failureEnum(input.Operation, allowedFailureOperations, "frontend"),
+		Phase:     failureEnum(input.Phase, allowedFailurePhases, "runtime"),
+		Role:      failureEnum(input.Role, allowedFailureRoles, "frontend"),
+		Code:      FailureCodeOperation,
+		Stage:     failureEnum(input.Stage, allowedFailureStages, "unknown-stage"),
+		Reason:    failureEnum(input.ErrorCategory, allowedFailureCategories, "unknown-category"),
+	})
 }
 
 func (s *Store) record(event Event, onceKey string) Event {
@@ -426,6 +489,14 @@ func safeValue(value string, fallback string) string {
 		}
 	}
 	return value
+}
+
+func failureEnum(value string, allowed map[string]struct{}, fallback string) string {
+	value = strings.TrimSpace(value)
+	if _, ok := allowed[value]; ok {
+		return value
+	}
+	return fallback
 }
 
 func newDiagnosticID() string {

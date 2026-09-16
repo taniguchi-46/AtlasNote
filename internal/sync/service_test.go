@@ -1,7 +1,9 @@
 package sync
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	attachmentstore "atlasnote/internal/attachment"
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
 	"atlasnote/internal/storage"
@@ -370,6 +373,163 @@ func TestSyncNowInitializesRemoteAndUploadsImmutableObject(t *testing.T) {
 	}
 	if len(remoteStore.files) < 5 {
 		t.Fatalf("remote immutable layout has %d files, want format/head/manifest/object", len(remoteStore.files))
+	}
+}
+
+func TestSyncNowUploadsAndImportsAttachmentBodyAndManifest(t *testing.T) {
+	ctx := context.Background()
+	remote := newFakeRemote()
+	vaultID := strings.Repeat("d", 32)
+	root := t.TempDir()
+
+	db, err := database.Open(ctx, filepath.Join(root, "local", "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open local database: %v", err)
+	}
+	defer db.Close()
+	repository := NewRepository(db)
+	noteRepository := note.NewRepository(db)
+	noteRepository.SetSyncChangeRecorder(repository)
+	store, err := storage.NewMarkdownStore(filepath.Join(root, "local", "notes"))
+	if err != nil {
+		t.Fatalf("create local markdown store: %v", err)
+	}
+	attachments, err := attachmentstore.NewStore(filepath.Join(root, "local", "notes"), nil)
+	if err != nil {
+		t.Fatalf("create local attachment store: %v", err)
+	}
+	notes := note.NewService(noteRepository, store)
+	notes.SetAttachmentStore(attachments)
+	created, err := notes.Create(ctx, note.CreateInput{Title: "同期添付", Content: "body"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	imageBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatalf("decode test image: %v", err)
+	}
+	if _, err := attachments.Save(ctx, attachmentstore.SaveInput{
+		NoteID: created.ID, Kind: "image", MIMEType: "image/png", Name: "paste.png", Data: imageBytes,
+	}); err != nil {
+		t.Fatalf("save attachment: %v", err)
+	}
+	if err := repository.SaveConnection(ctx, Connection{
+		Endpoint: "https://dav.example.test", RemoteRoot: "/atlasnote", Username: "alice",
+		VaultID: vaultID, Status: StatusIdle, FailSafe: true, CredentialRef: "ref-1",
+	}); err != nil {
+		t.Fatalf("save local connection: %v", err)
+	}
+	credentials := NewCredentialManager(NewSessionCredentialStore())
+	if _, err := credentials.Save("ref-1", "secret", false); err != nil {
+		t.Fatalf("save local credential: %v", err)
+	}
+	service := NewService(repository, notes, credentials)
+	service.SetAttachmentStore(attachments)
+	service.SetClientFactory(func(Connection, string) (RemoteClient, error) { return remote, nil })
+	result, err := service.SyncNow(ctx, SyncNowInput{InitializeRemote: true})
+	if err != nil {
+		t.Fatalf("upload sync: %v", err)
+	}
+	if result.Status != StatusSynced || result.Uploaded != 2 || result.Remaining != 0 {
+		t.Fatalf("upload sync result = %#v", result)
+	}
+
+	var remoteAttachment ManifestEntry
+	var attachmentCount int
+	var remoteHead HeadDocument
+	if err := json.Unmarshal(remote.files[headPath], &remoteHead); err != nil {
+		t.Fatalf("decode remote head: %v", err)
+	}
+	manifestBytes := remote.files[manifestPath(remoteHead.ManifestHash)]
+	var manifest ManifestDocument
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("decode remote manifest: %v", err)
+	}
+	for _, entry := range manifest.Entries {
+		if entry.EntityType == note.SyncEntityAttachment {
+			remoteAttachment = entry
+			attachmentCount++
+		}
+	}
+	if attachmentCount != 1 {
+		t.Fatalf("remote attachment entry count = %d, want 1", attachmentCount)
+	}
+	remoteObject := remote.files[objectPath(remoteAttachment.ObjectHash)]
+	object, err := decodeObject(remoteObject)
+	if err != nil {
+		t.Fatalf("decode remote attachment object: %v", err)
+	}
+	var payload note.SyncAttachmentPayload
+	if err := json.Unmarshal(object.Payload, &payload); err != nil {
+		t.Fatalf("decode remote attachment payload: %v", err)
+	}
+	encodedRemoteData, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil || !bytes.Equal(encodedRemoteData, imageBytes) {
+		t.Fatalf("remote attachment body does not match local body")
+	}
+
+	importRoot := t.TempDir()
+	importDB, err := database.Open(ctx, filepath.Join(importRoot, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open import database: %v", err)
+	}
+	defer importDB.Close()
+	importRepository := NewRepository(importDB)
+	importStore, err := storage.NewMarkdownStore(filepath.Join(importRoot, "notes"))
+	if err != nil {
+		t.Fatalf("create import markdown store: %v", err)
+	}
+	importAttachments, err := attachmentstore.NewStore(filepath.Join(importRoot, "notes"), nil)
+	if err != nil {
+		t.Fatalf("create import attachment store: %v", err)
+	}
+	importNotes := note.NewService(note.NewRepository(importDB), importStore)
+	importNotes.SetAttachmentStore(importAttachments)
+	if err := importRepository.SaveConnection(ctx, Connection{
+		Endpoint: "https://dav.example.test", RemoteRoot: "/atlasnote", Username: "alice",
+		VaultID: vaultID, Status: StatusIdle, FailSafe: true, CredentialRef: "ref-2",
+	}); err != nil {
+		t.Fatalf("save import connection: %v", err)
+	}
+	importCredentials := NewCredentialManager(NewSessionCredentialStore())
+	if _, err := importCredentials.Save("ref-2", "secret", false); err != nil {
+		t.Fatalf("save import credential: %v", err)
+	}
+	importService := NewService(importRepository, importNotes, importCredentials)
+	importService.SetAttachmentStore(importAttachments)
+	importService.SetClientFactory(func(Connection, string) (RemoteClient, error) { return remote, nil })
+	importResult, err := importService.SyncNow(ctx, SyncNowInput{ImportRemote: true})
+	if err != nil {
+		t.Fatalf("import sync: %v", err)
+	}
+	if importResult.Status != StatusSynced || importResult.Downloaded != 2 {
+		t.Fatalf("import sync result = %#v", importResult)
+	}
+	importedNote, err := importNotes.Get(ctx, created.ID)
+	if err != nil || importedNote.Content != "body" {
+		t.Fatalf("imported note = %#v, err=%v", importedNote, err)
+	}
+	_, importedBytes, err := importAttachments.Read(ctx, created.ID, payload.ID)
+	if err != nil || !bytes.Equal(importedBytes, imageBytes) {
+		t.Fatalf("imported attachment bytes mismatch: err=%v", err)
+	}
+	if err := notes.Delete(ctx, created.ID, note.DeleteInput{ExpectedRevision: created.Revision}); err != nil {
+		t.Fatalf("delete note with attachment: %v", err)
+	}
+	deleteResult, err := service.SyncNow(ctx, SyncNowInput{})
+	if err != nil || deleteResult.Uploaded < 1 {
+		t.Fatalf("delete sync result = %#v, err=%v", deleteResult, err)
+	}
+	if err := json.Unmarshal(remote.files[headPath], &remoteHead); err != nil {
+		t.Fatalf("decode post-delete remote head: %v", err)
+	}
+	if err := json.Unmarshal(remote.files[manifestPath(remoteHead.ManifestHash)], &manifest); err != nil {
+		t.Fatalf("decode post-delete remote manifest: %v", err)
+	}
+	for _, entry := range manifest.Entries {
+		if entry.EntityType == note.SyncEntityAttachment {
+			t.Fatalf("remote attachment survived note tombstone: %#v", entry)
+		}
 	}
 }
 

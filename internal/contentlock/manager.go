@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	attachmentstore "atlasnote/internal/attachment"
 	"atlasnote/internal/storage"
 )
 
@@ -50,8 +51,9 @@ type unlockFailure struct {
 // Manager stores encrypted lock metadata in SQLite and keeps decrypted lock
 // keys only in process memory. It also implements storage.ContentProtector.
 type Manager struct {
-	db    *sql.DB
-	store *storage.MarkdownStore
+	db          *sql.DB
+	store       *storage.MarkdownStore
+	attachments *attachmentstore.Store
 
 	// Export and AI gates are separate from operationMu so each outer request
 	// can hold its access gate while it asks the note service for content. Lock
@@ -77,6 +79,15 @@ func NewManager(db *sql.DB, store *storage.MarkdownStore) *Manager {
 		store.SetContentProtector(manager)
 	}
 	return manager
+}
+
+func (m *Manager) SetAttachmentStore(store *attachmentstore.Store) {
+	m.mu.Lock()
+	m.attachments = store
+	m.mu.Unlock()
+	if store != nil {
+		store.SetProtector(m)
+	}
 }
 
 // Close removes all in-memory lock keys. The underlying stored ciphertext is
@@ -446,6 +457,50 @@ func (m *Manager) Decode(ctx context.Context, noteID string, stored []byte) ([]b
 	return decryptContent(noteID, materials, stored)
 }
 
+// EncodeAttachment protects an attachment with the same note lock materials
+// while binding the attachment ID into AES-GCM additional authenticated data.
+func (m *Manager) EncodeAttachment(ctx context.Context, noteID string, attachmentID string, plain []byte) ([]byte, error) {
+	pending := m.pendingFor(noteID)
+	locks, err := m.locksForNote(ctx, noteID, pending)
+	if err != nil {
+		return nil, err
+	}
+	if len(locks) == 0 {
+		return plain, nil
+	}
+	materials, err := m.materialsForLocks(locks)
+	if err != nil {
+		return nil, err
+	}
+	defer zeroMaterials(materials)
+	return encryptAttachment(noteID, attachmentID, materials, plain)
+}
+
+// DecodeAttachment reads an attachment using the currently committed lock
+// metadata. Pending lock state is intentionally ignored while staging a lock
+// conversion, just like MarkdownStore.Decode.
+func (m *Manager) DecodeAttachment(ctx context.Context, noteID string, attachmentID string, stored []byte) ([]byte, error) {
+	locks, err := m.locksForNote(ctx, noteID, pendingWrite{})
+	if err != nil {
+		return nil, err
+	}
+	if len(locks) == 0 {
+		if isEncryptedContent(stored) {
+			return nil, ErrIntegrity
+		}
+		return stored, nil
+	}
+	if !isEncryptedContent(stored) {
+		return nil, ErrIntegrity
+	}
+	materials, err := m.materialsForLocks(locks)
+	if err != nil {
+		return nil, err
+	}
+	defer zeroMaterials(materials)
+	return decryptAttachment(noteID, attachmentID, materials, stored)
+}
+
 func (m *Manager) Enable(ctx context.Context, input EnableInput) (Lock, int, error) {
 	target, err := normalizeTarget(Target{Type: input.TargetType, ID: input.TargetID})
 	if err != nil {
@@ -554,6 +609,11 @@ func (m *Manager) Enable(ctx context.Context, input EnableInput) (Lock, int, err
 		}
 		if writeErr := m.store.WriteTemp(ctx, noteID, operationID, content); writeErr != nil {
 			return Lock{}, aiRecordCount, writeErr
+		}
+		if attachments := m.attachmentStore(); attachments != nil {
+			if err := attachments.StageReencode(ctx, noteID, operationID); err != nil {
+				return Lock{}, aiRecordCount, err
+			}
 		}
 	}
 	if err := m.commitEnableMetadata(ctx, operation); err != nil {
@@ -802,6 +862,11 @@ func (m *Manager) Disable(ctx context.Context, input DisableInput) error {
 		if writeErr := m.store.WriteTemp(ctx, noteID, operationID, content); writeErr != nil {
 			return writeErr
 		}
+		if attachments := m.attachmentStore(); attachments != nil {
+			if err := attachments.StageReencode(ctx, noteID, operationID); err != nil {
+				return err
+			}
+		}
 	}
 	if err := m.commitDisableMetadata(ctx, operation); err != nil {
 		return err
@@ -924,14 +989,19 @@ func (m *Manager) promoteOperation(ctx context.Context, operation lockOperation)
 			if err := m.store.CommitTemp(ctx, noteID, operation.ID); err != nil {
 				return err
 			}
-			continue
+		} else {
+			exists, err := m.store.Exists(ctx, noteID)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return ErrIntegrity
+			}
 		}
-		exists, err := m.store.Exists(ctx, noteID)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return ErrIntegrity
+		if attachments := m.attachmentStore(); attachments != nil {
+			if err := attachments.CommitReencode(ctx, noteID, operation.ID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -962,11 +1032,23 @@ func (m *Manager) rollbackStaging(ctx context.Context, operation lockOperation) 
 		if err := m.store.RollbackTemp(ctx, noteID, operation.ID); err != nil {
 			return err
 		}
+		if attachments := m.attachmentStore(); attachments != nil {
+			if err := attachments.RollbackReencode(ctx, noteID, operation.ID); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := m.db.ExecContext(ctx, "DELETE FROM content_lock_operations WHERE operation_id = ?", operation.ID); err != nil {
 		return fmt.Errorf("rollback content lock operation: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) attachmentStore() *attachmentstore.Store {
+	m.mu.RLock()
+	attachments := m.attachments
+	m.mu.RUnlock()
+	return attachments
 }
 
 func (m *Manager) requireMaterials(ctx context.Context, noteID string, pending pendingWrite) error {

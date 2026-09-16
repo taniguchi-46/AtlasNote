@@ -6,7 +6,7 @@
     </p>
 
     <section class="content-lock-auto-lock" aria-labelledby="content-lock-auto-lock-title">
-      <h4 id="content-lock-auto-lock-title">自動ロック</h4>
+      <h4 id="content-lock-auto-lock-title" data-settings-anchor="locks.auto-lock" tabindex="-1">自動ロック</h4>
       <label for="content-lock-auto-lock-minutes">ロック解除後</label>
       <select id="content-lock-auto-lock-minutes" v-model.number="settingsStore.contentLockAutoLockMinutes">
         <option v-for="minutes in autoLockMinuteOptions" :key="minutes" :value="minutes">

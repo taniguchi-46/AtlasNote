@@ -1,14 +1,20 @@
 package contentlock_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	attachmentstore "atlasnote/internal/attachment"
 	"atlasnote/internal/contentlock"
 	"atlasnote/internal/database"
 	"atlasnote/internal/note"
@@ -150,6 +156,79 @@ func TestNoteLockStatusPersistsAcrossManagerSessions(t *testing.T) {
 	status, err = reopened.GetTargetStatus(ctx, contentlock.Target{Type: contentlock.TargetNote, ID: created.ID})
 	if err != nil || status.Protected || status.Locked || status.ExplicitLock {
 		t.Fatalf("disabled restarted note lock status = %#v, %v", status, err)
+	}
+}
+
+func TestNoteLockReencodesAttachmentsAndKeepsTheirBytesPrivate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(root, "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := storage.NewMarkdownStore(filepath.Join(root, "notes"))
+	if err != nil {
+		t.Fatalf("create markdown store: %v", err)
+	}
+	manager := contentlock.NewManager(db, store)
+	t.Cleanup(manager.Close)
+	attachments, err := attachmentstore.NewStore(filepath.Join(root, "notes"), manager)
+	if err != nil {
+		t.Fatalf("create attachment store: %v", err)
+	}
+	manager.SetAttachmentStore(attachments)
+	service := note.NewService(note.NewRepository(db), store)
+	service.SetContentLockGuard(manager)
+	created, err := service.Create(ctx, note.CreateInput{Title: "添付ロック", Content: "本文"})
+	if err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	plain := testLockedAttachmentPNG(t)
+	saved, err := attachments.Save(ctx, attachmentstore.SaveInput{
+		NoteID: created.ID, Kind: "image", MIMEType: "image/png", Name: "locked.png", Data: plain,
+	})
+	if err != nil {
+		t.Fatalf("save attachment: %v", err)
+	}
+	attachmentPath := filepath.Join(root, "notes", "attachments", created.ID, saved.Metadata.ID+".bin")
+	rawBefore, err := os.ReadFile(attachmentPath)
+	if err != nil || !bytes.Equal(rawBefore, plain) {
+		t.Fatalf("unlocked attachment bytes = %d, %v", len(rawBefore), err)
+	}
+
+	if _, _, err := manager.Enable(ctx, contentlock.EnableInput{
+		TargetType: contentlock.TargetNote, TargetID: created.ID, Passphrase: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("enable note lock: %v", err)
+	}
+	rawProtected, err := os.ReadFile(attachmentPath)
+	if err != nil || bytes.Equal(rawProtected, plain) || !bytes.HasPrefix(rawProtected, []byte("ATLASNOTE-LOCK-1\n")) {
+		t.Fatalf("protected attachment bytes are not encrypted: %d, %v", len(rawProtected), err)
+	}
+	if _, err := manager.LockNow(ctx, contentlock.Target{Type: contentlock.TargetNote, ID: created.ID}); err != nil {
+		t.Fatalf("lock note: %v", err)
+	}
+	if _, _, err := attachments.Read(ctx, created.ID, saved.Metadata.ID); !errors.Is(err, contentlock.ErrLocked) {
+		t.Fatalf("locked attachment read error = %v, want ErrLocked", err)
+	}
+	if _, err := manager.Unlock(ctx, contentlock.UnlockInput{
+		TargetType: contentlock.TargetNote, TargetID: created.ID, Passphrase: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("unlock note: %v", err)
+	}
+	_, afterUnlock, err := attachments.Read(ctx, created.ID, saved.Metadata.ID)
+	if err != nil || !bytes.Equal(afterUnlock, plain) {
+		t.Fatalf("unlocked attachment = %d, %v", len(afterUnlock), err)
+	}
+	if err := manager.Disable(ctx, contentlock.DisableInput{
+		TargetType: contentlock.TargetNote, TargetID: created.ID, Passphrase: "correct horse battery staple",
+	}); err != nil {
+		t.Fatalf("disable note lock: %v", err)
+	}
+	rawAfter, err := os.ReadFile(attachmentPath)
+	if err != nil || !bytes.Equal(rawAfter, plain) {
+		t.Fatalf("unprotected attachment bytes = %d, %v", len(rawAfter), err)
 	}
 }
 
@@ -750,6 +829,21 @@ func newLockFixtureWithSync(t *testing.T) (*contentlock.Manager, *note.Service, 
 	service := note.NewService(repository, store)
 	service.SetContentLockGuard(manager)
 	return manager, service, store, db
+}
+
+func testLockedAttachmentPNG(t *testing.T) []byte {
+	t.Helper()
+	imageValue := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			imageValue.Set(x, y, color.RGBA{R: uint8(x * 80), G: uint8(y * 80), B: 180, A: 255})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, imageValue); err != nil {
+		t.Fatalf("encode locked attachment PNG: %v", err)
+	}
+	return buffer.Bytes()
 }
 
 type commitTempFailingStore struct {

@@ -2,7 +2,7 @@
   <section class="sync-settings" data-settings-anchor="sync" tabindex="-1">
     <h3>同期</h3>
 
-    <button type="button" class="secondary-button" @click="wizardOpen = !wizardOpen">
+    <button type="button" class="secondary-button" data-settings-anchor="sync.setup-mode" @click="wizardOpen = !wizardOpen">
       同期ウィザードを開く…
     </button>
     <div v-if="wizardOpen || syncStore.targetChanged" class="wizard-box">
@@ -16,14 +16,14 @@
       </select>
     </div>
 
-    <div class="setting-group">
+    <div class="setting-group" data-settings-anchor="sync.target" tabindex="-1">
       <label for="sync-target">同期先</label>
       <select id="sync-target" value="webdav" disabled>
         <option value="webdav">WebDAV</option>
       </select>
     </div>
 
-    <div class="setting-group wide-field">
+    <div class="setting-group wide-field" data-settings-anchor="sync.url" tabindex="-1">
       <label for="sync-webdav-url">WebDAV URL</label>
       <input id="sync-webdav-url" v-model.trim="syncStore.draft.webDAVURL" type="url" autocomplete="url" placeholder="https://dav.example.com/atlasnote" />
       <p class="field-help">
@@ -35,17 +35,17 @@
       WebDAV URLまたはユーザー名が変更されています。保存前に同期ウィザードで方式を選択し、パスワードを再入力してください。
     </p>
 
-    <div class="setting-group wide-field">
+    <div class="setting-group wide-field" data-settings-anchor="sync.username" tabindex="-1">
       <label for="sync-username">WebDAV ユーザー名</label>
       <input id="sync-username" v-model.trim="syncStore.draft.username" type="text" autocomplete="username" />
     </div>
-    <div class="setting-group wide-field">
+    <div class="setting-group wide-field" data-settings-anchor="sync.password" tabindex="-1">
       <label for="sync-password">WebDAV パスワード</label>
       <input id="sync-password" v-model="syncStore.draft.password" type="password" autocomplete="new-password" />
       <p class="field-help">入力したパスワードはOSの資格情報ストアへ保存します。利用できない場合は現在のセッション内だけで保持します。</p>
     </div>
 
-    <div class="setting-group">
+    <div class="setting-group" data-settings-anchor="sync.interval" tabindex="-1">
       <label for="sync-interval">同期間隔</label>
       <select id="sync-interval" v-model.number="syncStore.draft.syncIntervalSeconds">
         <option :value="0">無効</option>
@@ -68,7 +68,7 @@
       {{ syncStore.configurationTestError }}
     </p>
 
-    <button type="button" class="advanced-toggle" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
+    <button type="button" class="advanced-toggle" data-settings-anchor="sync.advanced" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
       <span aria-hidden="true">{{ advancedOpen ? '▾' : '›' }}</span>
       詳細設定を{{ advancedOpen ? '隠す' : '表示' }}
     </button>

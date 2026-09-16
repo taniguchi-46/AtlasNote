@@ -46,6 +46,7 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
+| Attachments | `notes/attachments/<noteID>/manifest.json` と管理ID付き画像本体を保存する。本文には `atlasnote-attachment://` 参照だけを保持し、PNG／JPEGの検証、ロック時の暗号化、削除ジャーナル、ZIP出力を担当する。WebDAV同期は現形式では拒否する。詳細は`docs/development/attachments.md`を正とする |
 | Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
 | Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
 | Backup / Restore | アクティブな保存空間のSQLite・Markdownを設定されたアーカイブルートへ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/backup-restore.md`を正とする |
@@ -57,6 +58,7 @@ Go Backend
 - ノート本文は Markdown ファイルとして保存する方針。
 - ノートのメタデータ、タグ、リンク、同期状態、検索補助情報は SQLite に保存する方針。
 - ノート本文のファイル名は安定 ID を使った `note-id.md` とし、ユーザー入力をファイルパスへ直接使用しない。
+- 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
 - AIワークスペースの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
@@ -90,6 +92,7 @@ Go Backend
 - ローカル保存キューと同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 - 空の同期先を検出した場合は既定ONのフェイルセーフでlocal正本へのremote適用を止める。再アップロードはheadの`If-Match`成功後だけlocal同期状態を更新する。
 - remote正本からの全再取得は実行中のDB・notesへ直接適用せず、`.sync-recovery/staging/`の別vaultでhash・payload・SQLite integrityを検証する。次回起動時にデータロック取得後かつSQLite open前に現行vaultを`.sync-recovery/backups/`へ退避してswapし、失敗時はrollbackする。
+- 添付を含む `notes/` のバックアップ・移行はディレクトリを再帰的にコピーする。現在のWebDAV形式は添付を表現しないため、添付存在時の設定確認・設定保存・同期実行を拒否し、旧クライアントが添付を無視する同期を許可しない。
 
 ### バックアップと復元
 

@@ -39,7 +39,7 @@ try {
 
   assert.deepEqual(calls, [[
     'operation failed',
-    { operationId: 'operation-1', noteId: 'note-1', stage: 'save', errorCategory: 'io' },
+    { operationId: 'operation-1', noteId: 'note-1', stage: 'unknown-stage', errorCategory: 'unknown-category' },
   ]])
   console.log('operation logger tests passed')
 } finally {

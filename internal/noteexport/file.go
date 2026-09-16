@@ -41,3 +41,10 @@ func writeFileAtomic(path string, content []byte) (err error) {
 	committed = true
 	return nil
 }
+
+// WriteFileAtomic exposes the existing safe file replacement primitive to
+// other local export-like features such as diagnostics. The caller is still
+// responsible for obtaining a user-selected destination.
+func WriteFileAtomic(path string, content []byte) error {
+	return writeFileAtomic(path, content)
+}

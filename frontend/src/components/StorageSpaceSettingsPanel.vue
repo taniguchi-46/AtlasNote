@@ -1,5 +1,5 @@
 <template>
-  <section class="storage-space-settings">
+  <section class="storage-space-settings" data-settings-anchor="storage-spaces" tabindex="-1">
     <h3>保存空間</h3>
     <p class="storage-space-description">
       ノートを保存空間ごとに分けて管理します。別の保存空間のノートは表示されません。

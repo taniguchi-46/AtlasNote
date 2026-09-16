@@ -24,6 +24,7 @@ const (
 type Service struct {
 	repository      *Repository
 	notes           *note.Service
+	attachments     attachmentSyncStore
 	credentials     *CredentialManager
 	clientFactory   func(Connection, string) (RemoteClient, error)
 	recoveryDataDir string
@@ -58,6 +59,10 @@ func (s *Service) SetRecoveryDataDir(dataDir string) {
 
 func (s *Service) SetClientFactory(factory func(Connection, string) (RemoteClient, error)) {
 	s.clientFactory = factory
+}
+
+func (s *Service) SetAttachmentStore(store attachmentSyncStore) {
+	s.attachments = store
 }
 
 func (s *Service) lockNotesForSync(ctx context.Context) (context.Context, func()) {
@@ -207,6 +212,11 @@ func (s *Service) Configure(ctx context.Context, input ConnectionInput) (StatusR
 		if err != nil {
 			return StatusResult{}, err
 		}
+		attachmentChanges, attachmentErr := s.collectAttachmentSyncChanges(ctx, "")
+		if attachmentErr != nil {
+			return StatusResult{}, attachmentErr
+		}
+		initialChanges = append(initialChanges, attachmentChanges...)
 	}
 
 	credentialRef := ""
@@ -456,13 +466,32 @@ func (s *Service) SyncNow(ctx context.Context, input SyncNowInput) (SyncResult, 
 			return SyncResult{Status: StatusFailed, Message: "sync retry state could not be reset"}, err
 		}
 	}
-
 	initializeRemote := input.InitializeRemote || (!connection.HasLastSync && connection.HeadManifestHash == "")
 	remote, err := s.loadRemoteState(ctx, client, *connection, initializeRemote)
 	if err != nil {
 		status := statusForError(err)
 		_ = s.repository.UpdateConnectionStatus(context.Background(), status, "")
 		return SyncResult{Status: status, Message: userMessage(err)}, err
+	}
+	pendingOutbox, err := s.repository.CountOutbox(ctx)
+	if err != nil {
+		_ = s.repository.UpdateConnectionStatus(context.Background(), StatusFailed, "")
+		return SyncResult{Status: StatusFailed, Message: "同期復旧情報の確認に失敗しました"}, err
+	}
+	if pendingOutbox == 0 {
+		if err := s.checkEmptyRemoteFailSafe(ctx, *connection, remote, input.ImportRemote); err != nil {
+			status := statusForError(err)
+			_ = s.repository.UpdateConnectionStatus(context.Background(), status, "")
+			return SyncResult{Status: status, Message: userMessage(err)}, err
+		}
+	}
+	if err := s.ensureMissingLocalOutbox(ctx); err != nil {
+		_ = s.repository.UpdateConnectionStatus(context.Background(), StatusFailed, "")
+		return SyncResult{Status: StatusFailed, Message: "同期復旧情報の登録に失敗しました"}, err
+	}
+	if err := s.ensureAttachmentOutbox(ctx, remote); err != nil {
+		_ = s.repository.UpdateConnectionStatus(context.Background(), StatusFailed, "")
+		return SyncResult{Status: StatusFailed, Message: "添付ファイルの同期準備に失敗しました"}, err
 	}
 
 	uploaded, downloaded, conflicts, err := s.syncOutbox(ctx, client, *connection, remote)
@@ -572,9 +601,24 @@ func (s *Service) ResolveConflict(ctx context.Context, input ConflictResolutionI
 		if err := s.repository.RequeueConflictLocal(ctx, *conflict); err != nil {
 			return err
 		}
+		remoteObject, remoteErr := decodeObject([]byte(conflict.RemoteSnapshot))
+		if remoteErr != nil {
+			return remoteErr
+		}
+		if conflict.EntityType == note.SyncEntityNote && remoteObject.Deleted {
+			if noteID, ok := entityIDFromKey(note.SyncEntityNote, conflict.EntityKey); ok {
+				if err := s.ensureLocalNoteAttachmentsOutbox(ctx, noteID, conflict.ID+"-local"); err != nil {
+					return err
+				}
+			}
+		}
 	case "both":
 		if conflict.EntityType != note.SyncEntityNote {
 			return errors.New("keeping both sides is supported for note conflicts only")
+		}
+		remoteObject, remoteErr := decodeObject([]byte(conflict.RemoteSnapshot))
+		if remoteErr != nil || remoteObject.Deleted {
+			return ErrInvalidRemoteFormat
 		}
 		if err := s.repository.RequeueConflictLocal(ctx, *conflict); err != nil {
 			return err
@@ -589,6 +633,9 @@ func (s *Service) ResolveConflict(ctx context.Context, input ConflictResolutionI
 }
 
 func (s *Service) keepBothNoteVersions(ctx context.Context, conflict Conflict) error {
+	if s.notes == nil {
+		return errors.New("note service is unavailable")
+	}
 	object, err := decodeObject([]byte(conflict.RemoteSnapshot))
 	if err != nil || object.Deleted {
 		return ErrInvalidRemoteFormat
@@ -597,36 +644,62 @@ func (s *Service) keepBothNoteVersions(ctx context.Context, conflict Conflict) e
 	if err := json.Unmarshal(object.Payload, &payload); err != nil {
 		return ErrInvalidRemoteFormat
 	}
+	if !isEntityID(payload.ID) || object.EntityKey != note.SyncEntityKey(note.SyncEntityNote, payload.ID) ||
+		(payload.NotebookID != nil && !isEntityID(*payload.NotebookID)) {
+		return ErrInvalidRemoteFormat
+	}
+	sourceNoteID := payload.ID
 	// A retry after the note was created but before the conflict row was marked
-	// resolved must update the same copy instead of creating duplicates.
+	// resolved must reuse the same copy instead of creating duplicates. If the
+	// user edited that copy while attachment recovery was pending, keep the
+	// canonical edit rather than restoring the old remote snapshot.
 	id := hashBytes([]byte("conflict-remote-copy:" + conflict.ID))[:32]
 	payload.ID = id
-	if err := s.notes.ApplySyncNote(ctx, payload); err != nil {
-		return err
-	}
-	createdAt := parseTimestamp(payload.CreatedAt)
-	updatedAt := parseTimestamp(payload.UpdatedAt)
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
-	}
-	if updatedAt.IsZero() {
-		updatedAt = createdAt
-	}
-	change, err := note.NewNoteSyncChange(conflict.ID+"-remote", note.Record{
-		ID:         id,
-		NotebookID: payload.NotebookID,
-		Title:      payload.Title,
-		IsFavorite: payload.IsFavorite,
-		IsPinned:   payload.IsPinned,
-		IsTrashed:  payload.IsTrashed,
-		Revision:   1,
-		CreatedAt:  createdAt,
-		UpdatedAt:  updatedAt,
-	}, payload.Content)
+	copyOperationID := conflict.ID + "-remote"
+	var attachmentChanges []note.SyncChange
+	payload.Content, attachmentChanges, err = s.copyNoteAttachments(ctx, sourceNoteID, id, payload.Content, copyOperationID)
 	if err != nil {
 		return err
 	}
-	return s.repository.EnqueueChanges(ctx, []note.SyncChange{change})
+	copyNote, copyErr := s.notes.Get(ctx, id)
+	copyExists := copyErr == nil
+	if !copyExists && !errors.Is(copyErr, note.ErrNotFound) {
+		return copyErr
+	}
+	if !copyExists {
+		if err := s.notes.ApplySyncNote(ctx, payload); err != nil {
+			return err
+		}
+		copyNote, err = s.notes.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
+	if len(attachmentChanges) > 0 {
+		stager, ok := s.attachments.(syncAttachmentStager)
+		if !ok {
+			return errors.New("attachment staging is unavailable")
+		}
+		if err := stager.CommitSyncAttachments(ctx, id, copyOperationID); err != nil {
+			return err
+		}
+	}
+	change, err := note.NewNoteSyncChange(conflict.ID+"-remote", note.Record{
+		ID:         copyNote.ID,
+		NotebookID: copyNote.NotebookID,
+		Title:      copyNote.Title,
+		IsFavorite: copyNote.IsFavorite,
+		IsPinned:   copyNote.IsPinned,
+		IsTrashed:  copyNote.IsTrashed,
+		Revision:   copyNote.Revision,
+		CreatedAt:  copyNote.CreatedAt,
+		UpdatedAt:  copyNote.UpdatedAt,
+	}, copyNote.Content)
+	if err != nil {
+		return err
+	}
+	changes := append([]note.SyncChange{change}, attachmentChanges...)
+	return s.repository.EnqueueChanges(ctx, changes)
 }
 
 func (s *Service) ListConflicts(ctx context.Context) ([]ConflictSummary, error) {
@@ -642,11 +715,12 @@ func (s *Service) ListConflicts(ctx context.Context) ([]ConflictSummary, error) 
 }
 
 type remoteState struct {
-	format   FormatDocument
-	head     HeadDocument
-	headETag string
-	manifest ManifestDocument
-	entries  map[string]ManifestEntry
+	format      FormatDocument
+	head        HeadDocument
+	headETag    string
+	manifest    ManifestDocument
+	entries     map[string]ManifestEntry
+	noteDeleted map[string]bool
 }
 
 func (s *Service) loadRemoteState(ctx context.Context, client RemoteClient, connection Connection, initialize bool) (remoteState, error) {
@@ -706,7 +780,33 @@ func (s *Service) loadRemoteState(ctx context.Context, client RemoteClient, conn
 	for _, entry := range manifest.Entries {
 		entries[entry.EntityKey] = entry
 	}
-	return remoteState{format: format, head: head, headETag: headResponse.ETag, manifest: manifest, entries: entries}, nil
+	noteDeleted := make(map[string]bool)
+	for _, entry := range manifest.Entries {
+		if entry.EntityType != note.SyncEntityAttachment {
+			continue
+		}
+		noteID, _, ok := attachmentIDsFromKey(entry.EntityKey)
+		if !ok {
+			return remoteState{}, ErrInvalidRemoteFormat
+		}
+		parent, ok := entries[note.SyncEntityKey(note.SyncEntityNote, noteID)]
+		if !ok || parent.EntityType != note.SyncEntityNote {
+			return remoteState{}, ErrInvalidRemoteFormat
+		}
+		parentRaw, err := s.fetchRemoteObject(ctx, client, parent)
+		if err != nil {
+			return remoteState{}, err
+		}
+		parentObject, err := decodeObject(parentRaw)
+		if err != nil {
+			return remoteState{}, err
+		}
+		noteDeleted[noteID] = parentObject.Deleted
+		if parentObject.Deleted {
+			return remoteState{}, ErrInvalidRemoteFormat
+		}
+	}
+	return remoteState{format: format, head: head, headETag: headResponse.ETag, manifest: manifest, entries: entries, noteDeleted: noteDeleted}, nil
 }
 
 func initializeRemote(ctx context.Context, client RemoteClient, vaultID string) error {
@@ -764,10 +864,52 @@ func (s *Service) syncOutbox(ctx context.Context, client RemoteClient, connectio
 		return 0, 0, 0, err
 	}
 	uploaded, downloaded, conflicts := 0, 0, 0
+	attachmentParentConflicts := make(map[string]struct{})
 	for _, item := range items {
+		if active, attachmentErr := s.attachmentOutboxIsActive(ctx, item); attachmentErr != nil {
+			return uploaded, downloaded, conflicts, attachmentErr
+		} else if !active {
+			if err := s.repository.DeleteOutbox(ctx, item.Sequence); err != nil {
+				return uploaded, downloaded, conflicts, err
+			}
+			continue
+		}
+		if item.EntityType == note.SyncEntityNote {
+			ready, recoveryErr := s.recoverSyncCopyForNote(ctx, item.EntityKey)
+			if recoveryErr != nil {
+				return uploaded, downloaded, conflicts, recoveryErr
+			}
+			if !ready {
+				// Keep an already-recorded note outbox item durable while a
+				// sync-copy stage is incomplete. Sending the parent without its
+				// attachments would publish an inconsistent note, and deleting or
+				// retrying the item here would lose the user's later edit.
+				continue
+			}
+		}
 		current, err := s.loadRemoteState(ctx, client, connection, false)
 		if err != nil {
 			return uploaded, downloaded, conflicts, err
+		}
+		if item.EntityType == note.SyncEntityAttachment {
+			parentDeleted, parentErr := s.remoteAttachmentParentDeleted(ctx, client, current, item)
+			if parentErr != nil {
+				return uploaded, downloaded, conflicts, parentErr
+			}
+			if parentDeleted {
+				noteID := attachmentNoteID(item)
+				created, conflictErr := s.ensureAttachmentParentConflict(ctx, client, current, item)
+				if conflictErr != nil {
+					return uploaded, downloaded, conflicts, conflictErr
+				}
+				if created {
+					if _, exists := attachmentParentConflicts[noteID]; !exists {
+						attachmentParentConflicts[noteID] = struct{}{}
+						conflicts++
+					}
+				}
+				continue
+			}
 		}
 		remoteHash := ""
 		if entry, ok := current.entries[item.EntityKey]; ok {
@@ -870,6 +1012,15 @@ func (s *Service) uploadOne(ctx context.Context, client RemoteClient, remote rem
 	if err := ensureObjectHash(objectBytes, item.ObjectHash); err != nil {
 		return err
 	}
+	if item.EntityType == note.SyncEntityAttachment {
+		parentDeleted, err := s.remoteAttachmentParentDeleted(ctx, client, remote, item)
+		if err != nil {
+			return err
+		}
+		if parentDeleted {
+			return errAttachmentParentDeleted
+		}
+	}
 	response, err := client.Put(ctx, objectPath(item.ObjectHash), objectBytes, "", "*")
 	if err != nil {
 		var statusErr *HTTPStatusError
@@ -894,6 +1045,16 @@ func (s *Service) uploadOne(ctx context.Context, client RemoteClient, remote rem
 	entries := make(map[string]ManifestEntry, len(remote.entries)+1)
 	for key, entry := range remote.entries {
 		entries[key] = entry
+	}
+	if item.EntityType == note.SyncEntityNote && item.Deleted {
+		if noteID, ok := entityIDFromKey(note.SyncEntityNote, item.EntityKey); ok {
+			for key := range entries {
+				attachmentNoteID, _, attachmentOK := attachmentIDsFromKey(key)
+				if attachmentOK && attachmentNoteID == noteID {
+					delete(entries, key)
+				}
+			}
+		}
 	}
 	entries[item.EntityKey] = ManifestEntry{EntityKey: item.EntityKey, EntityType: item.EntityType, ObjectHash: item.ObjectHash}
 	manifest := manifestFor(remote.format.VaultID, remote.head.Generation+1, entries)
@@ -970,6 +1131,13 @@ func (s *Service) pullRemote(ctx context.Context, client RemoteClient, remote re
 	for _, entry := range orderedEntries {
 		key := entry.EntityKey
 		state, exists := stateByKey[key]
+		blocked, conflictErr := s.repository.HasOpenConflict(ctx, key)
+		if conflictErr != nil {
+			return downloaded, conflicts, conflictErr
+		}
+		if blocked {
+			continue
+		}
 		if !exists && initialImport && !importRemote {
 			return downloaded, conflicts, errors.New("remote import requires explicit confirmation")
 		}
@@ -1087,8 +1255,10 @@ func syncEntityRank(entityType string) int {
 		return 2
 	case note.SyncEntityNoteTags:
 		return 3
-	default:
+	case note.SyncEntityAttachment:
 		return 4
+	default:
+		return 5
 	}
 }
 
@@ -1108,10 +1278,14 @@ func (s *Service) fetchRemoteObject(ctx context.Context, client RemoteClient, en
 }
 
 func (s *Service) applyRemoteObject(ctx context.Context, raw []byte) error {
-	return applyRemoteObjectTo(ctx, s.notes, raw)
+	return applyRemoteObjectToWithAttachments(ctx, s.notes, s.attachments, raw)
 }
 
 func applyRemoteObjectTo(ctx context.Context, notes *note.Service, raw []byte) error {
+	return applyRemoteObjectToWithAttachments(ctx, notes, nil, raw)
+}
+
+func applyRemoteObjectToWithAttachments(ctx context.Context, notes *note.Service, attachments attachmentSyncStore, raw []byte) error {
 	if notes == nil {
 		return errors.New("note service is unavailable")
 	}
@@ -1145,6 +1319,15 @@ func applyRemoteObjectTo(ctx context.Context, notes *note.Service, raw []byte) e
 				return err
 			}
 			return notes.DeleteSyncNoteTags(ctx, id)
+		case note.SyncEntityAttachment:
+			if attachments == nil {
+				return ErrInvalidRemoteFormat
+			}
+			noteID, attachmentID, ok := attachmentIDsFromKey(object.EntityKey)
+			if !ok {
+				return ErrInvalidRemoteFormat
+			}
+			return attachments.DeleteAttachment(ctx, noteID, attachmentID)
 		default:
 			return ErrInvalidRemoteFormat
 		}
@@ -1193,6 +1376,8 @@ func applyRemoteObjectTo(ctx context.Context, notes *note.Service, raw []byte) e
 			}
 		}
 		return notes.ApplySyncNoteTags(ctx, payload)
+	case note.SyncEntityAttachment:
+		return applyRemoteAttachment(ctx, notes, attachments, object)
 	default:
 		return ErrInvalidRemoteFormat
 	}

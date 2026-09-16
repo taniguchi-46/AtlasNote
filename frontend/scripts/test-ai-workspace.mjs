@@ -72,19 +72,31 @@ assert.match(settingsStoreSource, /atlas-ai-workspace-right-width/)
 assert.match(settingsStoreSource, /atlas-ai-workspace-bottom-height/)
 assert.match(settingsStoreSource, /setAIWorkspaceRightWidth/)
 assert.match(settingsStoreSource, /setAIWorkspaceBottomHeight/)
-assert.match(settingsModalSource, /AIワークスペース/)
-assert.match(settingsModalSource, /v-model="settingsStore\.aiWorkspacePlacement"/)
-assert.match(settingsModalSource, /value="right">右側/)
-assert.match(settingsModalSource, /value="bottom">下側/)
-assert.match(settingsModalSource, /境界をドラッグして幅または高さを調整/)
-assert.match(settingsModalSource, /Agentの本文編集権限/)
-assert.match(settingsModalSource, /v-model="settingsStore\.aiAgentEditPermission"/)
-assert.match(settingsModalSource, /value="review-required">提案のみ/)
-assert.match(settingsModalSource, /value="auto-update">更新可能/)
+assert.doesNotMatch(settingsModalSource, /data-settings-anchor="general\.ai-(?:placement|agent-permission)"/)
+assert.match(aiSettingsSource, /data-settings-anchor="ai\.workspace-placement"/)
+assert.match(aiSettingsSource, /v-model="settingsStore\.aiWorkspacePlacement"/)
+assert.match(aiSettingsSource, /value="right">右側/)
+assert.match(aiSettingsSource, /value="bottom">下側/)
+assert.match(aiSettingsSource, /境界をドラッグして幅または高さを調整/)
+assert.match(aiSettingsSource, /data-settings-anchor="ai\.agent-permission"/)
+assert.match(aiSettingsSource, /Agentの本文編集権限/)
+assert.match(aiSettingsSource, /v-model="settingsStore\.aiAgentEditPermission"/)
+assert.match(aiSettingsSource, /value="review-required">提案のみ/)
+assert.match(aiSettingsSource, /value="auto-update">更新可能/)
+assert.match(aiSettingsSource, /変更はすぐに反映されます/)
+assert.match(aiSettingsSource, /「適用」は保存してこの画面を維持し、「OK」は保存して画面を閉じます/)
 assert.match(aiSettingsSource, /v-model="settingsStore\.aiEnabled"/)
 assert.match(aiSettingsSource, /isAIProcessing/)
 assert.match(aiSettingsSource, /isSubmitting: isAIComposerSubmitting\.value/)
 assert.match(aiSettingsSource, /実行中のAI処理が完了するまでOFFにできません/)
+
+// Toolbar affordances keep a stable hover title while retaining state-aware
+// accessible labels and normal editor transactions.
+assert.match(editorSource, /title="モード切り替え"/)
+assert.match(editorSource, /:aria-label="editMode === 'markdown' \? 'リッチテキストモードに切り替え' : 'Markdownモードに切り替え'"/)
+assert.match(editorSource, /title="水平線"/)
+assert.match(editorSource, /function toggleHorizontalRule\(\)\s*\{[\s\S]*?setHorizontalRule\(\)\.run\(\)/)
+assert.match(editorSource, /insertMarkdownBlock\('\-\-\-'\)/)
 
 // Right/bottom placement and pointer/keyboard resizing remain available.
 assert.match(workspaceSource, /ResizeObserver/)
@@ -484,7 +496,12 @@ const saveFeedbackWatchAnchor = editorSource.indexOf(
   '() => noteStore.saveFeedbackVersion',
   activeNoteWatchAnchor + 1,
 )
-const activeNoteWatchEnd = editorSource.lastIndexOf('watch(', saveFeedbackWatchAnchor)
+const nextWatchOffset = editorSource.slice(activeNoteWatchStart).search(
+  /\r?\nwatch\(\s*\(\) => activeAgentEditorHighlight/s,
+)
+const activeNoteWatchEnd = nextWatchOffset >= 0
+  ? activeNoteWatchStart + nextWatchOffset
+  : editorSource.lastIndexOf('watch(', saveFeedbackWatchAnchor)
 assert.ok(
   activeNoteWatchStart >= 0 && activeNoteWatchEnd > activeNoteWatchStart,
   'NoteEditor must watch the active note',

@@ -403,9 +403,15 @@ func (r *Repository) ListOutbox(ctx context.Context, limit int) ([]OutboxItem, e
 SELECT sequence, change_set_id, entity_key, entity_type, object_hash,
        base_manifest_hash, base_head_etag, object_json, deleted,
        attempt_count, next_retry_at, failed_class, created_at
-FROM sync_outbox
-WHERE next_retry_at <= ?
-ORDER BY sequence
+FROM sync_outbox AS outbox
+WHERE outbox.next_retry_at <= ?
+  AND NOT EXISTS (
+      SELECT 1
+      FROM sync_conflicts AS conflict
+      WHERE conflict.entity_key = outbox.entity_key
+        AND conflict.resolution_status = 'open'
+  )
+ORDER BY outbox.sequence
 LIMIT ?
 `, formatTimestamp(time.Now().UTC()), limit)
 	if err != nil {
@@ -433,6 +439,20 @@ func (r *Repository) CountOutbox(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count sync outbox: %w", err)
 	}
 	return count, nil
+}
+
+func (r *Repository) HasOpenConflict(ctx context.Context, entityKey string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `
+SELECT EXISTS(
+	SELECT 1
+	FROM sync_conflicts
+	WHERE entity_key = ? AND resolution_status = 'open'
+)
+`, entityKey).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check open sync conflict: %w", err)
+	}
+	return exists, nil
 }
 
 func (r *Repository) DeleteOutbox(ctx context.Context, sequence int64) error {

@@ -182,6 +182,8 @@ import { useNoteExportStore } from './stores/useNoteExportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
 import { logOperationFailure } from './utils/operationLogger'
+import { recordOperationFailure } from './api/diagnostics'
+import { setOperationFailureReporter } from './utils/operationLogger'
 import { createContentLockAutoLock } from './utils/contentLockAutoLock'
 import { createContentLockBeforeLock } from './utils/contentLockBeforeLock'
 import { prepareBackupOperation } from './services/backupLifecycle'
@@ -206,9 +208,18 @@ type NoteEditorExpose = {
   toggleEditMode: () => void
   flushEditorInput: () => boolean
   setContentLockPending: (pending: boolean) => boolean
+  isAttachmentExportBusy: () => boolean
 }
 
 const noteStore = useNoteStore()
+
+setOperationFailureReporter(({ stage, errorCategory }) => recordOperationFailure({
+  operation: 'frontend',
+  phase: 'runtime',
+  role: 'frontend',
+  stage,
+  errorCategory,
+}))
 const appStore = useAppStore()
 const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
@@ -245,7 +256,7 @@ storageSpaceStore.setSwitchLifecycle(
       || aiWritingStore.isBusy
     ),
     isImportBusy: () => noteImportStore.isBusy,
-    isExportBusy: () => noteExportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
@@ -269,7 +280,7 @@ storageLocationStore.setLifecycle(
       || aiWritingStore.isBusy
     ),
     isImportBusy: () => noteImportStore.isBusy,
-    isExportBusy: () => noteExportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
     flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
@@ -293,7 +304,7 @@ backupStore.setLifecycle(
       || aiWritingStore.isBusy
     ),
     isImportBusy: () => noteImportStore.isBusy,
-    isExportBusy: () => noteExportStore.isBusy,
+    isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     isContentLockBusy: () => contentLockStore.isBusy,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),

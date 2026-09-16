@@ -32,6 +32,7 @@ Markdownだけを送受信すると、SQLiteに保存しているタイトル、
 | notebook | `notebooks` | ID、親ID、名前、アイコン、作成・更新日時 | ノートブック1件 |
 | tag | `tags` | ID、表示名、正規化名、作成・更新日時 | タグ1件 |
 | note-tags | `note_tags` | ノートごとのtag ID集合 | ノート1件の関係集合 |
+| attachment | `notes/attachments/<noteID>` | 添付manifestメタデータとPNG／JPEG本体 | 添付1件 |
 | FTS5検索索引 | `note_search` | 対象外 | 受信後に再構築 |
 | ノートリンク索引 | `note_links` | 対象外 | 受信後に再抽出 |
 | `notes.revision` | SQLite | 対象外 | 受信適用時にローカルCASとして生成 |
@@ -39,7 +40,7 @@ Markdownだけを送受信すると、SQLiteに保存しているタイトル、
 
 ノートブック削除など複数entityに影響する操作は、削除コマンドとして送らない。ローカル操作後の結果として変更された全entityをひとつの同期change setへ記録する。これにより、子ノートブックの削除、ノートのtrash・切り離しなどの副作用を別端末でも同じ結果として適用できる。
 
-同期対象に添付ファイル、履歴、関連メモ、AI生成結果、v1のAI設定（プロバイダーID・モデルID・credential reference）、AI資格情報は含めない。AI関連の同期境界はPhase 4のD-04を正とし、これらは別Phaseまたは別設計とする。
+添付はmanifestメタデータと本体を1つのattachment object payloadへまとめて同期する。添付本体はローカルoutboxへ再構成でき、受信時は本文を先に適用してから容量・MIME・寸法・SHA-256を検証する。保護された本文・添付を平文同期へ混ぜないため、本文ロックが設定された保存空間の同期は拒否する。履歴、関連メモ、AI生成結果、v1のAI設定（プロバイダーID・モデルID・credential reference）、AI資格情報は対象外とする。AI関連の同期境界はPhase 4のD-04を正とする。
 
 ## 3. リモート配置と識別子
 
@@ -224,7 +225,7 @@ wails build
 ## 11. 対象外
 
 - Google Drive、OneDrive、Dropbox、Git Repositoryとの同期
-- 添付ファイル、履歴、関連メモ、AI生成結果、v1のAI設定・AI資格情報の同期
+- 保護された保存空間の暗号化同期、履歴、関連メモ、AI生成結果、v1のAI設定・AI資格情報の同期
 - SQLite DB、FTS5内部shadow table、ノートリンク索引の直接同期
 - 自動merge、無確認の強制上書き、無期限のバックグラウンドretry
 - WebDAV認証情報を平文ログ、`localStorage`、SQLite、`.env`へ保存すること

@@ -448,6 +448,10 @@ func isEntityID(value string) bool {
 }
 
 func entityIDFromKey(entityType string, entityKey string) (string, bool) {
+	if entityType == noteSyncEntityAttachment {
+		noteID, _, ok := attachmentIDsFromKey(entityKey)
+		return noteID, ok
+	}
 	switch entityType {
 	case "note", "notebook", "tag", "note-tags":
 	default:
@@ -459,6 +463,20 @@ func entityIDFromKey(entityType string, entityKey string) (string, bool) {
 	}
 	id := strings.TrimPrefix(entityKey, prefix)
 	return id, isEntityID(id)
+}
+
+const noteSyncEntityAttachment = "attachment"
+
+func attachmentIDsFromKey(entityKey string) (string, string, bool) {
+	prefix := noteSyncEntityAttachment + ":"
+	if !strings.HasPrefix(entityKey, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(entityKey, prefix), ":")
+	if len(parts) != 2 || !isEntityID(parts[0]) || !isEntityID(parts[1]) {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func ensureObjectHash(document []byte, expected string) error {

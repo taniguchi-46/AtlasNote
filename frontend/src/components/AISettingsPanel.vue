@@ -1,6 +1,32 @@
 <template>
   <section class="ai-settings" data-settings-anchor="ai" tabindex="-1">
     <h3>AI</h3>
+    <div class="settings-section">
+      <h4>AIワークスペース</h4>
+      <div class="setting-group" data-settings-anchor="ai.workspace-placement" tabindex="-1">
+        <label for="ai-workspace-placement">表示位置</label>
+        <select id="ai-workspace-placement" v-model="settingsStore.aiWorkspacePlacement">
+          <option value="right">右側</option>
+          <option value="bottom">下側</option>
+        </select>
+        <p class="field-help">
+          位置を選択し、表示中の境界をドラッグして幅または高さを調整します。
+        </p>
+      </div>
+      <div class="setting-group" data-settings-anchor="ai.agent-permission" tabindex="-1">
+        <label for="ai-agent-edit-permission">Agentの本文編集権限</label>
+        <select id="ai-agent-edit-permission" v-model="settingsStore.aiAgentEditPermission">
+          <option value="review-required">提案のみ（適用前に確認）</option>
+          <option value="auto-update">更新可能（生成後に自動適用）</option>
+        </select>
+        <p class="field-help">
+          更新可能では、送信した通常のAgent依頼が返した本文1箇所の差分を自動保存します。変更前後はAIタイムラインで確認できます。
+        </p>
+      </div>
+      <p class="field-help">
+        AIワークスペースの配置とAgent本文編集権限の変更はすぐに反映されます。「適用」は保存してこの画面を維持し、「OK」は保存して画面を閉じます。
+      </p>
+    </div>
     <div class="ai-availability-setting" data-settings-anchor="ai.enabled" tabindex="-1">
       <label class="ai-switch-label" for="ai-enabled">
         <input
@@ -23,7 +49,7 @@
       API Key は表示・再表示されず、この画面を閉じると入力中の値も破棄されます。認証確認・モデル取得・生成確認では保存されません。
     </p>
 
-    <div class="setting-group">
+    <div class="setting-group" data-settings-anchor="ai.provider" tabindex="-1">
       <label for="ai-provider">プロバイダー</label>
       <select id="ai-provider" v-model="aiStore.draft.providerID" :disabled="aiStore.isSettingsBusy">
         <option value="openrouter">OpenRouter</option>
@@ -34,7 +60,7 @@
       </p>
     </div>
 
-    <div class="setting-group wide-field">
+    <div class="setting-group wide-field" data-settings-anchor="ai.api-key" tabindex="-1">
       <label for="ai-api-key">API Key</label>
       <input
         id="ai-api-key"
@@ -67,7 +93,7 @@
       {{ aiStore.modelsError.message }}
     </p>
 
-    <div class="setting-group wide-field">
+    <div class="setting-group wide-field" data-settings-anchor="ai.model" tabindex="-1">
       <label for="ai-model">要約モデル</label>
       <select
         id="ai-model"
@@ -120,7 +146,7 @@
       {{ aiStore.settingsError.message }}
     </p>
 
-    <section class="credential-actions" aria-label="AI 認証情報の削除">
+    <section class="credential-actions" data-settings-anchor="ai.credentials" tabindex="-1" aria-label="AI 認証情報の削除">
       <p class="field-help">削除操作は確認後に実行します。認証情報の状態はキーを表示せずに示します。</p>
       <button
         type="button"

@@ -1,8 +1,10 @@
 # プロジェクト状況
 
-最終更新: 2026-09-12
+最終更新: 2026-09-13
 
 追加再レビューのHigh（先行ロックの表示更新完了が後続ロックの入力ガードを解除する競合）を修正。StoreがAppの表示更新までawaitし、同じbusy区間のfinallyで取得元エディタのガードを解放する。通知watcherを廃止し、単一／batchの表示更新保留中の後続拒否、保存・API・表示更新失敗、空結果、重複、アンマウント後始末を回帰確認した。content-locks／Mermaid／保存・削除・serializerの関連回帰と型チェック込みFrontend buildが成功。実OS IME／Wails画面での手動受け入れは未確認。
+
+Priority 1の添付画像保存を実装。PNG／JPEGのサイズ・寸法・画素数・実デコード検証、管理参照、Rich／Markdown貼り付け、autosave／履歴接続、再試行可能な失敗保持、暗号化・ロック再エンコード、再帰バックアップ、ネイティブZIP保存を追加した。追加レビューのHigh 1〜5として、暗号化格納上限の共有計算、添付保存と同期・バックアップ排他、保護添付ZIPの明示確認・再検証、画像貼り付け操作世代ガード、既存WebDAV形式への添付manifest／本体／outbox／復旧接続を実装した。保護された保存空間の同期拒否は維持する。Go添付・暗号化・同期往復・バックアップ・App統合テスト、Frontend typecheckを確認済み。Wails実画面の手動貼り付けと複数OSでのネイティブダイアログ確認は未確認（2026-09-13）。
 
 Pre-Phase 5の将来機能として、削除操作を下書きflush→同一ノートlane操作の順に統一し、保存／CAS失敗時の本文・draft保全、対象単位のアクティブノート終了、部分成功、選択応答の世代保護を追加した。Mermaid Rich表示は図のみ＋編集ダイアログへ更新し、fenced/raw/HTML貼り付け、動的フェンスコピー、Tiptap Undo・autosave接続を追加した。コンテンツロック中のIME入力はdraft保存からロック後の表示反映まで保護する。`test:note-delete`、`test:serializer`、Mermaid renderer／NodeView／実Tiptap統合テスト、Frontend typecheck、Frontend production buildが成功している。Wails画面全体の手動受け入れは今回未確認。
 
@@ -156,7 +158,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 ## 保留事項
 
 - デスクトップアプリの対応OSと配布方式
-- 添付ファイルの保存設計
+- 保護された保存空間の暗号化WebDAV同期形式（現行WebDAVでは保護本文・保護添付の同期を拒否）
 - Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
 - Phase 4 v1〜v3は承認・実装・自動検証・利用者による手動UI受け入れを完了し、2026-08-24付でPhase 4完了とする。今後はAI関連実装またはUI変更時の回帰確認として管理する。チャット履歴の永続化はv3の確定保存仕様に従う。正本は [`scope-phese4.md`](development/scopes/scope-phese4.md)、[`scope-phese4-v2.md`](development/scopes/scope-phese4-v2.md)、[`scope-phese4-v3.md`](development/scopes/scope-phese4-v3.md)、各TODO、`docs/development/ai-integration.md` とする。
 
@@ -185,6 +187,7 @@ npm --prefix frontend run test:mermaid
 npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger
+node frontend/scripts/test-attachments.mjs
 npm --prefix frontend run test:note-links
 npm --prefix frontend run test:ai-chat
 npm --prefix frontend run test:ai-workspace

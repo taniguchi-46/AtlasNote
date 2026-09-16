@@ -26,10 +26,33 @@
         問題が起きた場合は、設定の「保存場所」にある診断情報をコピーし、指定された窓口へ共有してください。APIキー、本文、プロンプトなどの秘密情報は共有しないでください。
       </p>
     </section>
+
+    <section class="help-section help-diagnostics" data-settings-anchor="help.diagnostics" tabindex="-1">
+      <h4>診断ログ</h4>
+      <p>操作の失敗を調査するための安全なメタデータです。本文、タイトル、APIキー、プロンプト、ツール履歴、ファイルパスは含めません。</p>
+      <div class="help-diagnostics-actions">
+        <button type="button" :disabled="diagnosticsLoading" @click="loadDiagnostics">
+          {{ diagnosticsLoading ? '取得中…' : '診断ログを更新' }}
+        </button>
+        <button type="button" :disabled="!diagnosticReport || diagnosticsLoading" @click="copyDiagnostics">
+          コピー
+        </button>
+        <button type="button" :disabled="diagnosticsLoading" @click="saveDiagnosticsFile">
+          ファイルに保存
+        </button>
+      </div>
+      <p v-if="diagnosticsMessage" class="help-diagnostics-message" role="status">{{ diagnosticsMessage }}</p>
+      <pre v-if="diagnosticReport" class="help-diagnostics-report" aria-label="診断ログ">{{ diagnosticReport }}</pre>
+      <p v-else class="help-diagnostics-empty">記録された診断ログはありません。</p>
+    </section>
   </section>
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { ClipboardSetText } from '../../wailsjs/runtime/runtime'
+import { getDiagnostics, saveDiagnostics } from '../api/diagnostics'
+
 type HelpSection = {
   id: string
   title: string
@@ -95,6 +118,60 @@ const helpSections: readonly HelpSection[] = [
     ],
   },
 ]
+
+const diagnosticReport = ref('')
+const diagnosticsLoading = ref(false)
+const diagnosticsMessage = ref('')
+
+async function loadDiagnostics() {
+  if (diagnosticsLoading.value) return
+  diagnosticsLoading.value = true
+  diagnosticsMessage.value = ''
+  try {
+    const result = await getDiagnostics()
+    diagnosticReport.value = result.report ?? ''
+    if (!diagnosticReport.value) diagnosticsMessage.value = '診断ログはありません。'
+  } catch {
+    diagnosticReport.value = ''
+    diagnosticsMessage.value = '診断ログを取得できませんでした。'
+  } finally {
+    diagnosticsLoading.value = false
+  }
+}
+
+async function copyDiagnostics() {
+  if (!diagnosticReport.value) await loadDiagnostics()
+  if (!diagnosticReport.value) return
+  try {
+    const copied = await ClipboardSetText(diagnosticReport.value)
+    diagnosticsMessage.value = copied
+      ? '診断ログをクリップボードにコピーしました。'
+      : '診断ログのコピーに失敗しました。'
+  } catch {
+    diagnosticsMessage.value = '診断ログのコピーに失敗しました。'
+  }
+}
+
+async function saveDiagnosticsFile() {
+  diagnosticsMessage.value = ''
+  diagnosticsLoading.value = true
+  try {
+    const result = await saveDiagnostics()
+    diagnosticsMessage.value = result.saved
+      ? `診断ログを保存しました: ${result.savedName ?? 'ファイル'}`
+      : result.cancelled
+        ? '診断ログの保存をキャンセルしました。'
+        : result.error ?? '診断ログを保存できませんでした。'
+  } catch {
+    diagnosticsMessage.value = '診断ログを保存できませんでした。'
+  } finally {
+    diagnosticsLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void loadDiagnostics()
+})
 </script>
 
 <style scoped>
@@ -149,5 +226,45 @@ const helpSections: readonly HelpSection[] = [
 .help-contact {
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+
+.help-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.help-diagnostics-actions button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.help-diagnostics-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.help-diagnostics-message,
+.help-diagnostics-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.help-diagnostics-report {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

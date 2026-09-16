@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"atlasnote/internal/contentformat"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -21,7 +22,7 @@ const (
 	kdfIterations  = 3
 	kdfParallelism = 1
 	kdfKeyLength   = 32
-	contentPrefix  = "ATLASNOTE-LOCK-1\n"
+	contentPrefix  = contentformat.ProtectedContentPrefix
 )
 
 type contentEnvelope struct {
@@ -123,12 +124,20 @@ func deriveContentKey(noteID string, materials []keyMaterial) ([]byte, error) {
 }
 
 func encryptContent(noteID string, materials []keyMaterial, plain []byte) ([]byte, error) {
+	return encryptScopedContent(noteID, "atlasnote-content/v1:"+noteID, materials, plain)
+}
+
+func encryptAttachment(noteID string, attachmentID string, materials []keyMaterial, plain []byte) ([]byte, error) {
+	return encryptScopedContent(noteID, "atlasnote-content-attachment/v1:"+noteID+":"+attachmentID, materials, plain)
+}
+
+func encryptScopedContent(noteID string, additionalData string, materials []keyMaterial, plain []byte) ([]byte, error) {
 	key, err := deriveContentKey(noteID, materials)
 	if err != nil {
 		return nil, err
 	}
 	defer zeroBytes(key)
-	nonce, ciphertext, err := seal(key, []byte("atlasnote-content/v1:"+noteID), plain)
+	nonce, ciphertext, err := seal(key, []byte(additionalData), plain)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +151,14 @@ func encryptContent(noteID string, materials []keyMaterial, plain []byte) ([]byt
 }
 
 func decryptContent(noteID string, materials []keyMaterial, encoded []byte) ([]byte, error) {
+	return decryptScopedContent(noteID, "atlasnote-content/v1:"+noteID, materials, encoded)
+}
+
+func decryptAttachment(noteID string, attachmentID string, materials []keyMaterial, encoded []byte) ([]byte, error) {
+	return decryptScopedContent(noteID, "atlasnote-content-attachment/v1:"+noteID+":"+attachmentID, materials, encoded)
+}
+
+func decryptScopedContent(noteID string, additionalData string, materials []keyMaterial, encoded []byte) ([]byte, error) {
 	if !isEncryptedContent(encoded) {
 		return nil, ErrIntegrity
 	}
@@ -162,7 +179,7 @@ func decryptContent(noteID string, materials []keyMaterial, encoded []byte) ([]b
 		return nil, err
 	}
 	defer zeroBytes(key)
-	plain, err := open(key, []byte("atlasnote-content/v1:"+noteID), nonce, ciphertext)
+	plain, err := open(key, []byte(additionalData), nonce, ciphertext)
 	if err != nil {
 		return nil, ErrIntegrity
 	}

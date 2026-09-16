@@ -36,14 +36,18 @@ func (a *App) GetStorageLocationDiagnostics() StorageLocationDiagnosticsResult {
 	events := a.diagnostics.Events()
 	result := StorageLocationDiagnosticsResult{Events: make([]StorageLocationDiagnostic, 0, len(events)), Report: diagnostics.FormatReport(events)}
 	for _, event := range events {
-		result.Events = append(result.Events, StorageLocationDiagnostic{
-			Schema: event.Schema, Timestamp: event.Timestamp, DiagnosticID: event.DiagnosticID,
-			Operation: event.Operation, Phase: event.Phase, Role: event.Role, Code: event.Code,
-			Reason: event.Reason, Stage: event.Stage, OSErrorNumber: event.OSErrorNumber,
-			OS: event.OS, Arch: event.Arch, AppVersion: event.AppVersion, VCSRevision: event.VCSRevision,
-		})
+		result.Events = append(result.Events, storageLocationDiagnosticFromEvent(event))
 	}
 	return result
+}
+
+func storageLocationDiagnosticFromEvent(event diagnostics.Event) StorageLocationDiagnostic {
+	return StorageLocationDiagnostic{
+		Schema: event.Schema, Timestamp: event.Timestamp, DiagnosticID: event.DiagnosticID,
+		Operation: event.Operation, Phase: event.Phase, Role: event.Role, Code: event.Code,
+		Reason: event.Reason, Stage: event.Stage, OSErrorNumber: event.OSErrorNumber,
+		OS: event.OS, Arch: event.Arch, AppVersion: event.AppVersion, VCSRevision: event.VCSRevision,
+	}
 }
 
 func (a *App) storageLocationErrorFor(err error, operation string, phase string, role string, onceKey string) *StorageLocationError {

@@ -6,7 +6,7 @@
     </p>
 
     <div class="backup-toggle-card">
-      <label class="backup-toggle-label">
+      <label class="backup-toggle-label" data-settings-anchor="backups.automatic" tabindex="-1">
         <input v-model="backupStore.automaticEnabled" type="checkbox" />
         <span>
           <strong>自動バックアップを有効にする</strong>

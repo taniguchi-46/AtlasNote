@@ -23,8 +23,12 @@ try {
   const settingsSearch = await import(pathToFileURL(outFile).href)
 
   assert.deepEqual(settingsSearch.searchSettings(''), [])
-  assert.equal(settingsSearch.searchSettings('フォント').some((item) => item.id === 'editor.font-family'), true)
-  assert.equal(settingsSearch.searchSettings('AI オフ').some((item) => item.id === 'ai.enabled'), true)
+  const fontResults = settingsSearch.searchSettings('フォント')
+  assert.equal(fontResults.some((item) => item.id === 'editor.font-family'), true)
+  assert.equal(fontResults.every((item) => typeof item.matchedText === 'string' && item.matchedText.length > 0), true)
+  const aiResults = settingsSearch.searchSettings('AI オフ')
+  assert.equal(aiResults.some((item) => item.id === 'ai.enabled'), true)
+  assert.match(aiResults.find((item) => item.id === 'ai.enabled').matchedText, /AI機能を有効にする|AIワークスペース|AI操作/)
   assert.equal(settingsSearch.searchSettings('問い合わせ').some((item) => item.id === 'help.contact'), true)
   assert.equal(settingsSearch.searchSettings('Windows 削除').some((item) => item.id === 'general.uninstall'), true)
   assert.equal(settingsSearch.searchSettings('存在しない設定').length, 0)
@@ -37,6 +41,8 @@ try {
   assert.match(settingsSource, /selectSearchResult\(item\)/)
   assert.match(settingsSource, /openInstalledApps/)
   assert.match(settingsSource, /<HelpSettingsPanel \/>/)
+  assert.match(settingsSource, /<small v-if="item\.matchedText">一致: \{\{ item\.matchedText \}\}<\/small>/)
+  assert.match(settingsSource, /closest\('details'\)/)
   assert.match(helpSource, /問い合わせ窓口は未設定・未公開です。/)
   assert.match(helpSource, /data-settings-anchor="help.contact"/)
 

@@ -51,7 +51,7 @@
       </button>
     </div>
 
-    <section class="location-diagnostics" aria-labelledby="location-diagnostics-title">
+    <section class="location-diagnostics" data-settings-anchor="storage-locations.diagnostics" tabindex="-1" aria-labelledby="location-diagnostics-title">
       <div class="location-diagnostics-heading">
         <div>
           <h4 id="location-diagnostics-title">診断情報</h4>
