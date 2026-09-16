@@ -182,6 +182,20 @@
                   step="0.1"
                 />
               </div>
+              <div class="setting-group" data-settings-anchor="editor.auto-save" tabindex="-1">
+                <label class="setting-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="settingsStore.autoSaveEnabled"
+                    @change="handleAutoSaveChange"
+                  />
+                  自動保存を有効にする
+                </label>
+                <p class="setting-help">
+                  OFFでも入力内容は下書きとして保持されます。Ctrl+S、終了、保存場所の切替などの明示操作では保存します。
+                </p>
+                <p v-if="autoSaveMessage" class="setting-help" role="status">{{ autoSaveMessage }}</p>
+              </div>
             </div>
             </section>
           </TabsContent>
@@ -244,6 +258,7 @@ import {
   VisuallyHidden,
 } from 'reka-ui'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
@@ -264,6 +279,7 @@ import ShortcutSettingsPanel from './ShortcutSettingsPanel.vue'
 import HelpSettingsPanel from './HelpSettingsPanel.vue'
 
 const settingsStore = useSettingsStore()
+const noteStore = useNoteStore()
 const appStore = useAppStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
@@ -288,6 +304,7 @@ const fontSizeOptions = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26]
 const settingsQuery = ref('')
 const settingsSearchInput = ref<HTMLInputElement | null>(null)
 const uninstallMessage = ref('')
+const autoSaveMessage = ref('')
 const searchResults = computed(() => searchSettings(settingsQuery.value))
 
 watch(
@@ -297,6 +314,7 @@ watch(
     activeTab.value = settingsStore.requestedTab
     settingsQuery.value = ''
     uninstallMessage.value = ''
+    autoSaveMessage.value = ''
     syncStore.resetDraft()
     aiStore.resetDraft()
     void storageSpaceStore.initialize()
@@ -371,6 +389,36 @@ function handleOpenChange(open: boolean) {
   aiStore.discardDraft()
   settingsQuery.value = ''
   settingsStore.closeSettings()
+}
+
+async function handleAutoSaveChange(event: Event) {
+  const input = event.currentTarget as HTMLInputElement
+  const nextEnabled = input.checked
+  autoSaveMessage.value = ''
+  if (nextEnabled === settingsStore.autoSaveEnabled) return
+
+  if (!nextEnabled && noteStore.hasDirtyNotes) {
+    const shouldSave = window.confirm(
+      '未保存の変更を保存してから自動保存をOFFにしますか？\n「いいえ」の後に破棄を選べます。',
+    )
+    if (shouldSave) {
+      const saved = await noteStore.flushAllDirtyNotes()
+      if (!saved) {
+        input.checked = true
+        autoSaveMessage.value = '未保存の変更を保存できないため、自動保存をOFFにしませんでした。'
+        return
+      }
+    } else {
+      const shouldDiscard = window.confirm('未保存の変更を破棄して、自動保存をOFFにしますか？')
+      if (!shouldDiscard) {
+        input.checked = true
+        return
+      }
+      noteStore.discardAllDrafts()
+    }
+  }
+
+  settingsStore.setAutoSaveEnabled(nextEnabled)
 }
 </script>
 
@@ -595,6 +643,17 @@ function handleOpenChange(open: boolean) {
   font-weight: 500;
   margin-bottom: 8px;
   color: var(--text-primary);
+}
+
+.setting-group label.setting-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.setting-checkbox input {
+  accent-color: var(--brand-primary);
 }
 
 .setting-help {

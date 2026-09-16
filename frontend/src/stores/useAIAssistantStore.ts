@@ -24,6 +24,8 @@ import { useAIStore } from './useAIStore'
 
 export type AssistantState = 'idle' | 'loading-context' | 'generating' | 'canceling' | 'success' | 'error' | 'stale' | 'orphaned'
 
+export type AIHistorySaveState = 'idle' | 'saving' | 'saved' | 'failed'
+
 export type AssistantError = {
   code: string
   message: string
@@ -145,11 +147,14 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const contextSources = ref<AIContextSource[]>([])
   const histories = ref<AIHistory[]>([])
   const selectedHistoryID = ref<string | null>(null)
+  const historySaveState = ref<AIHistorySaveState>('idle')
+  const historySaveError = ref<AssistantError | null>(null)
   const activeRequest = ref<AssistantRequest | null>(null)
   const isBusy = computed(() => (
     state.value === 'loading-context'
     || state.value === 'generating'
     || state.value === 'canceling'
+    || historySaveState.value === 'saving'
   ))
   let preparedContextKey = ''
   let latestContextRequest = 0
@@ -159,6 +164,9 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   let clearedBackendRequestID: string | null = null
   let staleBackendRequestID: string | null = null
   let completedMessages: AIConversationMessage[] = []
+  let conversationGeneration = 0
+  let lastHistoryTitle = ''
+  let historySavePromise: Promise<boolean> | null = null
 
   function clearError() {
     error.value = null
@@ -234,6 +242,8 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     }
     if (requestID !== latestGenerationRequest) return false
     clearError()
+    historySaveState.value = 'idle'
+    historySaveError.value = null
     state.value = 'generating'
     proposal.value = null
     const backendRequestID = createAssistantRequestID()
@@ -281,7 +291,6 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       completedMessages = [...response.result.messages]
       sources.value = mergeConversationSources(sources.value, response.result.sources)
       contextSources.value = response.result.sources
-      selectedHistoryID.value = null
       activeRequest.value = request
       state.value = 'success'
       return true
@@ -343,37 +352,86 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     }
   }
 
-  async function save(title: string) {
+  function defaultHistoryTitle() {
+    const firstQuestion = messages.value.find((message) => message.role === 'user')?.content.trim()
+    const firstLine = firstQuestion?.split(/\r?\n/, 1)[0]?.trim()
+    if (!firstLine) return `AI会話 ${new Date().toLocaleString('ja-JP')}`
+    return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
+  }
+
+  async function persistHistory(title: string, showError: boolean) {
     const request = activeRequest.value
     const setting = aiStore.configuredSetting
-    if (!request || !setting || state.value !== 'success' || messages.value.length < 2) {
-      error.value = createError('AI_INPUT_INVALID')
-      state.value = 'error'
+    const normalizedTitle = title.trim() || defaultHistoryTitle()
+    const saveGeneration = conversationGeneration
+    const savedHistoryID = selectedHistoryID.value
+    lastHistoryTitle = normalizedTitle
+    historySaveState.value = 'saving'
+    historySaveError.value = null
+
+    if (!request || !setting || state.value !== 'success' || messages.value.length < 2 || messages.value.length % 2 !== 0) {
+      const saveError = createError('AI_INPUT_INVALID')
+      historySaveState.value = 'failed'
+      historySaveError.value = saveError
+      if (showError) error.value = saveError
       return false
     }
     try {
       const response = await saveAIHistory({
         kind: request.kind,
-        title: title.trim(),
+        title: normalizedTitle,
         providerID: request.providerID,
         modelID: request.modelID,
-        messages: messages.value,
+        messages: [...messages.value],
         sources: sourceRefs(sources.value),
-        ...(selectedHistoryID.value ? { id: selectedHistoryID.value } : {}),
+        ...(savedHistoryID ? { id: savedHistoryID } : {}),
       })
+      if (saveGeneration !== conversationGeneration) {
+        if (!savedHistoryID && response.history?.id) {
+          void deleteAIHistory(response.history.id).catch(() => undefined)
+        }
+        return false
+      }
       if (response.error || !response.history) {
-        error.value = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
-        state.value = 'error'
+        const saveError = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
+        historySaveState.value = 'failed'
+        historySaveError.value = saveError
+        if (showError) error.value = saveError
         return false
       }
       selectedHistoryID.value = response.history.id
+      historySaveState.value = 'saved'
       await refreshHistories()
       return true
     } catch (cause) {
-      error.value = errorFromUnknown(cause)
-      state.value = 'error'
+      if (saveGeneration !== conversationGeneration) return false
+      const saveError = errorFromUnknown(cause)
+      historySaveState.value = 'failed'
+      historySaveError.value = saveError
+      if (showError) error.value = saveError
       return false
     }
+  }
+
+  async function saveCompletedConversation(title = defaultHistoryTitle()) {
+    if (historySavePromise) return historySavePromise
+    const pending = persistHistory(title, false)
+    historySavePromise = pending
+    try {
+      return await pending
+    } finally {
+      if (historySavePromise === pending) historySavePromise = null
+    }
+  }
+
+  async function retryHistorySave() {
+    if (historySaveState.value !== 'failed') return false
+    return saveCompletedConversation(lastHistoryTitle || defaultHistoryTitle())
+  }
+
+  async function save(title: string) {
+    if (historySavePromise) await historySavePromise
+    return persistHistory(title, true)
   }
 
   async function loadHistory(id: string) {
@@ -381,6 +439,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       error.value = createError('AI_BUSY')
       return false
     }
+    const loadGeneration = ++conversationGeneration
     latestContextRequest += 1
     latestGenerationRequest += 1
     clearError()
@@ -391,6 +450,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         state.value = 'error'
         return false
       }
+      if (loadGeneration !== conversationGeneration) return false
       const history = response.history
       messages.value = history.messages ?? []
       citations.value = []
@@ -405,6 +465,9 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
       }))
       contextSources.value = sources.value
       selectedHistoryID.value = history.id
+      historySaveState.value = 'saved'
+      historySaveError.value = null
+      lastHistoryTitle = history.title
       activeRequest.value = {
         providerID: history.providerID,
         modelID: history.modelID,
@@ -432,6 +495,10 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   async function removeHistory(id: string) {
+    if (isBusy.value) {
+      error.value = createError('AI_BUSY')
+      return false
+    }
     try {
       const response = await deleteAIHistory(id)
       if (response.error || !response.deleted) {
@@ -448,6 +515,10 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   async function removeAllHistories() {
+    if (isBusy.value) {
+      error.value = createError('AI_BUSY')
+      return false
+    }
     try {
       const response = await deleteAllAIHistories()
       if (response.error || !response.deleted) {
@@ -464,6 +535,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   }
 
   function clearConversation() {
+    conversationGeneration += 1
     const requestID = activeBackendRequestID
     if (requestID) {
       clearedBackendRequestID = requestID
@@ -482,6 +554,9 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     contextSources.value = []
     activeRequest.value = null
     selectedHistoryID.value = null
+    historySaveState.value = 'idle'
+    historySaveError.value = null
+    lastHistoryTitle = ''
     preparedContextKey = ''
     completedMessages = []
   }
@@ -514,12 +589,16 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     contextSources,
     histories,
     selectedHistoryID,
+    historySaveState,
+    historySaveError,
     isBusy,
     refreshHistories,
     previewContext,
     ask,
     cancel,
     save,
+    saveCompletedConversation,
+    retryHistorySave,
     loadHistory,
     removeHistory,
     removeAllHistories,

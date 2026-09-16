@@ -107,7 +107,7 @@
       </button>
     </div>
 
-    <p class="ai-v3-privacy">質問・応答は自動保存されません。必要なものだけ保存アイコンを押してください。保存データはこの端末のSQLiteだけに置かれ、WebDAV同期されません。</p>
+    <p class="ai-v3-privacy">完了した質問・応答はこの端末のAI履歴へ自動保存されます。保存データはこの端末のSQLiteだけに置かれ、WebDAV同期されません。</p>
 
     <div v-if="assistantStore.contextSources.length > 0" class="ai-v3-context">
       <strong>今回の参照資料（{{ assistantStore.contextSources.length }}件）</strong>
@@ -124,6 +124,12 @@
 
     <p v-if="assistantStore.error" class="ai-v3-error" role="alert">
       {{ assistantStore.error.message }}
+    </p>
+    <p v-if="assistantStore.historySaveState === 'failed'" class="ai-v3-warning" role="status">
+      AI履歴を保存できませんでした。{{ assistantStore.historySaveError?.message ?? '' }}
+      <button type="button" :disabled="assistantStore.isBusy" @click="retryHistorySave">
+        履歴保存を再試行
+      </button>
     </p>
     <p v-if="assistantStore.state === 'stale' || assistantStore.state === 'orphaned'" class="ai-v3-warning" role="status">
         {{ assistantStore.state === 'orphaned'
@@ -304,7 +310,7 @@ async function confirmAndAsk(agentEditPermission: AIAgentEditPermission = 'revie
       : '\nAgent変更提案: 開いているノート本文に対する差分を1件だけ生成します。保存・適用は行わず、回答後に内容を確認して明示的に適用します。'
     : ''
   if (!window.confirm(
-    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}${agentProposalSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n質問・応答は自動保存されません。`,
+    `次の内容をAIへ送信します。\n\nプロバイダー: ${setting.providerID}\nモデル: ${setting.modelID}\nモード: ${props.chatMode === 'agent' ? 'Agent' : 'Ask'}\nローカル追加検索: ${localSearchSummary}${webSearchSummary}${agentProposalSummary}\n本文送信範囲: 各ノート最大16 KiB、合計48 KiBまで\n参照資料:\n${sourceSummary}\n\n完了した質問・応答はこの端末のAI履歴へ自動保存されます。`,
   )) return false
   if (!settingsStore.aiEnabled) return false
 
@@ -335,6 +341,10 @@ async function submitPrompt(
 async function saveHistory() {
   const title = historyTitle.value.trim() || `${kind.value === 'qa' ? '質問応答' : 'ブレインストーミング'} ${new Date().toLocaleString('ja-JP')}`
   if (await assistantStore.save(title)) historyTitle.value = title
+}
+
+async function retryHistorySave() {
+  await assistantStore.retryHistorySave()
 }
 
 async function openHistory(id: string) {

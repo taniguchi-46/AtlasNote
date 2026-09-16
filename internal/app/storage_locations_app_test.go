@@ -123,6 +123,64 @@ func TestDefaultStorageLocationSetupRestartsAndCreatesNotebook(t *testing.T) {
 	}
 }
 
+func TestNewStorageAreaCreatesUserGuideOnlyOnce(t *testing.T) {
+	defaultRoot := filepath.Join(t.TempDir(), "default")
+	configFile := filepath.Join(defaultRoot, "storage-locations.json")
+	t.Setenv("ATLAS_NOTE_DATA_DIR", "")
+	t.Setenv("ATLAS_NOTE_DEFAULT_DATA_ROOT", defaultRoot)
+	t.Setenv("ATLAS_NOTE_STORAGE_LOCATIONS_FILE", configFile)
+
+	setup := NewApp()
+	setup.startup(t.Context())
+	if status := setup.GetStartupStatus(); status.Phase != StartupPhaseSetupRequired || status.Ready {
+		t.Fatalf("initial setup status = %#v", status)
+	}
+	if applied := setup.ApplyStorageLocations(); applied.Error != nil || !applied.RestartRequired {
+		t.Fatalf("apply default locations = %#v", applied)
+	}
+	setup.shutdown(t.Context())
+
+	first := NewWithUserGuide("test", "利用ガイド本文")
+	first.startup(t.Context())
+	status := first.GetStartupStatus()
+	if !status.Ready || status.Phase != StartupPhaseReady {
+		first.shutdown(t.Context())
+		t.Fatalf("first guide startup status = %#v", status)
+	}
+	notes, err := first.ListNotes()
+	if err != nil || len(notes) != 1 || notes[0].Title != userGuideTitle {
+		first.shutdown(t.Context())
+		t.Fatalf("first guide notes = %#v, %v", notes, err)
+	}
+	guide, err := first.GetNote(notes[0].ID)
+	if err != nil || guide.Content != "利用ガイド本文" {
+		first.shutdown(t.Context())
+		t.Fatalf("first guide = %#v, %v", guide, err)
+	}
+	updatedContent := "利用者が編集した本文"
+	expectedRevision := guide.Revision
+	updated, err := first.UpdateNote(guide.ID, note.UpdateInput{
+		Content: &updatedContent, ExpectedRevision: &expectedRevision,
+	})
+	if err != nil || updated.Note == nil || updated.Conflict != nil {
+		first.shutdown(t.Context())
+		t.Fatalf("update guide = %#v, %v", updated, err)
+	}
+	first.shutdown(t.Context())
+
+	reopened := NewWithUserGuide("test", "新しい本文に置換されてはいけない")
+	reopened.startup(t.Context())
+	defer reopened.shutdown(t.Context())
+	notes, err = reopened.ListNotes()
+	if err != nil || len(notes) != 1 || notes[0].Title != userGuideTitle {
+		t.Fatalf("reopened guide notes = %#v, %v", notes, err)
+	}
+	guide, err = reopened.GetNote(notes[0].ID)
+	if err != nil || guide.Content != updatedContent {
+		t.Fatalf("reopened guide = %#v, %v", guide, err)
+	}
+}
+
 func TestInvalidSavedStorageLocationEntersRecoveryWithoutChangingOldRoot(t *testing.T) {
 	configFile := filepath.Join(t.TempDir(), "bootstrap", "storage-locations.json")
 	oldRoot := t.TempDir()

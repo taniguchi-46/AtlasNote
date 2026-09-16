@@ -371,6 +371,16 @@
           <MinusIcon :size="15" />
         </button>
 
+        <button
+          class="format-btn"
+          type="button"
+          title="Mermaid図を挿入"
+          aria-label="Mermaid図を挿入"
+          @click="insertMermaidDiagram"
+        >
+          <WorkflowIcon :size="15" />
+        </button>
+
         <NoteLinkPopover
           v-if="noteStore.activeNote"
           :note-id="noteStore.activeNote.id"
@@ -467,7 +477,13 @@
               <XIcon :size="13" aria-hidden="true" />
             </button>
           </div>
-          <EditorContent v-if="editMode === 'wysiwyg'" :editor="editor" class="prose-editor" />
+          <EditorContent
+            v-if="editMode === 'wysiwyg'"
+            :editor="editor"
+            class="prose-editor"
+            @dragover="handleEditorDragOver"
+            @drop="handleRichDrop"
+          />
           <div v-else class="markdown-editor-shell">
             <div
               v-if="markdownAgentHighlight"
@@ -494,6 +510,8 @@
               @compositionstart="handleMarkdownCompositionStart"
               @compositionend="handleMarkdownCompositionEnd"
               @paste="handleMarkdownPaste"
+              @dragover="handleEditorDragOver"
+              @drop="handleMarkdownDrop"
               @scroll="syncMarkdownHighlightLayer"
               @click="handleMarkdownClick"
               @keyup="updateMarkdownSelection"
@@ -524,7 +542,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { JSONContent } from '@tiptap/core'
+import { textblockTypeInputRule, type JSONContent } from '@tiptap/core'
 import {
   BoldIcon,
   CheckSquareIcon,
@@ -557,6 +575,7 @@ import {
   TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
+  WorkflowIcon,
   XIcon,
 } from '@lucide/vue'
 import {
@@ -572,7 +591,7 @@ import {
   DOMSerializer as ProseMirrorDOMSerializer,
   type Node as ProseMirrorNode,
 } from '@tiptap/pm/model'
-import { NodeSelection, Plugin, PluginKey, type Selection } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Selection } from '@tiptap/pm/state'
 import {
   history as createRichHistoryPlugin,
   redo as redoRichHistory,
@@ -686,6 +705,16 @@ const MermaidCodeBlock = CodeBlockLowlight.extend({
   },
   addNodeView() {
     return VueNodeViewRenderer(MermaidCodeBlockView)
+  },
+  addInputRules() {
+    return [
+      textblockTypeInputRule({
+        find: /^(?:```|~~~)mermaid[\s\n]$/i,
+        type: this.type,
+        getAttributes: () => ({ language: 'mermaid' }),
+      }),
+      ...(this.parent?.() ?? []),
+    ]
   },
 })
 
@@ -845,6 +874,10 @@ type MarkdownImagePasteContext = {
   end: number
   generation: number
 }
+type DroppedImageFile = {
+  file: File
+  mimeHint: 'image/png' | 'image/jpeg'
+}
 
 class StaleImagePasteError extends Error {
   constructor() {
@@ -854,6 +887,7 @@ class StaleImagePasteError extends Error {
 }
 
 const pendingImagePaste = ref<PendingImagePaste | null>(null)
+const handledDropEvents = new WeakSet<DragEvent>()
 let savedRichSelection: { from: number; to: number } | null = null
 let markdownHighlightResizeObserver: ResizeObserver | null = null
 let lastScrolledAgentHighlightKey = ''
@@ -989,6 +1023,11 @@ const editor: Editor = new Editor({
           })
         },
       })
+    },
+    handleDrop(_view, event): boolean {
+      if (!hasDroppedFiles(event)) return false
+      handleRichDrop(event)
+      return true
     },
     handleClick(_view, _pos, event) {
       const target = event.target
@@ -1126,6 +1165,26 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => noteStore.discardedDraftsVersion,
+  () => {
+    const note = noteStore.activeNote
+    if (!note || noteStore.getDraft(note.id)) return
+
+    invalidateImagePasteOperations()
+    localTitle.value = note.title
+    localMarkdown.value = note.content
+    resetMarkdownEditHistory(note.content)
+    isRichDirty.value = false
+    if (editMode.value === 'wysiwyg') {
+      if (!setEditorFromMarkdown(note.content)) editMode.value = 'markdown'
+    } else {
+      resetRichEditorToEmpty()
+    }
+    resetSaveFeedback()
+  },
 )
 
 watch(
@@ -1412,10 +1471,22 @@ function invalidateImagePasteOperations() {
   imagePasteGeneration += 1
 }
 
-function captureRichImagePasteContext(): RichImagePasteContext | null {
+function captureRichImagePasteContext(dropPosition?: number): RichImagePasteContext | null {
   const noteId = noteStore.activeNote?.id
   if (!noteId || isEditorInputLocked.value || editor.isDestroyed || editMode.value !== 'wysiwyg') {
     return null
+  }
+
+  if (typeof dropPosition === 'number') {
+    try {
+      const selection = TextSelection.near(editor.state.doc.resolve(dropPosition))
+      if (!editor.state.selection.eq(selection)) {
+        editor.view.dispatch(editor.state.tr.setSelection(selection))
+      }
+    } catch {
+      // Fall back to the current selection when the browser reports an
+      // unusable drop coordinate.
+    }
   }
 
   invalidateImagePasteOperations()
@@ -1462,6 +1533,166 @@ function isMarkdownImagePasteContextCurrent(context: MarkdownImagePasteContext) 
   const textarea = markdownTextarea.value
   if (!textarea) return false
   return textarea.selectionStart === context.start && textarea.selectionEnd === context.end
+}
+
+function getDroppedImageFiles(event: DragEvent): DroppedImageFile[] {
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  return files.flatMap((file) => {
+    if (file.type === 'image/png' || file.type === 'image/jpeg') {
+      return [{ file, mimeHint: file.type }]
+    }
+
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.png')) return [{ file, mimeHint: 'image/png' as const }]
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+      return [{ file, mimeHint: 'image/jpeg' as const }]
+    }
+    return []
+  })
+}
+
+function hasDroppedFiles(event: DragEvent) {
+  const dataTransfer = event.dataTransfer
+  if (!dataTransfer) return false
+  return Boolean(dataTransfer.files.length || Array.from(dataTransfer.types).includes('Files'))
+}
+
+function handleEditorDragOver(event: DragEvent) {
+  if (!hasDroppedFiles(event)) return
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = getDroppedImageFiles(event).length > 0 || event.dataTransfer.types.includes('Files')
+      ? 'copy'
+      : 'none'
+  }
+}
+
+function notifyUnsupportedDrop() {
+  imagePasteError.value = '添付できるファイルはPNGまたはJPEG画像です。'
+  notificationStore.notify(imagePasteError.value, {
+    kind: 'warning',
+    source: 'note-editor',
+    code: 'NOTE_EDITOR_DROP_UNSUPPORTED',
+  })
+}
+
+function handleRichDrop(event: DragEvent) {
+  if (!hasDroppedFiles(event)) return
+  if (handledDropEvents.has(event)) return
+  handledDropEvents.add(event)
+  event.preventDefault()
+  if (editMode.value !== 'wysiwyg') return
+
+  const files = getDroppedImageFiles(event)
+  if (files.length === 0) {
+    notifyUnsupportedDrop()
+    return
+  }
+  const dropPosition = editor.view.posAtCoords({
+    left: event.clientX,
+    top: event.clientY,
+  })?.pos
+  const context = captureRichImagePasteContext(dropPosition)
+  if (context) void insertDroppedImages(files, 'wysiwyg', context)
+}
+
+function handleMarkdownDrop(event: DragEvent) {
+  if (!hasDroppedFiles(event)) return
+  event.preventDefault()
+  if (editMode.value !== 'markdown') return
+
+  const files = getDroppedImageFiles(event)
+  if (files.length === 0) {
+    notifyUnsupportedDrop()
+    return
+  }
+  const context = captureMarkdownImagePasteContext()
+  if (context) void insertDroppedImages(files, 'markdown', context)
+}
+
+async function insertDroppedImages(
+  files: DroppedImageFile[],
+  mode: 'wysiwyg' | 'markdown',
+  context: RichImagePasteContext | MarkdownImagePasteContext,
+) {
+  const attachments: NoteAttachment[] = []
+  let pending: PendingImagePaste | null = null
+  let failedPending: PendingImagePaste | null = null
+  let failure: unknown = null
+
+  try {
+    for (const dropped of files) {
+      pending = null
+      pendingImagePaste.value = null
+      try {
+        const payload = await readClipboardImage(dropped.file, dropped.mimeHint)
+        pending = {
+          noteId: context.noteId,
+          payload,
+          attachment: null,
+        }
+        pendingImagePaste.value = pending
+        const attachment = await persistImageAttachment(pending)
+        pending.attachment = attachment
+        attachments.push(attachment)
+
+        const isCurrent = mode === 'wysiwyg'
+          ? isRichImagePasteContextCurrent(context as RichImagePasteContext)
+          : isMarkdownImagePasteContextCurrent(context as MarkdownImagePasteContext)
+        if (!isCurrent) throw new StaleImagePasteError()
+      } catch (error) {
+        if (error instanceof StaleImagePasteError) throw error
+        failedPending = pending
+        failure = error
+      }
+    }
+
+    const isCurrent = mode === 'wysiwyg'
+      ? isRichImagePasteContextCurrent(context as RichImagePasteContext)
+      : isMarkdownImagePasteContextCurrent(context as MarkdownImagePasteContext)
+    if (!isCurrent) throw new StaleImagePasteError()
+    if (attachments.length === 0) {
+      if (failure) throw failure
+      throw new Error('image-node-insert-failed')
+    }
+
+    if (mode === 'wysiwyg') {
+      const inserted = editor.chain().focus().insertContent(
+        attachments.map((attachment) => ({
+          type: 'image',
+          attrs: {
+            src: attachment.reference,
+            alt: attachment.name,
+            title: attachment.name,
+          },
+        })),
+      ).run()
+      if (!inserted) throw new Error('image-node-insert-failed')
+    } else {
+      const markdown = attachments.map((attachment) => {
+        const alt = attachment.name.replace(/[\[\]]/g, '_')
+        return `![${alt}](${attachment.reference})`
+      }).join('\n\n')
+      const replaced = replaceMarkdownRange(
+        (context as MarkdownImagePasteContext).start,
+        (context as MarkdownImagePasteContext).end,
+        markdown,
+        (context as MarkdownImagePasteContext).start + markdown.length,
+        (context as MarkdownImagePasteContext).start + markdown.length,
+        { guardEditorInput: true },
+      )
+      if (!replaced) throw new StaleImagePasteError()
+    }
+
+    if (failure) {
+      clearImagePasteState()
+      retainImagePasteFailure(failedPending, failure)
+    } else {
+      clearImagePasteState()
+    }
+  } catch (error) {
+    retainImagePasteFailure(pending, error)
+  }
 }
 
 async function persistImageAttachment(pending: PendingImagePaste) {
@@ -1872,10 +2103,24 @@ function flushEditorInput(): boolean {
   }
 }
 
+async function saveCurrentNote(): Promise<boolean> {
+  if (!noteStore.activeNote || isEditorInputLocked.value) return false
+
+  if (editMode.value === 'wysiwyg') {
+    if (!flushEditorInput()) return false
+  } else {
+    updateMarkdownSelection()
+    scheduleAutoSave(localMarkdown.value)
+  }
+
+  return noteStore.flushPendingDraft()
+}
+
 defineExpose({
   toggleAIWorkspace,
   toggleEditMode,
   flushEditorInput,
+  saveCurrentNote,
   setContentLockPending,
   isAttachmentExportBusy,
 })
@@ -2232,6 +2477,24 @@ function toggleHorizontalRule() {
   }
 
   insertMarkdownBlock('---')
+}
+
+const MERMAID_STARTER = 'flowchart TD\n  A[開始] --> B[終了]'
+
+function insertMermaidDiagram() {
+  if (editMode.value === 'markdown') {
+    insertMarkdownBlock(createMermaidFence(MERMAID_STARTER))
+    return
+  }
+
+  editor.chain().focus().insertContent([
+    {
+      type: 'codeBlock',
+      attrs: { language: 'mermaid' },
+      content: [{ type: 'text', text: MERMAID_STARTER }],
+    },
+    { type: 'paragraph' },
+  ]).run()
 }
 
 function rememberRichSelection() {
@@ -2630,8 +2893,8 @@ function applyMarkdownHistory(action: 'undo' | 'redo') {
 }
 
 function handleMarkdownInput(event: Event) {
-  invalidateImagePasteOperations()
   markdownLineBreakTracker.reset()
+  invalidateImagePasteOperations()
   const textarea = event.currentTarget as HTMLTextAreaElement
   const after = createMarkdownSnapshot(textarea.value, textarea)
   const pending = pendingMarkdownInput

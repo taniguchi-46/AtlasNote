@@ -1,6 +1,7 @@
 export type ShortcutActionId =
   | 'editor.undo'
   | 'editor.redo'
+  | 'note.save'
   | 'note.new'
   | 'search.focus'
   | 'settings.open'
@@ -71,6 +72,7 @@ const createBinding = (
 export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: 'editor.undo', label: '元に戻す', scope: 'editor', defaultBinding: createBinding('KeyZ', { ctrl: true }) },
   { id: 'editor.redo', label: 'やり直す', scope: 'editor', defaultBinding: createBinding('KeyY', { ctrl: true }) },
+  { id: 'note.save', label: 'ノートを保存', scope: 'app', defaultBinding: createBinding('KeyS', { ctrl: true }) },
   { id: 'note.new', label: '新しいノート', scope: 'app', defaultBinding: createBinding('KeyN', { ctrl: true }) },
   { id: 'search.focus', label: '検索欄へ移動', scope: 'app', defaultBinding: createBinding('KeyF', { ctrl: true }) },
   { id: 'settings.open', label: '設定を開く', scope: 'app', defaultBinding: createBinding('Comma', { ctrl: true }) },

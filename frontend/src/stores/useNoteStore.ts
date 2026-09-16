@@ -118,6 +118,7 @@ export const useNoteStore = defineStore('notes', () => {
   const error = ref<string | null>(null)
   const autoTitleNoteId = ref<string | null>(null)
   const drafts = ref<Record<string, NoteDraft>>({})
+  const discardedDraftsVersion = ref(0)
   const saveFeedbackVersion = ref(0)
   const lastSavedNoteId = ref<string | null>(null)
   const agentEditorHighlight = ref<AgentEditorHighlight | null>(null)
@@ -129,6 +130,7 @@ export const useNoteStore = defineStore('notes', () => {
   const noteOperations = createNoteOperationQueue()
   const notificationStore = useNotificationStore()
   const appStore = useAppStore()
+  const settingsStore = useSettingsStore()
   const errorContext = ref<NoteErrorContext | null>(null)
   const deletionPreparationCounts = ref<Record<string, number>>({})
   const deletionSelectionGenerations = new Map<string, number>()
@@ -558,6 +560,12 @@ export const useNoteStore = defineStore('notes', () => {
     },
   })
 
+  watch(
+    () => settingsStore.autoSaveEnabled,
+    (enabled) => autoSave.setEnabled(enabled),
+    { immediate: true },
+  )
+
   function scheduleDraft(noteId: string, title: string, content: string) {
     // ユーザーの入力ごとに毎回バックエンドAPI（DBおよびファイルシステム）へ保存リクエストを送ると、
     // 通信量やディスクI/Oが過剰になりパフォーマンスが低下する。
@@ -889,6 +897,7 @@ export const useNoteStore = defineStore('notes', () => {
   function discardAllDrafts() {
     autoSave.cancel()
     drafts.value = {}
+    discardedDraftsVersion.value += 1
   }
 
   async function saveNote(id: string, input: note.UpdateInput) {
@@ -1103,6 +1112,8 @@ export const useNoteStore = defineStore('notes', () => {
     drafts,
     activeDraft,
     hasDirtyNotes,
+    autoSaveEnabled: computed(() => settingsStore.autoSaveEnabled),
+    discardedDraftsVersion,
     saveFeedbackVersion,
     lastSavedNoteId,
     agentEditorHighlight,

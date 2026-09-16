@@ -128,6 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const editorFirstLineStyle = ref(
     readStringOption('atlas-editor-first-line-style', 'heading2', FIRST_LINE_STYLE_OPTIONS),
   )
+  const autoSaveEnabled = ref(readBooleanOption('atlas-auto-save-enabled', true))
   const editorLineLength = ref(readNumberInRange('atlas-editor-line-length', 760, 520, 1200))
   const editorLineHeight = ref(readNumberInRange('atlas-editor-line-height', 1.8, 1.2, 2.4))
   const editorParagraphSpacing = ref(readNumberInRange('atlas-editor-paragraph-spacing', 1, 0, 2))
@@ -204,6 +205,10 @@ export const useSettingsStore = defineStore('settings', () => {
     localStorage.setItem('atlas-editor-first-line-style', newFirstLineStyle)
   }, { immediate: true })
 
+  watch(autoSaveEnabled, (newEnabled) => {
+    localStorage.setItem('atlas-auto-save-enabled', String(newEnabled))
+  }, { immediate: true })
+
   watch(defaultNotebookIcon, (newDefaultNotebookIcon) => {
     const icon = isKnownNotebookIcon(newDefaultNotebookIcon)
       ? newDefaultNotebookIcon
@@ -248,6 +253,10 @@ export const useSettingsStore = defineStore('settings', () => {
       AI_WORKSPACE_BOTTOM_HEIGHT_MAX,
       Math.max(AI_WORKSPACE_BOTTOM_HEIGHT_MIN, Math.round(height)),
     )
+  }
+
+  function setAutoSaveEnabled(enabled: boolean) {
+    autoSaveEnabled.value = Boolean(enabled)
   }
 
   function setShortcutBinding(
@@ -304,6 +313,7 @@ export const useSettingsStore = defineStore('settings', () => {
     fontFamily,
     editorFontSize,
     editorFirstLineStyle,
+    autoSaveEnabled,
     editorLineLength,
     editorLineHeight,
     editorParagraphSpacing,
@@ -315,6 +325,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setNoteListWidth,
     setAIWorkspaceRightWidth,
     setAIWorkspaceBottomHeight,
+    setAutoSaveEnabled,
     setShortcutBinding,
     resetShortcutBinding,
     resetAllShortcutBindings,

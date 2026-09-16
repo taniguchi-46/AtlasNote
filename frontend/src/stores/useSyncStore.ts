@@ -45,6 +45,7 @@ type SyncRunOptions = {
   importRemote?: boolean
   forceRetry?: boolean
   suppressFailureNotification?: boolean
+  automatic?: boolean
 }
 
 function emptyDraft(): SyncSettingsDraft {
@@ -143,7 +144,7 @@ export const useSyncStore = defineStore('sync', () => {
   let retryAttempt = 0
   let retryOptions: SyncRunOptions = {}
   let retryPaused = false
-  let beforeSync: (() => Promise<unknown>) | null = null
+  let beforeSync: ((options?: SyncRunOptions) => Promise<boolean>) | null = null
 
   const notificationStore = useNotificationStore()
   const statusLabel = computed(() => statusLabels[status.value])
@@ -256,7 +257,10 @@ export const useSyncStore = defineStore('sync', () => {
     syncError.value = ''
     let saved = false
     try {
-      if (input.setupMode !== 'update' && beforeSync) await beforeSync()
+      if (input.setupMode !== 'update' && beforeSync) {
+        const ready = await beforeSync()
+        if (!ready) return null
+      }
       const result = await configureSync(input)
       applyStatus(result)
       saved = true
@@ -304,7 +308,13 @@ export const useSyncStore = defineStore('sync', () => {
     isBusy.value = true
     status.value = 'syncing'
     try {
-      if (beforeSync) await beforeSync()
+      if (beforeSync) {
+        const ready = await beforeSync(options)
+        if (!ready) {
+          status.value = statusResult.value?.connection ? 'pending' : 'disabled'
+          return null
+        }
+      }
       const result = await syncNow({
         initializeRemote: options.initializeRemote ?? false,
         importRemote: options.importRemote ?? false,
@@ -394,7 +404,10 @@ export const useSyncStore = defineStore('sync', () => {
     if (isBusy.value) return null
     isBusy.value = true
     try {
-      if (beforeSync) await beforeSync()
+      if (beforeSync) {
+        const ready = await beforeSync()
+        if (!ready) return null
+      }
       return await prepareSyncRecovery(action)
     } catch (error) {
       notificationStore.notify('同期復旧の事前確認に失敗しました', {
@@ -452,7 +465,7 @@ export const useSyncStore = defineStore('sync', () => {
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = setTimeout(() => {
       debounceTimer = null
-      void runSync()
+      void runSync({ automatic: true })
     }, 5000)
   }
 
@@ -461,7 +474,7 @@ export const useSyncStore = defineStore('sync', () => {
     pollTimer = null
     if (isSuspended.value || seconds <= 0) return
     pollTimer = setInterval(() => {
-      if (!isBusy.value) void runSync()
+      if (!isBusy.value) void runSync({ automatic: true })
     }, seconds * 1000)
   }
 
@@ -471,6 +484,7 @@ export const useSyncStore = defineStore('sync', () => {
       initializeRemote: options.initializeRemote ?? false,
       importRemote: options.importRemote ?? false,
       forceRetry: false,
+      automatic: options.automatic ?? false,
     }
     const delay = retryDelays[retryAttempt]
     retryAttempt += 1
@@ -534,7 +548,7 @@ export const useSyncStore = defineStore('sync', () => {
     beforeSync = null
   }
 
-  function setBeforeSync(callback: (() => Promise<unknown>) | null) {
+  function setBeforeSync(callback: ((options?: SyncRunOptions) => Promise<boolean>) | null) {
     beforeSync = callback
   }
 

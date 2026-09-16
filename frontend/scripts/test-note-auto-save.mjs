@@ -34,6 +34,7 @@ try {
   await testFlushTargetsOneNoteLane()
   await testFailedLaneWaitsForManualRetry()
   await testThrownSaveIsHandled()
+  await testEnablingAutoSaveReschedulesPendingDraft()
   console.log('note auto-save tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
@@ -358,6 +359,34 @@ async function testThrownSaveIsHandled() {
   assert.equal(await autoSave.flush('note-a'), false)
   assert.equal(failedCount, 1)
   assert.equal(await autoSave.flush('note-a'), false)
+}
+
+async function testEnablingAutoSaveReschedulesPendingDraft() {
+  const saves = []
+  const timers = fakeTimers()
+  const snapshot = { noteId: 'note-a', title: 'A', content: 'A', draftVersion: 1 }
+  const autoSave = createNoteAutoSave({
+    delayMs: 1000,
+    save: async (pendingSnapshot) => {
+      saves.push(pendingSnapshot)
+      return pendingSnapshot
+    },
+    shouldApply: () => true,
+    isCurrent: () => true,
+    applyResult: () => {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  })
+
+  autoSave.setEnabled(false)
+  autoSave.schedule(snapshot)
+  timers.run()
+  assert.deepEqual(saves, [])
+
+  autoSave.setEnabled(true)
+  timers.run()
+  assert.equal(await autoSave.flush('note-a'), true)
+  assert.deepEqual(saves, [snapshot])
 }
 
 function fakeTimers() {

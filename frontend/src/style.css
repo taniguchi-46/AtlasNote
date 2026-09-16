@@ -1087,6 +1087,38 @@ body.is-pane-resizing * {
   font-size: 12px;
 }
 
+.ProseMirror .mermaid-code-block-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ProseMirror .mermaid-code-block-actions button,
+.ProseMirror .mermaid-code-block-actions input[type='button'] {
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ProseMirror .mermaid-code-block-actions button:hover:not(:disabled),
+.ProseMirror .mermaid-code-block-actions button:focus-visible,
+.ProseMirror .mermaid-code-block-actions input[type='button']:hover:not(:disabled),
+.ProseMirror .mermaid-code-block-actions input[type='button']:focus-visible {
+  border-color: var(--brand-primary);
+}
+
+.ProseMirror .mermaid-code-block-actions button:disabled,
+.ProseMirror .mermaid-code-block-actions input[type='button']:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .ProseMirror .mermaid-code-block-edit {
   min-height: 28px;
   padding: 0 9px;
@@ -1117,6 +1149,11 @@ body.is-pane-resizing * {
   margin: 0 auto;
   border-radius: 4px;
   background: var(--bg-editor);
+}
+
+.ProseMirror .mermaid-code-block-viewport {
+  max-width: 100%;
+  overflow: auto;
 }
 
 .ProseMirror .mermaid-code-block-status,

@@ -4,7 +4,7 @@
       <strong>履歴・成果物</strong>
     </div>
     <p class="ai-records-description">
-      保存した会話・成果物と、生成成功時に自動保存する要約を表示します。AI司書の一時結果は保存されません。
+      完了した会話と要約、保存した成果物を表示します。会話と要約は生成成功時にこの端末へ自動保存されます。AI司書の一時結果は保存されません。
     </p>
 
     <p v-if="assistantStore.error" class="ai-records-error" role="alert">
@@ -15,6 +15,12 @@
     </p>
     <p v-if="aiStore.summaryHistoryError" class="ai-records-error" role="alert">
       {{ aiStore.summaryHistoryError.message }}
+    </p>
+    <p v-if="assistantStore.historySaveState === 'failed'" class="ai-records-error" role="status">
+      AI履歴の自動保存に失敗しました。{{ assistantStore.historySaveError?.message ?? '' }}
+      <button type="button" :disabled="assistantStore.isBusy" @click="assistantStore.retryHistorySave()">
+        履歴保存を再試行
+      </button>
     </p>
 
     <section v-if="aiStore.summaryHistory.length > 0" class="ai-records-section" aria-label="保存済み要約">
@@ -48,6 +54,7 @@
           type="button"
           title="保存済み履歴をすべて削除"
           aria-label="保存済み履歴をすべて削除"
+          :disabled="assistantStore.isBusy"
           @click="removeAllHistories"
         >
           <Trash2Icon :size="15" aria-hidden="true" />
@@ -64,6 +71,7 @@
             type="button"
             title="履歴を削除"
             aria-label="履歴を削除"
+            :disabled="assistantStore.isBusy"
             @click="removeHistory(history.id)"
           >
             <Trash2Icon :size="15" aria-hidden="true" />
@@ -198,6 +206,20 @@ function statusLabel(status: AIRecordStatus) {
 .ai-records-error {
   margin: 0;
   color: var(--color-danger, #b42318);
+}
+
+.ai-records-error button {
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ai-records-error button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .ai-records-section {

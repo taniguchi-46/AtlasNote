@@ -4,16 +4,18 @@ Atlas Noteの仕様、設計、進捗、作業チェックの入口です。フ�
 
 ## まず読む
 
-1. [プロジェクト状況](status.md)で現在の実装状態・残作業・受け入れ状況を確認する。
-2. [開発ロードマップ](development/scopes/scope.md)でPhaseごとの対象範囲を確認する。
-3. [開発・設計資料の索引](development/README.md)または[TODO索引](todo/README.md)から、対象機能の正本へ進む。
-4. 実装時は[アーキテクチャ](rules/architecture.md)、[実装規約](rules/conventions.md)、[AI共通ガイド](rules/ai.md)を確認する。
+1. [利用者向けガイド](user-readme.md)で基本操作、FAQ、問い合わせ案内を確認する。
+2. [プロジェクト状況](status.md)で現在の実装状態・残作業・受け入れ状況を確認する。
+3. [開発ロードマップ](development/scopes/scope.md)でPhaseごとの対象範囲を確認する。
+4. [開発・設計資料の索引](development/README.md)または[TODO索引](todo/README.md)から、対象機能の正本へ進む。
+5. 実装時は[アーキテクチャ](rules/architecture.md)、[実装規約](rules/conventions.md)、[AI共通ガイド](rules/ai.md)を確認する。
 
 ## ディレクトリ案内
 
 | 場所 | 役割 | 入口 |
 | --- | --- | --- |
 | `docs/status.md` | 現在の実装・検証状態、残課題、保留事項 | [プロジェクト状況](status.md) |
+| `docs/user-readme.md` | 利用者向けの基本操作、FAQ、問い合わせ案内 | [利用ガイド](user-readme.md) |
 | `docs/development/` | 機能設計、同期・データ契約、開発ガイド | [開発・設計資料](development/README.md) |
 | `docs/development/scopes/` | Phaseごとの要求範囲・対象外・完了条件 | [scope索引](development/scopes/README.md) |
 | `docs/todo/` | 実装・検証・受け入れのチェックリスト | [TODO索引](todo/README.md) |

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -115,5 +116,38 @@ VALUES ('note-1', 'Note 1', 'note-1.md', 0, 0, 0, 2, '2026-07-28T00:00:00Z', '20
 	}
 	if preservedSummary, err := repository.getArtifact(t.Context(), "summary-1"); err != nil || preservedSummary.Kind != ArtifactKindSummary {
 		t.Fatalf("summary after writing delete = %#v, %v", preservedSummary, err)
+	}
+}
+
+func TestRepositoryListsAllAIHistories(t *testing.T) {
+	db, err := database.Open(t.Context(), filepath.Join(t.TempDir(), "atlasnote.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	repository := NewRepository(db)
+	for index := 0; index < 101; index++ {
+		if _, err := repository.saveHistory(t.Context(), SaveAIHistoryInput{
+			ID:         fmt.Sprintf("history-%03d", index),
+			Kind:       AssistantKindQA,
+			Title:      fmt.Sprintf("History %03d", index),
+			ProviderID: ProviderOpenRouter,
+			ModelID:    "openai/test",
+			Messages: []AIConversationMessage{
+				{Role: "user", Content: "Question"},
+				{Role: "assistant", Content: "Answer"},
+			},
+		}); err != nil {
+			t.Fatalf("save history %d: %v", index, err)
+		}
+	}
+
+	histories, err := repository.listHistories(t.Context())
+	if err != nil {
+		t.Fatalf("list histories: %v", err)
+	}
+	if len(histories) != 101 {
+		t.Fatalf("listed histories = %d, want 101", len(histories))
 	}
 }

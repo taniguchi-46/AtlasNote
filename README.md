@@ -54,6 +54,7 @@ Codex のプロジェクト指示の入口は `AGENTS.md` です。計画・実�
 
 ## 開発環境セットアップとガイド
 
+- 利用者向けの操作説明・FAQ・問い合わせ案内: [Atlas Note 利用ガイド](docs/user-readme.md)
 - [ドキュメント入口](docs/README.md)
 - 初めて開発に参加する方向けの全体像・解説: [初心者向け開発ガイド](docs/development/beginner-guide.md)
 - 詳細な開発環境のセットアップと起動方法: [開発環境セットアップ](docs/development/setup.md)

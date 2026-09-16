@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"atlasnote/internal/database"
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/diagnostics"
+	"atlasnote/internal/fileatomic"
 	"atlasnote/internal/note"
 	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
@@ -59,6 +61,8 @@ type App struct {
 	recoveryReport              note.RecoveryReport
 	syncRecoveryBackup          string
 	backupRestoreSafetyBackupID string
+	userGuideContent            string
+	newStorageArea              bool
 	statusMu                    sync.RWMutex
 	closeMu                     sync.Mutex
 	closeRequested              bool
@@ -85,6 +89,9 @@ var (
 	errRestartUnavailable     = errors.New("automatic restart is unavailable")
 	errRestartDevelopmentMode = errors.New("automatic restart is unavailable in Wails development mode")
 	errProtectedContentSync   = errors.New("本文ロックが設定されている保存空間では同期できません。保護済み本文を同期する暗号化形式は未対応です")
+	userGuideTitle            = "Atlas Note 利用ガイド"
+	userGuidePendingMarker    = ".atlasnote-user-guide.pending"
+	userGuideCreatedMarker    = ".atlasnote-user-guide.created"
 )
 
 func backupStartupError(err error) error {
@@ -146,7 +153,11 @@ func NewApp() *App {
 }
 
 func newApp(productVersion string) *App {
-	app := &App{diagnostics: newAppDiagnosticsStore(productVersion)}
+	return newAppWithUserGuide(productVersion, "")
+}
+
+func newAppWithUserGuide(productVersion string, userGuideContent string) *App {
+	app := &App{diagnostics: newAppDiagnosticsStore(productVersion), userGuideContent: userGuideContent}
 	app.initialize(context.Background())
 	return app
 }
@@ -154,6 +165,12 @@ func newApp(productVersion string) *App {
 // New creates the Wails application service.
 func New(productVersion string) *App {
 	return newApp(productVersion)
+}
+
+// NewWithUserGuide creates the application with the bundled user guide used
+// for the first note in a newly initialized storage area.
+func NewWithUserGuide(productVersion string, userGuideContent string) *App {
+	return newAppWithUserGuide(productVersion, userGuideContent)
 }
 
 // SetRecordApplicationUser configures optional application-user registration
@@ -1159,7 +1176,13 @@ func (a *App) CreateStorageSpace(input notespace.CreateInput) notespace.Mutation
 	if a.spaceRegistry == nil {
 		return notespace.MutationResult{Error: notespace.APIErrorFrom(notespace.ErrUnavailable)}
 	}
-	space, activeSpaceID, err := a.spaceRegistry.Create(a.operationContext(), input.Name, a.prepareStorageSpace)
+	prepare := func(ctx context.Context, dataDir string) error {
+		if err := a.prepareStorageSpace(ctx, dataDir); err != nil {
+			return err
+		}
+		return markUserGuidePending(dataDir)
+	}
+	space, activeSpaceID, err := a.spaceRegistry.Create(a.operationContext(), input.Name, prepare)
 	if err != nil {
 		return notespace.MutationResult{Error: notespace.APIErrorFrom(err)}
 	}
@@ -1681,6 +1704,7 @@ func (a *App) initialize(ctx context.Context) {
 	a.activeSpace = activeSpace
 	a.dataDir = activeDataDir
 	paths := config.PathsForDataDir(activeDataDir)
+	a.newStorageArea = userGuideNeedsCreation(paths)
 	a.notesDir = paths.NotesDir
 	dataLock, err := datalock.Acquire(paths.LockPath)
 	if err != nil {
@@ -1728,6 +1752,23 @@ func (a *App) initialize(ctx context.Context) {
 		return
 	}
 	a.syncRecoveryBackup = backupPath
+	if backupApplyResult.RestoreSafetyBackupID != "" || backupPath != "" {
+		// A restore or sync recovery can populate an otherwise empty storage
+		// area. Treat the restored contents as existing data and persist that
+		// decision so a pending first-run marker cannot create a guide later.
+		a.newStorageArea = false
+		if strings.TrimSpace(a.userGuideContent) != "" {
+			if err := markUserGuideCreated(paths.DataDir); err != nil {
+				_ = a.dataLock.Release()
+				a.dataLock = nil
+				a.statusMu.Lock()
+				a.startupErr = fmt.Errorf("record restored storage state: %w", err)
+				a.startupPhase = StartupPhaseError
+				a.statusMu.Unlock()
+				return
+			}
+		}
+	}
 
 	db, err := database.Open(ctx, paths.DatabasePath)
 	if err != nil {
@@ -1953,8 +1994,80 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 	}
 	a.backupService = backupService
 	a.recoveryReport = recoveryReport
+	if a.newStorageArea && strings.TrimSpace(a.userGuideContent) != "" {
+		if err := ensureFirstRunUserGuide(ctx, service, paths, a.userGuideContent); err != nil {
+			return fmt.Errorf("create first-run user guide: %w", err)
+		}
+		a.newStorageArea = false
+	}
 	a.startupLocked = false
 	return nil
+}
+
+func userGuideNeedsCreation(paths config.Paths) bool {
+	if hasUserGuideMarker(filepath.Join(paths.DataDir, userGuideCreatedMarker)) {
+		return false
+	}
+	if hasUserGuideMarker(filepath.Join(paths.DataDir, userGuidePendingMarker)) {
+		return true
+	}
+	return isNewStorageArea(paths)
+}
+
+func hasUserGuideMarker(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func isNewStorageArea(paths config.Paths) bool {
+	if _, err := os.Stat(paths.DatabasePath); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if _, err := os.Stat(paths.NotesDir); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
+}
+
+func markUserGuidePending(dataDir string) error {
+	return writeUserGuideMarker(filepath.Join(dataDir, userGuidePendingMarker), []byte("pending\n"))
+}
+
+func markUserGuideCreated(dataDir string) error {
+	if err := writeUserGuideMarker(filepath.Join(dataDir, userGuideCreatedMarker), []byte("created\n")); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dataDir, userGuidePendingMarker)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func writeUserGuideMarker(path string, content []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("user guide marker is not a regular file: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return fileatomic.Write(path, content)
+}
+
+func ensureFirstRunUserGuide(ctx context.Context, service *note.Service, paths config.Paths, content string) error {
+	items, err := service.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Title == userGuideTitle {
+			return markUserGuideCreated(paths.DataDir)
+		}
+	}
+	if _, err := service.Create(ctx, note.CreateInput{Title: userGuideTitle, Content: content}); err != nil {
+		return err
+	}
+	return markUserGuideCreated(paths.DataDir)
 }
 
 func (a *App) ToggleAlwaysOnTop(b bool) {

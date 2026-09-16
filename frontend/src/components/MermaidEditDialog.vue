@@ -12,6 +12,18 @@
           Mermaidのソースを編集し、プレビューを確認できます。保存すると本文の図へ反映します。
         </DialogDescription>
 
+        <div class="mermaid-edit-dialog-actions">
+          <button type="button" @click="close">閉じる</button>
+          <button
+            type="button"
+            class="mermaid-edit-dialog-save"
+            :disabled="isComposing || isInputLocked"
+            @click="save"
+          >
+            保存
+          </button>
+        </div>
+
         <div class="mermaid-edit-dialog-grid">
           <label class="mermaid-edit-dialog-label" for="mermaid-edit-source">
             ソース
@@ -30,26 +42,21 @@
           </label>
 
           <div class="mermaid-edit-dialog-preview" aria-live="polite" :aria-busy="status === 'loading'">
+            <div class="mermaid-edit-dialog-zoom" role="toolbar" aria-label="Mermaid図の表示サイズ">
+              <button type="button" title="縮小" aria-label="Mermaid図を縮小" :disabled="zoom <= 0.5" @click="adjustZoom(-0.1)">−</button>
+              <button type="button" title="表示倍率をリセット" @click="resetZoom">{{ Math.round(zoom * 100) }}%</button>
+              <button type="button" title="拡大" aria-label="Mermaid図を拡大" :disabled="zoom >= 2" @click="adjustZoom(0.1)">＋</button>
+            </div>
             <p v-if="status === 'loading'" class="mermaid-edit-dialog-status" role="status">
               Mermaid図を描画しています…
             </p>
             <p v-else-if="status === 'error'" class="mermaid-edit-dialog-error" role="alert">
               {{ errorMessage }}
             </p>
-            <img v-else-if="svgUrl" :src="svgUrl" alt="Mermaid図のプレビュー" class="mermaid-edit-dialog-image" />
+            <div v-else-if="svgUrl" class="mermaid-edit-dialog-image-viewport">
+              <img :src="svgUrl" alt="Mermaid図のプレビュー" class="mermaid-edit-dialog-image" :style="previewImageStyle" />
+            </div>
           </div>
-        </div>
-
-        <div class="mermaid-edit-dialog-actions">
-          <button type="button" @click="close">閉じる</button>
-          <button
-            type="button"
-            class="mermaid-edit-dialog-save"
-            :disabled="isComposing || isInputLocked"
-            @click="save"
-          >
-            保存
-          </button>
         </div>
       </DialogContent>
     </DialogPortal>
@@ -86,6 +93,10 @@ const sourceInput = ref<HTMLTextAreaElement | null>(null)
 const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorMessage = ref('')
 const svgUrl = ref<string | null>(null)
+const zoom = ref(1)
+const previewImageStyle = computed(() => zoom.value === 1
+  ? undefined
+  : { width: (zoom.value * 100) + '%', maxWidth: 'none' })
 const isComposing = ref(false)
 const localInputLocked = ref(false)
 const isInputLocked = computed(() => props.inputLocked === true || localInputLocked.value)
@@ -106,6 +117,14 @@ function revokeObjectUrl() {
 function clearPreview() {
   revokeObjectUrl()
   svgUrl.value = null
+}
+
+function adjustZoom(delta: number) {
+  zoom.value = Math.min(2, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+}
+
+function resetZoom() {
+  zoom.value = 1
 }
 
 function schedulePreview() {
@@ -229,6 +248,7 @@ watch(
     if (!open) commitSourceFromInput()
     if (open) {
       setLocalSource(props.source)
+      resetZoom()
       await nextTick()
       if (props.open) sourceInput.value?.focus()
     }
@@ -350,6 +370,7 @@ onBeforeUnmount(() => {
 
 .mermaid-edit-dialog-grid {
   display: grid;
+  order: 1;
   grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
   gap: 14px;
   min-height: 360px;
@@ -388,14 +409,51 @@ onBeforeUnmount(() => {
 }
 
 .mermaid-edit-dialog-preview {
-  display: grid;
+  display: flex;
   min-height: 320px;
-  place-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 12px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-input);
+}
+
+.mermaid-edit-dialog-zoom {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.mermaid-edit-dialog-zoom button {
+  min-width: 34px;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.mermaid-edit-dialog-zoom button:hover:not(:disabled),
+.mermaid-edit-dialog-zoom button:focus-visible {
+  border-color: var(--brand-primary);
+}
+
+.mermaid-edit-dialog-zoom button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mermaid-edit-dialog-image-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .mermaid-edit-dialog-image {
@@ -419,6 +477,7 @@ onBeforeUnmount(() => {
 
 .mermaid-edit-dialog-actions {
   display: flex;
+  order: 2;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;

@@ -109,8 +109,7 @@ SELECT history.id, history.kind, history.title, history.provider_id, history.mod
        %s, history.created_at, history.updated_at
 FROM ai_histories history
 ORDER BY history.updated_at DESC, history.id ASC
-LIMIT %d
-`, historyStatusExpression, aiRecordListLimit))
+`, historyStatusExpression))
 	if err != nil {
 		return nil, fmt.Errorf("list AI histories: %w", err)
 	}

@@ -43,6 +43,17 @@
         </div>
         <div class="ai-workspace-header-actions">
           <button
+            class="ai-workspace-new-chat-button"
+            type="button"
+            title="New Chat（新しいチャット）"
+            aria-label="New Chat（新しいチャット）"
+            :disabled="isAnyBusy"
+            @click="startNewChat"
+          >
+            <PlusIcon :size="14" aria-hidden="true" />
+            <span>新しいチャット</span>
+          </button>
+          <button
             class="ai-workspace-icon-button"
             type="button"
             title="AI設定を開く"
@@ -193,6 +204,25 @@
         >
           <AlertCircleIcon :size="14" aria-hidden="true" />
           <span>{{ assistantStateWarning }}</span>
+        </div>
+
+        <div
+          v-if="assistantStore.historySaveState === 'failed'"
+          class="ai-chat-state-warning is-history-save-failure"
+          role="status"
+        >
+          <AlertCircleIcon :size="14" aria-hidden="true" />
+          <span>
+            回答は表示されていますが、AI履歴を自動保存できませんでした。
+            {{ assistantStore.historySaveError?.message ?? '' }}
+          </span>
+          <button
+            type="button"
+            :disabled="isAnyBusy"
+            @click="retryHistorySave"
+          >
+            履歴保存を再試行
+          </button>
         </div>
 
         <div
@@ -1069,6 +1099,28 @@ function toggleRecords() {
   if (!recordsOpen.value) void nextTick(focusComposer)
 }
 
+async function startNewChat() {
+  if (isAnyBusy.value) return
+
+  if (assistantStore.historySaveState === 'failed') {
+    const shouldRetry = window.confirm(
+      '現在の会話はAI履歴へ保存できていません。保存を再試行してから新しいチャットを開始しますか？\n「キャンセル」で会話を保持します。',
+    )
+    if (shouldRetry) {
+      if (!await assistantStore.retryHistorySave()) return
+    } else if (!window.confirm('保存できていない現在の会話を破棄して、新しいチャットを開始しますか？')) {
+      return
+    }
+  }
+
+  closeContextPicker()
+  assistantStore.clearConversation()
+  chatStore.clearConversation()
+  clearResultAnchors()
+  recordsOpen.value = false
+  void nextTick(focusComposer)
+}
+
 function timelineRoleLabel(entry: AIChatTimelineEntry) {
   if (entry.role === 'user') return 'あなた'
   if (entry.role === 'tool') return entry.tool
@@ -1138,6 +1190,11 @@ function canSaveAssistantEntry(entry: AIChatTimelineEntry) {
 async function saveConversation() {
   const noteTitle = noteStore.activeNote?.title?.trim() || '無題のノート'
   await assistantStore.save(`${noteTitle}との会話 ${new Date().toLocaleString('ja-JP')}`)
+}
+
+async function retryHistorySave() {
+  if (isAnyBusy.value) return
+  await assistantStore.retryHistorySave()
 }
 
 async function applyAgentProposal(entryID: string) {
@@ -1492,6 +1549,9 @@ async function runComposerSubmission() {
           content: `OpenRouter Web Search（Exa）を${assistantStore.webSearchRequests}回実行して回答しました。`,
           status: 'success',
         })
+      }
+      if (assistantStore.messages.length >= 2) {
+        await assistantStore.saveCompletedConversation()
       }
     } else if (assistantStore.error) {
       recordAssistantTimelineFailure({
@@ -1853,6 +1913,32 @@ onBeforeUnmount(() => {
   opacity: .45;
 }
 
+.ai-workspace-new-chat-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ai-workspace-new-chat-button:hover,
+.ai-workspace-new-chat-button:focus-visible {
+  background: var(--bg-hover);
+  color: var(--brand-primary);
+}
+
+.ai-workspace-new-chat-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .ai-workspace-resizer {
   position: relative;
   z-index: 1;
@@ -2094,10 +2180,31 @@ onBeforeUnmount(() => {
 }
 
 .ai-chat-state-warning {
+  flex-wrap: wrap;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--color-warning, #8a5a00) 30%, var(--border));
   border-radius: 7px;
   color: var(--color-warning, #8a5a00);
+}
+
+.ai-chat-state-warning.is-history-save-failure {
+  color: var(--color-danger, #b42318);
+  border-color: color-mix(in srgb, var(--color-danger, #b42318) 30%, var(--border));
+}
+
+.ai-chat-state-warning button {
+  margin-left: auto;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ai-chat-state-warning button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .is-spinning {

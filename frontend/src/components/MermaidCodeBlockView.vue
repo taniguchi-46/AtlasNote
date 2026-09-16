@@ -15,14 +15,19 @@
     >
       <div class="mermaid-code-block-toolbar">
         <span>Mermaid図</span>
-        <button
-          type="button"
-          class="mermaid-code-block-edit"
-          :disabled="!canEdit"
-          @click.stop="openEditor"
-        >
-          編集
-        </button>
+        <div class="mermaid-code-block-actions" role="toolbar" aria-label="Mermaid図の表示サイズ">
+          <input type="button" title="縮小" aria-label="Mermaid図を縮小" value="−" :disabled="zoom <= 0.5" @click.stop="adjustZoom(-0.1)" />
+          <input type="button" title="表示倍率をリセット" :value="`${Math.round(zoom * 100)}%`" @click.stop="resetZoom" />
+          <input type="button" title="拡大" aria-label="Mermaid図を拡大" value="＋" :disabled="zoom >= 2" @click.stop="adjustZoom(0.1)" />
+          <button
+            type="button"
+            class="mermaid-code-block-edit"
+            :disabled="!canEdit"
+            @click.stop="openEditor"
+          >
+            編集
+          </button>
+        </div>
       </div>
       <p v-if="status === 'loading'" class="mermaid-code-block-status" role="status">
         Mermaid図を描画しています…
@@ -30,7 +35,9 @@
       <p v-else-if="status === 'error'" class="mermaid-code-block-error" role="alert">
         {{ errorMessage }}
       </p>
-      <img v-else-if="svgUrl" :src="svgUrl" :alt="altText" class="mermaid-code-block-image" />
+      <div v-else-if="svgUrl" class="mermaid-code-block-viewport">
+        <img :src="svgUrl" :alt="altText" class="mermaid-code-block-image" :style="previewImageStyle" />
+      </div>
     </div>
     <MermaidEditDialog
       ref="editDialogRef"
@@ -132,6 +139,10 @@ const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorMessage = ref('')
 const svgUrl = ref<string | null>(null)
 const altText = ref('Mermaid図')
+const zoom = ref(1)
+const previewImageStyle = computed(() => zoom.value === 1
+  ? undefined
+  : { width: `${zoom.value * 100}%`, maxWidth: 'none' })
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null
 let renderGeneration = 0
@@ -149,6 +160,14 @@ function clearPreview() {
   revokeObjectUrl()
   svgUrl.value = null
   altText.value = 'Mermaid図'
+}
+
+function adjustZoom(delta: number) {
+  zoom.value = Math.min(2, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+}
+
+function resetZoom() {
+  zoom.value = 1
 }
 
 function scheduleRender() {

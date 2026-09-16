@@ -16,6 +16,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed docs/user-readme.md
+var userReadme []byte
+
 //go:embed wails.json
 var wailsConfigBytes []byte
 
@@ -46,7 +49,7 @@ func main() {
 		return
 	}
 	defer applicationLock.Release()
-	app := backendapp.New(applicationProductVersion())
+	app := backendapp.NewWithUserGuide(applicationProductVersion(), string(userReadme))
 	app.SetRecordApplicationUser(appcleanup.RecordApplicationUser)
 
 	err = wails.Run(&options.App{

@@ -32,6 +32,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs))
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer))
   const lanes = new Map<string, SaveLane>()
+  let enabled = true
 
   function getOrCreateLane(noteId: string) {
     const existing = lanes.get(noteId)
@@ -86,11 +87,12 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     return true
   }
 
-  async function runPending(noteId: string) {
+  async function runPending(noteId: string, force = false) {
     const lane = lanes.get(noteId)
     if (!lane) return true
 
     cancelTimer(lane)
+    if (!force && !enabled) return true
     if (lane.blocked) return false
 
     const snapshot = lane.pendingSnapshot
@@ -148,7 +150,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     cancelTimer(lane)
     lane.pendingSnapshot = snapshot
     if (resume) lane.blocked = false
-    if (lane.blocked) return
+    if (!enabled || lane.blocked) return
 
     lane.timer = setTimer(() => {
       void runPending(snapshot.noteId)
@@ -175,7 +177,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
       }
 
       const result = lane.pendingSnapshot
-        ? await runPending(noteId)
+        ? await runPending(noteId, true)
         : await lane.inFlightSave!
       succeeded = result && succeeded
     }
@@ -211,10 +213,29 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     }
   }
 
+  function setEnabled(nextEnabled: boolean) {
+    enabled = nextEnabled
+    if (enabled) {
+      for (const [noteId, lane] of lanes.entries()) {
+        if (lane.blocked || lane.inFlightSave || !lane.pendingSnapshot) continue
+        cancelTimer(lane)
+        lane.timer = setTimer(() => {
+          void runPending(noteId)
+        }, options.delayMs)
+      }
+      return
+    }
+
+    // Keep pending snapshots so an explicit save can still flush the latest
+    // input. Only the debounce timers are stopped when automatic saving is off.
+    for (const lane of lanes.values()) cancelTimer(lane)
+  }
+
   return {
     schedule,
     retry,
     flush,
     cancel,
+    setEnabled,
   }
 }

@@ -207,6 +207,7 @@ type NoteEditorExpose = {
   toggleAIWorkspace: () => void
   toggleEditMode: () => void
   flushEditorInput: () => boolean
+  saveCurrentNote: () => Promise<boolean>
   setContentLockPending: (pending: boolean) => boolean
   isAttachmentExportBusy: () => boolean
 }
@@ -243,7 +244,10 @@ contentLockStore.setBeforeLock(createContentLockBeforeLock(
   () => noteStore.flushAllDirtyNotes(),
 ))
 contentLockStore.setAfterLock(handleLockedTargets)
-syncStore.setBeforeSync(() => noteStore.flushAllDirtyNotes())
+syncStore.setBeforeSync(async (options) => {
+  if (options?.automatic && noteStore.hasDirtyNotes) return false
+  return noteStore.flushAllDirtyNotes()
+})
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
      isBackupBusy: () => backupStore.isBusy || backupStore.status?.pendingRestore === true,
@@ -416,8 +420,25 @@ function handleOpenSettings() {
   settingsStore.openSettings()
 }
 
+async function handleManualNoteSave() {
+  if (!noteStore.activeNote || !noteEditorRef.value) return
+
+  const saved = await noteEditorRef.value.saveCurrentNote()
+  if (saved) return
+
+  notificationStore.notify('ノートを保存できませんでした。保存状態を確認して再試行してください。', {
+    kind: 'warning',
+    source: 'notes',
+    code: 'NOTE_MANUAL_SAVE_FAILED',
+  })
+}
+
 function executeGlobalShortcut(actionId: ShortcutActionId) {
   switch (actionId) {
+    case 'note.save':
+      if (!noteStore.activeNote || !noteEditorRef.value) return false
+      void handleManualNoteSave()
+      return true
     case 'note.new':
       void handleNewNote()
       return true
@@ -482,7 +503,7 @@ watch(
 
 watch(() => noteStore.saveFeedbackVersion, () => {
   if (searchStore.isActive) void searchStore.refresh()
-  syncStore.scheduleAutoSync()
+  if (!noteStore.hasDirtyNotes) syncStore.scheduleAutoSync()
 })
 
 watch(

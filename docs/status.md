@@ -2,6 +2,8 @@
 
 最終更新: 2026-09-16
 
+P2追加機能を実装。自動保存のON／OFFと`Ctrl+S`明示保存、Mermaid挿入・表示倍率調整・Markdown入力ルール、PNG／JPEGのノート本文へのドラッグ＆ドロップ、完了済みAI会話のローカル履歴保存・一覧・再開・新規チャット、ユーザー向け利用ガイドの初回ノート生成とHelp画面のFAQ／トラブルシューティング整理を追加した。入力・保存・同期・AI履歴の世代競合を保護し、履歴一覧は全件取得とした。Frontend typecheck／lint、関連Frontend回帰、`internal/ai`／`internal/app`のGoテストは成功。`go test ./... -count=1`は既存の`internal/appcleanup` Windows固有テストが環境のアクセス拒否で失敗しており、Wails実画面の手動受け入れは未確認。
+
 自動保存中の追加入力で先行保存の成功応答が破棄され、古いrevisionによって次の保存が自己競合する不具合を修正。成功した保存は下書き世代にかかわらず保存済みsnapshotへ反映し、最新下書きの消去・保存完了通知だけを世代一致で制御する。既存の実Storeテスト（`test:note-delete`）へ保存中入力、表示切替、最新下書き保持、本当の外部revision競合の回帰ケースを追加して成功を確認した。既存の競合コピーは変更しない。実Wails画面での連続入力による確認は未実施。
 
 追加再レビューのHigh（先行ロックの表示更新完了が後続ロックの入力ガードを解除する競合）を修正。StoreがAppの表示更新までawaitし、同じbusy区間のfinallyで取得元エディタのガードを解放する。通知watcherを廃止し、単一／batchの表示更新保留中の後続拒否、保存・API・表示更新失敗、空結果、重複、アンマウント後始末を回帰確認した。content-locks／Mermaid／保存・削除・serializerの関連回帰と型チェック込みFrontend buildが成功。実OS IME／Wails画面での手動受け入れは未確認。

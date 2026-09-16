@@ -47,12 +47,12 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
-| Attachments | `notes/attachments/<noteID>/manifest.json` と管理ID付き画像本体を保存する。本文には `atlasnote-attachment://` 参照だけを保持し、PNG／JPEGの検証、ロック時の暗号化、削除ジャーナル、ZIP出力を担当する。WebDAV同期は現形式では拒否する。詳細は`docs/development/attachments.md`を正とする |
+| Attachments | `notes/attachments/<noteID>/manifest.json` と管理ID付き画像本体を保存する。本文には `atlasnote-attachment://` 参照だけを保持し、PNG／JPEGの検証、ロック時の暗号化、削除ジャーナル、ZIP出力を担当する。WebDAVでは添付entityとして検証付き同期を行う。詳細は`docs/development/attachments.md`を正とする |
 | Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
 | Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
 | Backup / Restore | アクティブな保存空間のSQLite・Markdownを設定されたアーカイブルートへ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/backup-restore.md`を正とする |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、明示保存した会話・成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
+| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、完了済み会話、明示保存した成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 
 ## データ / 状態管理
 
@@ -62,7 +62,7 @@ Go Backend
 - 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- AIワークスペースの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、生成結果、API Keyは`localStorage`へ保持しない。tool traceは画面メモリだけに置き、SQLite、Markdown、WebDAVへ保存しない。
+- AIワークスペースの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法を縮小する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、API Keyは`localStorage`へ保持しない。完了済みのuser／assistant会話はアクティブ保存空間のSQLiteへ既定で履歴保存し、一覧・再開・同じ履歴IDの更新を行う。tool trace、認証情報、WebDAV同期は履歴保存対象外とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
@@ -93,7 +93,7 @@ Go Backend
 - ローカル保存キューと同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 - 空の同期先を検出した場合は既定ONのフェイルセーフでlocal正本へのremote適用を止める。再アップロードはheadの`If-Match`成功後だけlocal同期状態を更新する。
 - remote正本からの全再取得は実行中のDB・notesへ直接適用せず、`.sync-recovery/staging/`の別vaultでhash・payload・SQLite integrityを検証する。次回起動時にデータロック取得後かつSQLite open前に現行vaultを`.sync-recovery/backups/`へ退避してswapし、失敗時はrollbackする。
-- 添付を含む `notes/` のバックアップ・移行はディレクトリを再帰的にコピーする。現在のWebDAV形式は添付を表現しないため、添付存在時の設定確認・設定保存・同期実行を拒否し、旧クライアントが添付を無視する同期を許可しない。
+- 添付を含む `notes/` のバックアップ・移行はディレクトリを再帰的にコピーする。WebDAVでは添付manifestと本体をentityとして扱い、サイズ・MIME・寸法・hashを再検証する。添付を理解しない旧クライアントが参照だけを同期する経路は許可しない。
 
 ### バックアップと復元
 
@@ -148,7 +148,7 @@ Go Backend
 
 ### Mermaid図のRich表示
 
-- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして図のみを表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。ソース編集はNodeViewのダイアログで行う。
+- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして図のみを表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。ソース編集はNodeViewのダイアログで行う。NodeViewとダイアログの表示倍率は表示専用で、Markdown・SQLite・同期へ保存しない。
 - MarkdownモードとエクスポートはMermaidのコードソースを扱い、AI回答プレビューは対象外とする。raw HTML、raw SVG、`div.mermaid`はMermaid入力として扱わない。
 - ダイアログの保存は対象ノードとアクティブノートの世代を再検証し、成功したソーステキスト置換だけを通常のTiptap transaction、Undo、autosaveへ接続する。Rich貼り付けはfenced/raw/許可したHTML code sourceに限定し、コピーは動的長のMermaidフェンスを使う。
 - Mermaidは固定した安全設定と入力上限で描画し、init／frontmatter設定、click／callback、外部画像・アイコン・URLを拒否する。生成SVGは専用サニタイズ後にBlob URLの`img`として表示し、外部参照・イベント・`foreignObject`を許可しない。
