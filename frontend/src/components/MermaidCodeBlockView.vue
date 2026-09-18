@@ -12,18 +12,34 @@
       class="mermaid-code-block-preview"
       contenteditable="false"
       :aria-busy="status === 'loading'"
-      @pointerdown.capture="handlePreviewPointerDown"
-      @contextmenu.capture.prevent.stop="handlePreviewContextMenu"
     >
       <div class="mermaid-code-block-toolbar">
         <span>Mermaid図</span>
-        <button
-          type="button"
-          class="mermaid-code-block-edit-button"
-          :disabled="!canEdit || isInputLocked"
-          @click.stop="openEditor"
-        >編集</button>
-        <span class="mermaid-code-block-zoom">{{ Math.round(zoom * 100) }}%</span>
+        <div class="mermaid-code-block-toolbar-actions">
+          <div class="mermaid-code-block-toolbar-buttons">
+            <button
+              type="button"
+              class="mermaid-code-block-icon-button"
+              :disabled="!canEdit || isInputLocked"
+              aria-label="Mermaid図を編集"
+              title="Mermaid図を編集"
+              @click.stop="openEditor"
+            >
+              <PencilIcon :size="14" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="mermaid-code-block-icon-button mermaid-code-block-delete-button"
+              :disabled="!canEdit || isInputLocked"
+              aria-label="Mermaid図を削除"
+              title="Mermaid図を削除"
+              @click.stop="removeDiagram"
+            >
+              <Trash2Icon :size="14" aria-hidden="true" />
+            </button>
+          </div>
+          <span class="mermaid-code-block-zoom">{{ Math.round(zoom * 100) }}%</span>
+        </div>
       </div>
       <p v-if="status === 'loading'" class="mermaid-code-block-status" role="status">
         Mermaid図を描画しています…
@@ -63,6 +79,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from 'vue'
+import { PencilIcon, Trash2Icon } from '@lucide/vue'
 import { NodeViewContent, NodeViewWrapper, nodeViewProps } from '@tiptap/vue-3'
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { useAppStore } from '../stores/useAppStore'
@@ -291,16 +308,21 @@ function openEditor() {
   editDialogOpen.value = true
 }
 
-function handlePreviewPointerDown(event: PointerEvent) {
-  if (event.button !== 2) return
-  event.preventDefault()
-  event.stopPropagation()
-  openEditor()
-}
+function removeDiagram() {
+  if (!canEdit.value || isInputLocked.value) return
+  const target = getCurrentMermaidTarget()
+  if (!target) return
 
-function handlePreviewContextMenu(event: MouseEvent) {
-  event.preventDefault()
-  openEditor()
+  try {
+    const transaction = target.editor.state.tr.delete(
+      target.position,
+      target.position + target.node.nodeSize,
+    )
+    target.editor.view.dispatch(transaction)
+    target.editor.commands.focus()
+  } catch {
+    // The node may have become stale while the button event was queued.
+  }
 }
 
 function applySource(nextSource: string) {
@@ -426,6 +448,54 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.mermaid-code-block-toolbar {
+  width: 100%;
+}
+
+.mermaid-code-block-toolbar-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.mermaid-code-block-toolbar-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mermaid-code-block-icon-button {
+  display: inline-flex;
+  width: 26px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.mermaid-code-block-icon-button:hover:not(:disabled),
+.mermaid-code-block-icon-button:focus-visible {
+  border-color: var(--brand-primary);
+}
+
+.mermaid-code-block-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mermaid-code-block-delete-button:hover:not(:disabled),
+.mermaid-code-block-delete-button:focus-visible {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
 .mermaid-code-block-resize-frame {
   position: relative;
   display: inline-block;
@@ -470,20 +540,4 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.mermaid-code-block-edit-button {
-  min-height: 24px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-}
-
-.mermaid-code-block-edit-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
 </style>

@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core'
-import { NodeSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
 type MermaidEditorStorage = {
@@ -11,7 +11,11 @@ function isMermaidCodeBlock(node: ProseMirrorNode) {
     && String(node.attrs.language ?? '').trim().toLowerCase() === 'mermaid'
 }
 
-export function insertMermaidCodeBlock(editor: Editor, source: string) {
+export function insertMermaidCodeBlock(
+  editor: Editor,
+  source: string,
+  replaceRange?: { from: number; to: number },
+) {
   const storage = (editor.storage as MermaidEditorStorage).codeBlock
   if (storage) storage.openMermaidEditorOnSelect = true
 
@@ -19,6 +23,10 @@ export function insertMermaidCodeBlock(editor: Editor, source: string) {
   const inserted = editor.chain()
     .focus()
     .command(({ tr }) => {
+      if (replaceRange) {
+        tr.setSelection(TextSelection.create(tr.doc, replaceRange.from, replaceRange.to))
+        tr.deleteSelection()
+      }
       // `insertContentAt` adjusts block insertion at the start of a text block
       // by one position. Calculate the same position before insertion so the
       // new node can be selected without scanning the whole document.

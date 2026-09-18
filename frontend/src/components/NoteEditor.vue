@@ -371,11 +371,6 @@
           <MinusIcon :size="15" />
         </button>
 
-        <MermaidInsertPopover
-          :disabled="isEditorInputLocked || noteStore.activeNote?.isTrashed"
-          @select="insertMermaidDiagram"
-        />
-
         <NoteLinkPopover
           v-if="noteStore.activeNote"
           :note-id="noteStore.activeNote.id"
@@ -385,6 +380,11 @@
         />
 
         <span class="format-divider" />
+
+        <MermaidInsertPopover
+          :disabled="isEditorInputLocked || noteStore.activeNote?.isTrashed"
+          @select="insertMermaidDiagram"
+        />
 
         <button
           class="format-btn"
@@ -479,7 +479,29 @@
             @dragover="handleEditorDragOver"
             @drop="handleRichDrop"
           />
-          <div v-else class="markdown-editor-shell">
+          <div
+            v-if="mermaidCommandOpen"
+            class="mermaid-command-menu"
+            :style="mermaidCommandStyle"
+            role="listbox"
+            aria-label="Mermaid図の候補"
+          >
+            <button
+              v-for="(diagram, index) in mermaidCommandSuggestions"
+              :key="diagram.type"
+              type="button"
+              class="mermaid-command-item"
+              :class="{ 'is-selected': index === mermaidCommandIndex }"
+              role="option"
+              :aria-selected="index === mermaidCommandIndex"
+              @mousedown.prevent
+              @click="selectMermaidCommand(diagram.type)"
+            >
+              <WorkflowIcon :size="15" aria-hidden="true" />
+              <span>{{ diagram.label }}</span>
+            </button>
+          </div>
+          <div v-if="editMode === 'markdown'" class="markdown-editor-shell">
             <div
               v-if="markdownAgentHighlight"
               ref="markdownHighlightLayer"
@@ -570,6 +592,7 @@ import {
   TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
+  WorkflowIcon,
   XIcon,
 } from '@lucide/vue'
 import {
@@ -672,6 +695,7 @@ import {
 import { createMermaidFence } from '../utils/mermaidClipboard'
 import { insertMermaidCodeBlock } from '../utils/mermaidInsertion'
 import {
+  getMermaidDiagramSuggestions,
   getMermaidDiagramDefinition,
   type MermaidDiagramType,
 } from '../utils/mermaidVisualEditor'
@@ -929,6 +953,34 @@ const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
 const markdownSelectionVersion = ref(0)
+const mermaidCommandOpen = ref(false)
+const mermaidCommandQuery = ref('')
+const mermaidCommandIndex = ref(0)
+const mermaidCommandRange = ref<{ start: number; end: number } | { from: number; to: number } | null>(null)
+const mermaidCommandSuggestions = computed(() => getMermaidDiagramSuggestions(mermaidCommandQuery.value).slice(0, 8))
+const mermaidCommandStyle = computed(() => {
+  editorStateVersion.value
+  if (editMode.value === 'wysiwyg') {
+    const editorElement = editor.view.dom
+    const body = editorElement.closest('.editor-body')
+    if (body) {
+      const coords = editor.view.coordsAtPos(editor.state.selection.from)
+      const bodyRect = body.getBoundingClientRect()
+      return {
+        top: `${coords.bottom - bodyRect.top + 8}px`,
+        left: `${coords.left - bodyRect.left}px`,
+      }
+    }
+    return undefined
+  }
+  if (!mermaidCommandRange.value || !('start' in mermaidCommandRange.value)) {
+    return undefined
+  }
+  const lineStart = localMarkdown.value.lastIndexOf('\n', mermaidCommandRange.value.start - 1) + 1
+  const lineIndex = localMarkdown.value.slice(0, lineStart).split('\n').length - 1
+  const scrollTop = markdownTextarea.value?.scrollTop ?? 0
+  return { top: `${24 + lineIndex * 24 - scrollTop}px` }
+})
 let imagePasteGeneration = 0
 let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
@@ -1123,6 +1175,7 @@ const editor: Editor = new Editor({
       return true
     },
     handleKeyDown(view, event) {
+      if (handleMermaidCommandKeydown(event, 'rich')) return true
       const actionId = findMatchingShortcutAction(
         event,
         settingsStore.shortcutBindings,
@@ -1146,6 +1199,7 @@ const editor: Editor = new Editor({
   onSelectionUpdate() {
     invalidateImagePasteOperations()
     editorStateVersion.value += 1
+    updateMermaidCommandState('rich')
   },
   onUpdate({ editor }) {
     invalidateImagePasteOperations()
@@ -1163,6 +1217,7 @@ const editor: Editor = new Editor({
       updateAutoTitleFromMarkdown(markdown)
       scheduleAutoSave(markdown)
     }
+    updateMermaidCommandState('rich')
   },
 })
 
@@ -2676,14 +2731,106 @@ function toggleHorizontalRule() {
   insertMarkdownBlock('---')
 }
 
-function insertMermaidDiagram(type: MermaidDiagramType) {
+function insertMermaidDiagram(
+  type: MermaidDiagramType,
+  commandRange?: { start: number; end: number } | { from: number; to: number },
+) {
   const starter = getMermaidDiagramDefinition(type).sample
   if (editMode.value === 'markdown') {
+    if (commandRange && 'start' in commandRange) {
+      replaceMarkdownRange(commandRange.start, commandRange.end, createMermaidFence(starter))
+      closeMermaidCommand()
+      return
+    }
     insertMarkdownBlock(createMermaidFence(starter))
     return
   }
 
-  insertMermaidCodeBlock(editor, starter)
+  insertMermaidCodeBlock(editor, starter, commandRange && 'from' in commandRange ? commandRange : undefined)
+  closeMermaidCommand()
+}
+
+function getMermaidCommandMatch(value: string, cursor: number) {
+  const beforeCursor = value.slice(0, cursor)
+  const match = beforeCursor.match(/(?:^|\s)\/mermaid(?:\s+([^\s]*))?$/i)
+  if (!match || match.index === undefined) return null
+  const commandOffset = match[0].lastIndexOf('/mermaid')
+  return {
+    start: match.index + commandOffset,
+    end: cursor,
+    query: match[1] ?? '',
+  }
+}
+
+function updateMermaidCommandState(mode: 'markdown' | 'rich') {
+  if (mode === 'markdown') {
+    const selection = getMarkdownSelection()
+    const lineStart = localMarkdown.value.lastIndexOf('\n', Math.max(selection.start - 1, 0)) + 1
+    const match = getMermaidCommandMatch(localMarkdown.value.slice(lineStart, selection.start), selection.start - lineStart)
+    if (!match || selection.start !== selection.end) {
+      closeMermaidCommand()
+      return
+    }
+    mermaidCommandRange.value = { start: lineStart + match.start, end: lineStart + match.end }
+    mermaidCommandQuery.value = match.query
+  } else {
+    if (editMode.value !== 'wysiwyg' || editor.state.selection.empty === false) {
+      closeMermaidCommand()
+      return
+    }
+    const selection = editor.state.selection
+    const parent = selection.$from.parent
+    const match = getMermaidCommandMatch(parent.textContent, selection.$from.parentOffset)
+    if (!match) {
+      closeMermaidCommand()
+      return
+    }
+    mermaidCommandRange.value = {
+      from: selection.$from.start() + match.start,
+      to: selection.$from.pos,
+    }
+    mermaidCommandQuery.value = match.query
+  }
+
+  mermaidCommandOpen.value = mermaidCommandSuggestions.value.length > 0
+  mermaidCommandIndex.value = Math.min(mermaidCommandIndex.value, Math.max(0, mermaidCommandSuggestions.value.length - 1))
+}
+
+function closeMermaidCommand() {
+  mermaidCommandOpen.value = false
+  mermaidCommandQuery.value = ''
+  mermaidCommandRange.value = null
+  mermaidCommandIndex.value = 0
+}
+
+function selectMermaidCommand(type: MermaidDiagramType) {
+  const range = mermaidCommandRange.value
+  if (!range) return
+  insertMermaidDiagram(type, range)
+}
+
+function handleMermaidCommandKeydown(event: KeyboardEvent, mode: 'markdown' | 'rich') {
+  if (!mermaidCommandOpen.value || (mode === 'markdown' && editMode.value !== 'markdown')) return false
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeMermaidCommand()
+    return true
+  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    const length = mermaidCommandSuggestions.value.length
+    mermaidCommandIndex.value = (mermaidCommandIndex.value + delta + length) % length
+    return true
+  }
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault()
+    const diagram = mermaidCommandSuggestions.value[mermaidCommandIndex.value]
+    if (diagram) selectMermaidCommand(diagram.type)
+    return true
+  }
+  return false
 }
 
 function rememberRichSelection() {
@@ -2987,6 +3134,7 @@ function handleMarkdownBeforeInput(event: InputEvent) {
 }
 
 function handleMarkdownKeydown(event: KeyboardEvent) {
+  if (handleMermaidCommandKeydown(event, 'markdown')) return
   markdownLineBreakTracker.handleKeydown(event)
   if (
     event.key === 'Enter'
@@ -3098,12 +3246,14 @@ function handleMarkdownInput(event: Event) {
   localMarkdown.value = textarea.value
   dismissAgentEditorHighlight()
   updateMarkdownSelection()
+  updateMermaidCommandState('markdown')
   updateAutoTitleFromMarkdown(localMarkdown.value)
   scheduleAutoSave(localMarkdown.value)
 }
 
 function handleMarkdownClick(event: MouseEvent) {
   updateMarkdownSelection()
+  updateMermaidCommandState('markdown')
   if (!event.ctrlKey && !event.metaKey) return
 
   const textarea = markdownTextarea.value
@@ -3150,6 +3300,7 @@ function updateMarkdownSelection() {
   }
 
   markdownSelectionVersion.value += 1
+  if (editMode.value === 'markdown') updateMermaidCommandState('markdown')
 }
 
 function toggleMarkdownInlineWrap(marker: string) {
@@ -3652,6 +3803,42 @@ function formatDate(iso: string): string {
 
 .editor-body {
   position: relative;
+}
+
+.mermaid-command-menu {
+  position: absolute;
+  z-index: 1100;
+  top: 18px;
+  left: 24px;
+  display: flex;
+  width: min(260px, calc(100% - 48px));
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 8px;
+  background: var(--bg-editor);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
+}
+
+.mermaid-command-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+
+.mermaid-command-item:hover,
+.mermaid-command-item.is-selected {
+  background: var(--bg-hover);
+  color: var(--brand-primary);
 }
 
 .agent-editor-highlight-status {

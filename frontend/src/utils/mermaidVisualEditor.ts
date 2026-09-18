@@ -52,6 +52,7 @@ export type MermaidElementKindDefinition = {
 export type MermaidDiagramDefinition = {
   type: MermaidDiagramType
   label: string
+  keywords?: string[]
   description: string
   sample: string
   elementKinds: MermaidElementKindDefinition[]
@@ -235,6 +236,7 @@ const definitions: MermaidDiagramDefinition[] = [
   {
     type: 'flowchart',
     label: 'フローチャート',
+    keywords: ['flow', 'flowchart', 'フロー', '流れ'],
     description: '処理の流れ、分岐、接続を表します。',
     sample: 'flowchart TD\n  A[開始] --> B[終了]',
     elementKinds: flowchartElementKinds,
@@ -242,21 +244,22 @@ const definitions: MermaidDiagramDefinition[] = [
   {
     type: 'sequence',
     label: 'シーケンス図',
+    keywords: ['sequence', 'seq', 'シーケンス', 'やりとり'],
     description: '参加者間のメッセージ、注釈、分岐・繰返しを表します。',
     sample: 'sequenceDiagram\n  participant A as 利用者\n  participant B as システム\n  A->>B: 依頼\n  B-->>A: 応答',
     elementKinds: sequenceElementKinds,
   },
-  { type: 'class', label: 'クラス図', description: 'クラス、属性、メソッド、関係を表します。', sample: 'classDiagram\n  class User {\n    +String name\n    +login()\n  }\n  User --> Account : owns', elementKinds: classElementKinds },
-  { type: 'state', label: '状態図', description: '状態、遷移、開始・終了、複合状態を表します。', sample: 'stateDiagram-v2\n  [*] --> 待機\n  待機 --> 実行\n  実行 --> [*]', elementKinds: stateElementKinds },
-  { type: 'er', label: 'ER図', description: 'エンティティ、属性、関係を表します。', sample: 'erDiagram\n  USER ||--o{ ORDER : places\n  USER {\n    string id\n    string name\n  }', elementKinds: erElementKinds },
-  { type: 'gantt', label: 'ガントチャート', description: '区分、項目、日付、期間、担当を表します。', sample: 'gantt\n  title 開発計画\n  dateFormat YYYY-MM-DD\n  section 作業\n  設計 :done, des1, 2026-01-01, 3d\n  実装 :active, des2, after des1, 5d', elementKinds: scheduleElementKinds },
-  { type: 'journey', label: 'Journey', description: '利用者の行動と評価を時系列で表します。', sample: 'journey\n    title 利用者の流れ\n    section ノート\n      ノートを開く: 5: 利用者\n      編集する: 4: 利用者', elementKinds: scheduleElementKinds },
+  { type: 'class', label: 'クラス図', keywords: ['class', 'クラス', 'オブジェクト'], description: 'クラス、属性、メソッド、関係を表します。', sample: 'classDiagram\n  class User {\n    +String name\n    +login()\n  }\n  User --> Account : owns', elementKinds: classElementKinds },
+  { type: 'state', label: '状態図', keywords: ['state', '状態', 'ステート'], description: '状態、遷移、開始・終了、複合状態を表します。', sample: 'stateDiagram-v2\n  [*] --> 待機\n  待機 --> 実行\n  実行 --> [*]', elementKinds: stateElementKinds },
+  { type: 'er', label: 'ER図', keywords: ['er', 'entity', 'database', 'データベース', 'ER'], description: 'エンティティ、属性、関係を表します。', sample: 'erDiagram\n  USER ||--o{ ORDER : places\n  USER {\n    string id\n    string name\n  }', elementKinds: erElementKinds },
+  { type: 'gantt', label: 'ガントチャート', keywords: ['gantt', 'schedule', '計画', 'スケジュール'], description: '区分、項目、日付、期間、担当を表します。', sample: 'gantt\n  title 開発計画\n  dateFormat YYYY-MM-DD\n  section 作業\n  設計 :done, des1, 2026-01-01, 3d\n  実装 :active, des2, after des1, 5d', elementKinds: scheduleElementKinds },
+  { type: 'journey', label: 'Journey', keywords: ['journey', 'ユーザージャーニー'], description: '利用者の行動と評価を時系列で表します。', sample: 'journey\n    title 利用者の流れ\n    section ノート\n      ノートを開く: 5: 利用者\n      編集する: 4: 利用者', elementKinds: scheduleElementKinds },
   { type: 'info', label: 'Info', description: 'Mermaidのバージョン情報を表示します。', sample: 'info', elementKinds: genericElementKinds },
   { type: 'pie', label: '円グラフ', description: '項目と値の割合を表します。', sample: 'pie title 構成\n  "本文" : 70\n  "図" : 30', elementKinds: [chartElementKinds[0], rawKind] },
   { type: 'quadrant', label: 'クアドラントチャート', description: '2軸の領域と項目を表します。', sample: 'quadrantChart\n  title 優先度\n  x-axis 低 --> 高\n  y-axis 低 --> 高\n  quadrant-1 重要\n  quadrant-2 改善\n  quadrant-3 保留\n  quadrant-4 低優先\n  項目: [0.7, 0.8]', elementKinds: chartElementKinds },
   { type: 'requirement', label: '要求図', description: '要求、要素、検証関係を表します。', sample: 'requirementDiagram\n\nrequirement test_req {\n  id: 1\n  text: the test text.\n  risk: high\n  verifyMethod: test\n}\n\nelement test_entity {\n  type: simulation\n}\n\ntest_entity - verifies -> test_req', elementKinds: [...classElementKinds.slice(0, 1), ...genericElementKinds] },
   { type: 'gitGraph', label: 'Gitグラフ', description: 'コミット、ブランチ、マージを表します。', sample: 'gitGraph\n  commit\n  branch develop\n  checkout develop\n  commit\n  checkout main\n  merge develop', elementKinds: genericElementKinds },
-  { type: 'mindmap', label: 'マインドマップ', description: '親子関係と階層を表します。', sample: 'mindmap\n  root((Atlas Note))\n    Notes\n      Markdown\n    Diagrams\n      Mermaid', elementKinds: [{ kind: 'node', label: '階層ノード', fields: [text('level', '階層'), text('label', '文字')] }, rawKind] },
+  { type: 'mindmap', label: 'マインドマップ', keywords: ['mindmap', 'mind', 'マインド', '階層'], description: '親子関係と階層を表します。', sample: 'mindmap\n  root((Atlas Note))\n    Notes\n      Markdown\n    Diagrams\n      Mermaid', elementKinds: [{ kind: 'node', label: '階層ノード', fields: [text('level', '階層'), text('label', '文字')] }, rawKind] },
   { type: 'timeline', label: 'タイムライン', description: '区分、日付、出来事を表します。', sample: 'timeline\n  title 更新履歴\n  2026-01 : 開始\n  2026-02 : 改善', elementKinds: scheduleElementKinds },
   { type: 'sankey', label: 'Sankey図', description: '流量と接続元・接続先を表します。', sample: 'sankey-beta\n  A,B,10\n  B,C,6\n  B,D,4', elementKinds: [{ kind: 'flow', label: '流れ', fields: [text('from', '元'), text('to', '先'), text('value', '値')] }, rawKind] },
   { type: 'xychart', label: 'XYチャート', description: '項目、値、系列、軸を表します。', sample: 'xychart-beta\n  title "進捗"\n  x-axis [1, 2, 3]\n  y-axis "値" 0 --> 10\n  bar [2, 5, 8]\n  line [1, 4, 9]', elementKinds: chartElementKinds },
@@ -320,6 +323,21 @@ const HEADER_PATTERNS: Array<[MermaidDiagramType, RegExp]> = [
 ]
 
 export const MERMAID_DIAGRAM_CATALOG = definitions as readonly MermaidDiagramDefinition[]
+
+export const MERMAID_QUICK_DIAGRAM_TYPES: readonly MermaidDiagramType[] = [
+  'flowchart', 'sequence', 'class', 'state', 'er', 'gantt', 'mindmap',
+]
+
+export function getMermaidDiagramSuggestions(query = '') {
+  const normalized = query.trim().toLocaleLowerCase()
+  if (!normalized) return [...MERMAID_DIAGRAM_CATALOG]
+  return MERMAID_DIAGRAM_CATALOG.filter((definition) => {
+    const searchable = [definition.type, definition.label, ...(definition.keywords ?? [])]
+      .join(' ')
+      .toLocaleLowerCase()
+    return searchable.includes(normalized)
+  })
+}
 
 export function getMermaidDiagramDefinition(type: MermaidDiagramType) {
   return definitionMap.get(type) ?? definitions[0]

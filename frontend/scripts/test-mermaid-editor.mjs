@@ -802,24 +802,13 @@ async function testActualMermaidNodeView(NodeView, mocks, vue) {
   app.mount(host)
 
   try {
-    const openDiagramEditor = async (trigger = 'pointerdown') => {
+    const openDiagramEditor = async () => {
       await waitFor(() => host.querySelector('.mermaid-code-block-preview') !== null)
-      const preview = host.querySelector('.mermaid-code-block-preview')
-      if (trigger === 'contextmenu') {
-        const contextMenu = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-        preview.dispatchEvent(contextMenu)
-        assert.equal(contextMenu.defaultPrevented, true, 'contextmenu must be suppressed')
-      } else {
-        const pointerDown = dispatchPointer(preview, 'pointerdown', { button: 2, pointerId: 31 })
-        const contextMenu = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
-        preview.dispatchEvent(contextMenu)
-        assert.equal(pointerDown.defaultPrevented, true, 'right-button pointerdown must suppress the native menu')
-        assert.equal(contextMenu.defaultPrevented, true, 'contextmenu must remain suppressed')
-      }
+      host.querySelector('.mermaid-code-block-icon-button')?.click()
       await nextTick()
       host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
       await nextTick()
-      assert.equal(host.querySelectorAll('textarea').length, 1, 'right-click must open only one edit dialog')
+      assert.equal(host.querySelectorAll('textarea').length, 1, 'the edit button must open one edit dialog')
     }
     const initialRender = await waitForRender(mocks, currentNode.textContent)
     mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'node' })
@@ -863,10 +852,10 @@ async function testActualMermaidNodeView(NodeView, mocks, vue) {
     assert.equal(zoomLabel(), 200, 'NodeView Mermaid zoom must clamp at 200%')
     dispatchPointer(handle, 'pointerup', { clientY: 10000, pointerId: 24 })
 
-    await openDiagramEditor('contextmenu')
+    await openDiagramEditor()
     host.querySelector('.mermaid-edit-dialog-actions button').click()
     await nextTick()
-    await openDiagramEditor('pointerdown')
+    await openDiagramEditor()
     await nextTick()
     const textarea = () => host.querySelector('textarea')
     assert.equal(textarea()?.value, currentNode.textContent)
@@ -1065,21 +1054,7 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
       await nextTick()
     }
 
-    const contextMenuOnly = new dom.window.MouseEvent('contextmenu', {
-      bubbles: true,
-      cancelable: true,
-    })
-    preview().dispatchEvent(contextMenuOnly)
-    await nextTick()
-    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
-    await nextTick()
-    assert.equal(contextMenuOnly.defaultPrevented, true,
-      'the actual Tiptap NodeView must suppress the native context menu')
-    assert.equal(host.querySelectorAll('textarea').length, 1,
-      'the actual Tiptap NodeView must open editing from contextmenu')
-    await closeDialog()
-
-    host.querySelector('.mermaid-code-block-edit-button')?.click()
+    host.querySelector('.mermaid-code-block-icon-button')?.click()
     await nextTick()
     host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
     await nextTick()
@@ -1087,23 +1062,8 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
       'the actual Vue Editor NodeView must open editing from the edit button')
     await closeDialog()
 
-    const pointerDown = dispatchPointer(preview(), 'pointerdown', { button: 2, pointerId: 41 })
-    const contextMenu = new dom.window.MouseEvent('contextmenu', {
-      bubbles: true,
-      cancelable: true,
-    })
-    preview().dispatchEvent(contextMenu)
-    await nextTick()
-    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
-    await nextTick()
-    assert.equal(pointerDown.defaultPrevented, true,
-      'the actual Tiptap NodeView must suppress right-button pointerdown')
-    assert.equal(contextMenu.defaultPrevented, true,
-      'the actual Tiptap NodeView must suppress the follow-up contextmenu')
-    assert.equal(host.querySelectorAll('textarea').length, 1,
-      'pointerdown and contextmenu must open only one actual edit dialog')
     assert.equal(editor.state.doc.firstChild.textContent, source,
-      'opening the actual edit dialog must not change the document')
+      'opening the edit dialog must not change the document')
   } finally {
     app.unmount()
     editor.destroy()
