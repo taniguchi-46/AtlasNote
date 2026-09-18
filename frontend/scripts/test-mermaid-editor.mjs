@@ -128,7 +128,7 @@ try {
   const { DOMParser: ProseMirrorDOMParser } = await import('@tiptap/pm/model')
   const { NodeSelection } = await import('@tiptap/pm/state')
   const { history, undo } = await import('@tiptap/pm/history')
-  const { EditorContent, VueNodeViewRenderer } = await import('@tiptap/vue-3')
+  const { Editor: VueEditor, EditorContent, VueNodeViewRenderer } = await import('@tiptap/vue-3')
 
   const editor = createEditor(Editor, StarterKit, CodeBlockLowlight, createLowlight, common, Markdown)
 
@@ -433,6 +433,7 @@ try {
     dom.window,
     {
       Editor,
+      VueEditor,
       EditorContent,
       StarterKit,
       CodeBlockLowlight,
@@ -1006,7 +1007,7 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
     createApp,
     h,
     nextTick,
-    Editor,
+    VueEditor,
     EditorContent,
     StarterKit,
     CodeBlockLowlight,
@@ -1029,7 +1030,7 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
       return VueNodeViewRenderer(NodeView)
     },
   })
-  const editor = new Editor({
+  const editor = new VueEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, undoRedo: false }),
       mermaidCodeBlock.configure({ lowlight: createLowlight(common) }),
@@ -1076,6 +1077,14 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
       'the actual Tiptap NodeView must suppress the native context menu')
     assert.equal(host.querySelectorAll('textarea').length, 1,
       'the actual Tiptap NodeView must open editing from contextmenu')
+    await closeDialog()
+
+    host.querySelector('.mermaid-code-block-edit-button')?.click()
+    await nextTick()
+    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    await nextTick()
+    assert.equal(host.querySelectorAll('textarea').length, 1,
+      'the actual Vue Editor NodeView must open editing from the edit button')
     await closeDialog()
 
     const pointerDown = dispatchPointer(preview(), 'pointerdown', { button: 2, pointerId: 41 })

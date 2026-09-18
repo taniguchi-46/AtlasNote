@@ -62,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from 'vue'
 import { NodeViewContent, NodeViewWrapper, nodeViewProps } from '@tiptap/vue-3'
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { useAppStore } from '../stores/useAppStore'
@@ -279,7 +279,10 @@ function openEditor() {
   const target = getCurrentMermaidTarget()
   if (!target) return
 
-  if (!target.node.eq(props.node)) return
+  // Vue wraps the NodeView prop in a reactive Proxy, while nodeAt returns
+  // ProseMirror's original node. Compare the original node instances so a
+  // valid edit request is not rejected before opening the dialog.
+  if (!target.node.eq(toRaw(props.node))) return
 
   editSession = {
     ...getEditorContext(),
