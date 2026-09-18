@@ -199,6 +199,12 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     return succeeded && [...lanes.values()].every((lane) => !lane.blocked)
   }
 
+  async function waitForInFlight(noteId: string) {
+    const lane = lanes.get(noteId)
+    if (!lane?.inFlightSave) return true
+    return lane.inFlightSave
+  }
+
   function cancel(noteId?: string) {
     const targetLanes = noteId
       ? [...lanes.entries()].filter(([laneNoteId]) => laneNoteId === noteId)
@@ -235,6 +241,7 @@ export function createNoteAutoSave<Result>(options: NoteAutoSaveOptions<Result>)
     schedule,
     retry,
     flush,
+    waitForInFlight,
     cancel,
     setEnabled,
   }

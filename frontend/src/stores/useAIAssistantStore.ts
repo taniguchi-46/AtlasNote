@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import {
   cancelAIAssistant,
@@ -17,6 +17,7 @@ import {
   type AIHistory,
   type AIHistorySource,
   type AIWebCitation,
+  type SaveAIHistoryInput,
   type AssistantInput,
   type AssistantKind,
 } from '../api/ai'
@@ -67,6 +68,7 @@ const safeMessages: Record<string, string> = {
   AI_BUSY: '別のAI処理を実行中です。完了してから再試行してください。',
   AI_INVALID_RESPONSE: 'AI プロバイダーから有効な回答を受け取れませんでした。',
   AI_HISTORY_NOT_FOUND: 'AI履歴が見つかりません。',
+  AI_HISTORY_SAVE_PENDING: '以前のAI履歴保存が完了していません。先に保存を再試行してください。',
   AI_CANCELLED: 'AI処理をキャンセルしました。',
   AI_CONTEXT_CHANGED: '確認後に参照ノートが更新されました。参照を確認してからもう一度送信してください。',
   AI_DRAFT_NOT_SAVED: '未保存の変更を保存できないため、AIへ送信しません。',
@@ -150,11 +152,13 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   const historySaveState = ref<AIHistorySaveState>('idle')
   const historySaveError = ref<AssistantError | null>(null)
   const activeRequest = ref<AssistantRequest | null>(null)
+  const historySaveInFlight = ref(false)
   const isBusy = computed(() => (
     state.value === 'loading-context'
     || state.value === 'generating'
     || state.value === 'canceling'
     || historySaveState.value === 'saving'
+    || historySaveInFlight.value
   ))
   let preparedContextKey = ''
   let latestContextRequest = 0
@@ -167,6 +171,11 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   let conversationGeneration = 0
   let lastHistoryTitle = ''
   let historySavePromise: Promise<boolean> | null = null
+  const pendingHistorySave = shallowRef<{ payload: SaveAIHistoryInput; generation: number } | null>(null)
+  const pendingHistorySaveFailed = ref(false)
+  const hasHistorySaveFailure = computed(() => (
+    historySaveState.value === 'failed' || pendingHistorySaveFailed.value
+  ))
 
   function clearError() {
     error.value = null
@@ -218,6 +227,14 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
   async function ask(input: Omit<AssistantRequest, 'messages' | 'providerID' | 'modelID'> & { messages?: AIConversationMessage[] }) {
     if (isBusy.value) {
       error.value = createError('AI_BUSY')
+      state.value = 'error'
+      return false
+    }
+    if (pendingHistorySave.value) {
+      const saveError = createError('AI_HISTORY_SAVE_PENDING')
+      historySaveError.value = saveError
+      historySaveState.value = 'failed'
+      error.value = saveError
       state.value = 'error'
       return false
     }
@@ -359,79 +376,122 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
   }
 
-  async function persistHistory(title: string, showError: boolean) {
+  function recordHistorySaveFailure(saveError: AssistantError, saveGeneration: number, showError: boolean) {
+    if (pendingHistorySave.value) pendingHistorySaveFailed.value = true
+    historySaveError.value = saveError
+    if (saveGeneration !== conversationGeneration) return
+    historySaveState.value = 'failed'
+    if (showError) error.value = saveError
+  }
+
+  async function persistHistory(
+    title: string,
+    showError: boolean,
+    retained: { payload: SaveAIHistoryInput; generation: number } | null = null,
+  ) {
     const request = activeRequest.value
     const setting = aiStore.configuredSetting
     const normalizedTitle = title.trim() || defaultHistoryTitle()
-    const saveGeneration = conversationGeneration
-    const savedHistoryID = selectedHistoryID.value
-    lastHistoryTitle = normalizedTitle
-    historySaveState.value = 'saving'
-    historySaveError.value = null
+    const saveGeneration = retained?.generation ?? conversationGeneration
+    const payload = retained?.payload ?? (
+      request && setting && state.value === 'success' && messages.value.length >= 2 && messages.value.length % 2 === 0
+        ? {
+            kind: request.kind,
+            title: normalizedTitle,
+            providerID: request.providerID,
+            modelID: request.modelID,
+            messages: [...messages.value],
+            sources: sourceRefs(sources.value),
+            ...(selectedHistoryID.value ? { id: selectedHistoryID.value } : {}),
+          }
+        : null
+    )
 
-    if (!request || !setting || state.value !== 'success' || messages.value.length < 2 || messages.value.length % 2 !== 0) {
+    if (!payload) {
       const saveError = createError('AI_INPUT_INVALID')
-      historySaveState.value = 'failed'
-      historySaveError.value = saveError
-      if (showError) error.value = saveError
+      recordHistorySaveFailure(saveError, saveGeneration, showError)
       return false
     }
+    if (!retained && pendingHistorySave.value) {
+      const saveError = createError('AI_HISTORY_SAVE_PENDING')
+      recordHistorySaveFailure(saveError, conversationGeneration, showError)
+      return false
+    }
+
+    const pending = retained ?? { payload, generation: saveGeneration }
+    pendingHistorySave.value = pending
+    pendingHistorySaveFailed.value = false
+    if (saveGeneration === conversationGeneration) {
+      lastHistoryTitle = payload.title
+      historySaveState.value = 'saving'
+      historySaveError.value = null
+    }
+
     try {
-      const response = await saveAIHistory({
-        kind: request.kind,
-        title: normalizedTitle,
-        providerID: request.providerID,
-        modelID: request.modelID,
-        messages: [...messages.value],
-        sources: sourceRefs(sources.value),
-        ...(savedHistoryID ? { id: savedHistoryID } : {}),
-      })
-      if (saveGeneration !== conversationGeneration) {
-        if (!savedHistoryID && response.history?.id) {
-          void deleteAIHistory(response.history.id).catch(() => undefined)
-        }
-        return false
-      }
+      const response = await saveAIHistory(payload)
       if (response.error || !response.history) {
         const saveError = createError(response.error?.code ?? 'AI_PROVIDER_UNAVAILABLE', response.error?.retryAfterSeconds)
-        historySaveState.value = 'failed'
-        historySaveError.value = saveError
-        if (showError) error.value = saveError
+        recordHistorySaveFailure(saveError, saveGeneration, showError)
         return false
       }
+      if (pendingHistorySave.value?.payload === payload) {
+        pendingHistorySave.value = null
+        pendingHistorySaveFailed.value = false
+      }
+      if (saveGeneration !== conversationGeneration) return Boolean(retained)
       selectedHistoryID.value = response.history.id
       historySaveState.value = 'saved'
       await refreshHistories()
       return true
     } catch (cause) {
-      if (saveGeneration !== conversationGeneration) return false
       const saveError = errorFromUnknown(cause)
-      historySaveState.value = 'failed'
-      historySaveError.value = saveError
-      if (showError) error.value = saveError
+      recordHistorySaveFailure(saveError, saveGeneration, showError)
       return false
     }
   }
 
-  async function saveCompletedConversation(title = defaultHistoryTitle()) {
+  function startHistorySave(
+    title: string,
+    showError: boolean,
+    retained: { payload: SaveAIHistoryInput; generation: number } | null = null,
+  ) {
     if (historySavePromise) return historySavePromise
-    const pending = persistHistory(title, false)
+    historySaveInFlight.value = true
+    const pending = persistHistory(title, showError, retained)
     historySavePromise = pending
-    try {
-      return await pending
-    } finally {
-      if (historySavePromise === pending) historySavePromise = null
+    const finish = () => {
+      if (historySavePromise !== pending) return
+      historySavePromise = null
+      historySaveInFlight.value = false
     }
+    void pending.then(finish, finish)
+    return pending
+  }
+
+  async function saveCompletedConversation(
+    title = defaultHistoryTitle(),
+    retained: { payload: SaveAIHistoryInput; generation: number } | null = null,
+  ) {
+    return startHistorySave(title, false, retained)
   }
 
   async function retryHistorySave() {
+    if (historySavePromise) return historySavePromise
+    if (pendingHistorySave.value) {
+      return startHistorySave(pendingHistorySave.value.payload.title, true, pendingHistorySave.value)
+    }
     if (historySaveState.value !== 'failed') return false
-    return saveCompletedConversation(lastHistoryTitle || defaultHistoryTitle())
+    return startHistorySave(lastHistoryTitle || defaultHistoryTitle(), true)
   }
 
   async function save(title: string) {
-    if (historySavePromise) await historySavePromise
-    return persistHistory(title, true)
+    if (historySavePromise) return historySavePromise
+    if (pendingHistorySave.value) {
+      const saveError = createError('AI_HISTORY_SAVE_PENDING')
+      recordHistorySaveFailure(saveError, conversationGeneration, true)
+      return false
+    }
+    return startHistorySave(title, true)
   }
 
   async function loadHistory(id: string) {
@@ -506,7 +566,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         return false
       }
       histories.value = histories.value.filter((history) => history.id !== id)
-      if (selectedHistoryID.value === id) clearConversation()
+      if (selectedHistoryID.value === id) clearConversation({ discardPendingHistory: true })
       return true
     } catch (cause) {
       error.value = errorFromUnknown(cause)
@@ -526,7 +586,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
         return false
       }
       histories.value = []
-      clearConversation()
+      clearConversation({ discardPendingHistory: true })
       return true
     } catch (cause) {
       error.value = errorFromUnknown(cause)
@@ -534,7 +594,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     }
   }
 
-  function clearConversation() {
+  function clearConversation(options: { discardPendingHistory?: boolean } = {}) {
     conversationGeneration += 1
     const requestID = activeBackendRequestID
     if (requestID) {
@@ -555,10 +615,20 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     activeRequest.value = null
     selectedHistoryID.value = null
     historySaveState.value = 'idle'
-    historySaveError.value = null
-    lastHistoryTitle = ''
+    if (options.discardPendingHistory) {
+      pendingHistorySave.value = null
+      pendingHistorySaveFailed.value = false
+      historySaveError.value = null
+    } else if (!pendingHistorySaveFailed.value) {
+      historySaveError.value = null
+    }
+    lastHistoryTitle = pendingHistorySave.value?.payload.title ?? ''
     preparedContextKey = ''
     completedMessages = []
+  }
+
+  function discardConversation() {
+    clearConversation({ discardPendingHistory: true })
   }
 
   function markStaleForRevision(noteID: string, revision: number) {
@@ -591,6 +661,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     selectedHistoryID,
     historySaveState,
     historySaveError,
+    hasHistorySaveFailure,
     isBusy,
     refreshHistories,
     previewContext,
@@ -603,6 +674,7 @@ export const useAIAssistantStore = defineStore('ai-assistant', () => {
     removeHistory,
     removeAllHistories,
     clearConversation,
+    discardConversation,
     markStaleForRevision,
     setPreconditionError,
   }

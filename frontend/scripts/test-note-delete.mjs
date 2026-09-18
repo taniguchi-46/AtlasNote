@@ -258,7 +258,7 @@ function toSummary(item) {
 `, 'utf8')
 
 await writeFile(path.join(outDir, 'mock-note-stores.mjs'), `
-const settings = { editorFirstLineStyle: 'paragraph' }
+const settings = { editorFirstLineStyle: 'paragraph', autoSaveEnabled: true }
 const app = { sortOption: '', sidebarSection: 'notes' }
 const notifications = { dismissBySource() {}, notify() {} }
 let deferLockResponses = false
@@ -266,6 +266,7 @@ const pendingLockResponses = []
 const lockCalls = []
 
 export function resetStores() {
+  settings.autoSaveEnabled = true
   deferLockResponses = false
   pendingLockResponses.length = 0
   lockCalls.length = 0
@@ -274,6 +275,7 @@ export function resetStores() {
 export const calls = { get refreshTarget() { return lockCalls } }
 
 export function setDeferredLockResponses(enabled) { deferLockResponses = enabled }
+export function setAutoSaveEnabled(enabled) { settings.autoSaveEnabled = enabled }
 
 export function resolveLockResponse(index, status) {
   const pending = pendingLockResponses[index]
@@ -315,6 +317,7 @@ try {
   await testActualStoreDraftFlushBeforeDeletion(noteMock, storeMock, useNoteStore)
   await testActualStoreFailedDraftPreventsDeletion(noteMock, storeMock, useNoteStore)
   await testActualStoreKeepsDraftAddedAfterFlush(noteMock, storeMock, useNoteStore)
+  await testActualStoreAutoSaveOffRequiresChoice(noteMock, storeMock, useNoteStore)
   await testActualStoreBatchDeleteKeepsPartialSuccess(noteMock, storeMock, useNoteStore)
   await testActualStoreLockResponseOrdering(noteMock, storeMock, useNoteStore)
   await testActualStoreSelectionAndListOrdering(noteMock, storeMock, useNoteStore)
@@ -573,6 +576,80 @@ async function testActualStoreKeepsDraftAddedAfterFlush(noteMock, storeMock, use
 
   store.discardDraft(original.id)
   noteMock.setDeferredUpdateResponses(false)
+}
+
+async function testActualStoreAutoSaveOffRequiresChoice(noteMock, storeMock, useNoteStore) {
+  const original = createTestNote('auto-save-off-note', 2, false)
+  const other = createTestNote('auto-save-off-other', 1, false)
+  const previousWindow = globalThis.window
+
+  try {
+    noteMock.resetBackend([original, other])
+    storeMock.resetStores()
+    storeMock.setAutoSaveEnabled(false)
+    setActivePinia(createPinia())
+    const saveStore = useNoteStore()
+    await saveStore.fetchNotes()
+    assert.equal(await saveStore.selectNote(original.id), true)
+    saveStore.scheduleDraft(original.id, '保存タイトル', '保存本文')
+    globalThis.window = { confirm: () => true }
+    assert.equal(await saveStore.selectNote(other.id), true)
+    assert.equal(noteMock.calls.updateNote[0].input.content, '保存本文')
+    assert.equal(saveStore.getDraft(original.id), null)
+
+    noteMock.resetBackend([original, other])
+    storeMock.resetStores()
+    storeMock.setAutoSaveEnabled(false)
+    setActivePinia(createPinia())
+    const cancelStore = useNoteStore()
+    await cancelStore.fetchNotes()
+    assert.equal(await cancelStore.selectNote(original.id), true)
+    cancelStore.scheduleDraft(original.id, '保持タイトル', '保持本文')
+    const cancelAnswers = [false, false]
+    globalThis.window = { confirm: () => cancelAnswers.shift() ?? false }
+    assert.equal(await cancelStore.selectNote(other.id), false)
+    assert.equal(cancelStore.activeNote.id, original.id)
+    assert.equal(cancelStore.getDraft(original.id).content, '保持本文')
+    assert.equal(noteMock.calls.updateNote.length, 0)
+
+    noteMock.resetBackend([original, other])
+    storeMock.resetStores()
+    storeMock.setAutoSaveEnabled(false)
+    setActivePinia(createPinia())
+    const discardStore = useNoteStore()
+    await discardStore.fetchNotes()
+    assert.equal(await discardStore.selectNote(original.id), true)
+    discardStore.scheduleDraft(original.id, '破棄タイトル', '破棄本文')
+    const discardAnswers = [false, true]
+    globalThis.window = { confirm: () => discardAnswers.shift() ?? false }
+    assert.equal(await discardStore.selectNote(other.id), true)
+    assert.equal(discardStore.getDraft(original.id), null)
+    assert.equal(noteMock.snapshotNote(original.id).content, original.content)
+    assert.equal(noteMock.calls.updateNote.length, 0)
+
+    const deleteTarget = createTestNote('auto-save-off-delete', 3, false)
+    noteMock.resetBackend([deleteTarget])
+    storeMock.resetStores()
+    storeMock.setAutoSaveEnabled(false)
+    setActivePinia(createPinia())
+    const deleteStore = useNoteStore()
+    await deleteStore.fetchNotes()
+    assert.equal(await deleteStore.selectNote(deleteTarget.id), true)
+    deleteStore.scheduleDraft(deleteTarget.id, '破棄して削除', '削除前の本文')
+    const deleteAnswers = [false, true]
+    globalThis.window = { confirm: () => deleteAnswers.shift() ?? false }
+    assert.equal(await deleteStore.trashNote(deleteTarget.id), true)
+    assert.equal(deleteStore.getDraft(deleteTarget.id), null)
+    assert.equal(noteMock.snapshotNote(deleteTarget.id).content, deleteTarget.content)
+    assert.equal(noteMock.calls.updateNote.length, 1)
+    assert.equal(noteMock.calls.updateNote[0].input.content, undefined)
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window
+    } else {
+      globalThis.window = previousWindow
+    }
+  }
 }
 
 async function testActualStoreBatchDeleteKeepsPartialSuccess(noteMock, storeMock, useNoteStore) {

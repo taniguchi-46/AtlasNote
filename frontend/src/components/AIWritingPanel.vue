@@ -314,7 +314,7 @@ async function ensureCurrentNotePersisted() {
   }
   const noteID = selectedNote.id
   try {
-    if (!await noteStore.flushPendingDraft()) {
+    if (!await noteStore.flushPendingDraft({ mode: 'required' })) {
       writingStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
       return false
     }

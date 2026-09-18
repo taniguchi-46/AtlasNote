@@ -402,7 +402,7 @@ async function handleAutoSaveChange(event: Event) {
       '未保存の変更を保存してから自動保存をOFFにしますか？\n「いいえ」の後に破棄を選べます。',
     )
     if (shouldSave) {
-      const saved = await noteStore.flushAllDirtyNotes()
+      const saved = await noteStore.flushAllDirtyNotes({ mode: 'explicit' })
       if (!saved) {
         input.checked = true
         autoSaveMessage.value = '未保存の変更を保存できないため、自動保存をOFFにしませんでした。'
@@ -414,7 +414,7 @@ async function handleAutoSaveChange(event: Event) {
         input.checked = true
         return
       }
-      noteStore.discardAllDrafts()
+      await noteStore.discardAllDrafts()
     }
   }
 

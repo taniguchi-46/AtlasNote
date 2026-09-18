@@ -10,8 +10,8 @@ export type MermaidClipboardPayload =
 
 const MERMAID_FENCE_LINE = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*mermaid(?:[ \t]+[^\r\n]*)?[ \t]*$/i
 const MERMAID_START_PATTERNS = [
-  /^(?:flowchart|graph)\s+(?:tb|td|bt|rl|lr)\b/i,
-  /^(?:sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|gitGraph|mindmap|timeline|zenuml|sankey|xychart-beta|block-beta|architecture-beta|c4context|packet-beta|kanban|radar|treemap)(?:\s|$)/i,
+  /^(?:flowchart|flowchart-elk|graph)\s+(?:tb|td|bt|rl|lr)\b/i,
+  /^(?:sequenceDiagram|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|info|showInfo|gantt|pie|quadrantChart|requirementDiagram|gitGraph|mindmap|timeline|sankey(?:-beta)?|xychart(?:-beta)?|block(?:-beta)?|architecture(?:-beta)?|C4(?:Context|Container|Component|Dynamic|Deployment)|packet(?:-beta)?|kanban|radar-beta|treemap|treeView-beta|swimlane-beta|eventmodeling|ishikawa(?:-beta)?|venn-beta|wardley-beta|cynefin-beta|railroad-beta|railroad-ebnf-beta|railroad-abnf-beta|railroad-peg-beta)(?:\s|$)/i,
 ]
 
 function hasClipboardType(data: DataTransfer, type: string) {

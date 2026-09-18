@@ -72,6 +72,7 @@ let source = {
 let pendingContext
 let pendingAssistant
 let pendingAssistantCancel
+let pendingHistorySave
 let activeAssistant
 let assistantProposal
 const contextErrors = []
@@ -102,6 +103,13 @@ export function deferContext() {
   const promise = new Promise((done) => { resolve = done })
   pendingContext = { promise, resolve }
   return pendingContext
+}
+
+export function deferHistorySave() {
+  let resolve
+  const promise = new Promise((done) => { resolve = done })
+  pendingHistorySave = { promise, resolve }
+  return pendingHistorySave
 }
 
 export function setAssistantProposal(nextProposal) {
@@ -177,6 +185,12 @@ export async function cancelAIAssistant(requestID) {
 
 export async function saveAIHistory(input) {
   calls.saveHistory.push(clone(input))
+  if (pendingHistorySave) {
+    const deferred = pendingHistorySave
+    pendingHistorySave = undefined
+    const response = await deferred.promise
+    if (response) return response
+  }
   return {
     history: {
       id: input.id ?? 'history-1',
@@ -831,6 +845,181 @@ try {
   assistant.clearConversation()
   assert.equal(assistant.proposal, null, 'clearing a conversation must also clear its proposed edit')
   mock.setAssistantProposal(null)
+
+  assert.equal(await assistant.previewContext({
+    kind: 'qa',
+    question: '遅延保存の確認',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '遅延保存の確認',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  const historyDeletesBeforeStaleSave = mock.calls.historyDeletes.length
+  const deferredHistorySave = mock.deferHistorySave()
+  const staleHistorySave = assistant.save('ノート切替中の履歴')
+  await Promise.resolve()
+  assistant.clearConversation()
+  deferredHistorySave.resolve()
+  assert.equal(await staleHistorySave, false, 'a stale history response must not update the cleared conversation')
+  assert.equal(
+    mock.calls.historyDeletes.length,
+    historyDeletesBeforeStaleSave,
+    'a successfully persisted stale history must not be deleted as cleanup',
+  )
+  assert.deepEqual(assistant.messages, [], 'clearing during history persistence must still clear the visible conversation')
+
+  assert.equal(await assistant.previewContext({
+    kind: 'qa',
+    question: '失敗保存の再試行',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '失敗保存の再試行',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  const failedHistorySave = mock.deferHistorySave()
+  const failedHistory = assistant.save('再試行する履歴')
+  await Promise.resolve()
+  assistant.clearConversation()
+  failedHistorySave.resolve({ error: { code: 'AI_NETWORK_UNAVAILABLE' } })
+  assert.equal(await failedHistory, false)
+  assert.equal(assistant.hasHistorySaveFailure, true, 'a stale history failure must remain retryable after clearing')
+  assert.equal(await assistant.retryHistorySave(), true, 'the retained history payload must be retryable after clearing')
+  assert.equal(assistant.hasHistorySaveFailure, false)
+
+  mock.setSource({
+    noteID: 'note-1',
+    title: '対象ノート',
+    revision: 6,
+    contentByte: 120,
+  })
+  assert.equal(await assistant.previewContext({
+    kind: 'qa',
+    question: '会話Aを生成する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '会話Aを生成する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  const failedConversationA = mock.deferHistorySave()
+  const saveConversationA = assistant.save('会話A')
+  await Promise.resolve()
+  assistant.clearConversation()
+  failedConversationA.resolve({ error: { code: 'AI_NETWORK_UNAVAILABLE' } })
+  assert.equal(await saveConversationA, false)
+  assert.equal(assistant.hasHistorySaveFailure, true)
+
+  const assistantCallsBeforeBlockedConversation = mock.calls.assistant.length
+  const historySavesBeforeBlockedConversation = mock.calls.saveHistory.length
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '会話Bを送信する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), false, 'an unresolved history payload must block a new conversation before the provider call')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeBlockedConversation)
+  assert.equal(mock.calls.saveHistory.length, historySavesBeforeBlockedConversation)
+  assert.equal(assistant.error?.code, 'AI_HISTORY_SAVE_PENDING')
+
+  const historySavesBeforeRetry = mock.calls.saveHistory.length
+  assert.equal(await assistant.retryHistorySave(), true, 'retrying the old payload must not generate a new response')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeBlockedConversation)
+  assert.equal(mock.calls.saveHistory.length, historySavesBeforeRetry + 1)
+  assert.deepEqual(
+    mock.calls.saveHistory.at(-1).messages,
+    [
+      { role: 'user', content: '会話Aを生成する' },
+      { role: 'assistant', content: '回答マーカー' },
+    ],
+    'history retry must save the retained conversation rather than the cleared screen',
+  )
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '会話Bを送信する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true, 'a new conversation may start after the old history is saved')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeBlockedConversation + 1)
+  assert.equal(await assistant.saveCompletedConversation('会話B'), true)
+  assert.deepEqual(
+    mock.calls.saveHistory.at(-1).messages,
+    [
+      { role: 'user', content: '会話Bを送信する' },
+      { role: 'assistant', content: '回答マーカー' },
+    ],
+    'the new conversation must be saved as a separate payload',
+  )
+
+  assistant.clearConversation()
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '会話Cを生成する',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true)
+  const failedConversationC = mock.deferHistorySave()
+  const saveConversationC = assistant.save('会話C')
+  await Promise.resolve()
+  assistant.clearConversation()
+  failedConversationC.resolve({ error: { code: 'AI_NETWORK_UNAVAILABLE' } })
+  assert.equal(await saveConversationC, false)
+  const assistantCallsBeforeCanceledConversation = mock.calls.assistant.length
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: 'キャンセル後の会話D',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), false, 'canceling the history resolution must keep the old payload and block generation')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeCanceledConversation)
+
+  const failedRetry = mock.deferHistorySave()
+  const firstRetry = assistant.retryHistorySave()
+  await Promise.resolve()
+  const secondRetry = assistant.retryHistorySave()
+  assert.equal(mock.calls.saveHistory.length, historySavesBeforeRetry + 4, 'concurrent retries must issue one history request')
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '保存中の会話D',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), false, 'a new send during history retry must not call the provider')
+  assert.equal(mock.calls.assistant.length, assistantCallsBeforeCanceledConversation)
+  failedRetry.resolve({ error: { code: 'AI_NETWORK_UNAVAILABLE' } })
+  assert.equal(await firstRetry, false)
+  assert.equal(await secondRetry, false)
+  assert.equal(assistant.hasHistorySaveFailure, true, 'a failed retry must retain the old payload')
+
+  assistant.discardConversation()
+  assert.equal(assistant.hasHistorySaveFailure, false)
+  assert.equal(await assistant.ask({
+    kind: 'qa',
+    question: '破棄後の会話D',
+    noteIDs: ['note-1'],
+    searchQuery: '',
+    includeBacklinks: false,
+  }), true, 'explicitly discarding the old payload must allow a new conversation')
 
   const writing = useAIWritingStore()
   writing.clear()

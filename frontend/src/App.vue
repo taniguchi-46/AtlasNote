@@ -241,12 +241,12 @@ const settingsStore = useSettingsStore()
 
 contentLockStore.setBeforeLock(createContentLockBeforeLock(
   () => noteEditorRef.value,
-  () => noteStore.flushAllDirtyNotes(),
+  (options) => noteStore.flushAllDirtyNotes({ mode: options?.automatic ? 'automatic' : 'transition' }),
 ))
 contentLockStore.setAfterLock(handleLockedTargets)
 syncStore.setBeforeSync(async (options) => {
   if (options?.automatic && noteStore.hasDirtyNotes) return false
-  return noteStore.flushAllDirtyNotes()
+  return noteStore.flushAllDirtyNotes({ mode: options?.automatic ? 'automatic' : 'required' })
 })
 storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
@@ -263,7 +263,7 @@ storageSpaceStore.setSwitchLifecycle(
     isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
-    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes({ mode: 'transition' }),
     notify: (message, code) => notificationStore.notify(message, {
       kind: 'warning', source: 'storage-space', code,
     }),
@@ -287,7 +287,7 @@ storageLocationStore.setLifecycle(
     isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
-    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes({ mode: 'transition' }),
     notify: (message, code) => notificationStore.notify(message, {
       kind: 'warning', source: 'storage-location', code,
     }),
@@ -312,7 +312,7 @@ backupStore.setLifecycle(
     isContentLockBusy: () => contentLockStore.isBusy,
     suspendSync: () => syncStore.suspend(),
     resumeSync: () => syncStore.resume(),
-    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes(),
+    flushAllDirtyNotes: () => noteStore.flushAllDirtyNotes({ mode: 'automatic' }),
     notify: (message, code) => notificationStore.notify(message, {
       kind: 'warning', source: 'backup', code,
     }),
@@ -337,7 +337,7 @@ let resizeStartX = 0
 let resizeStartWidth = 0
 
 const contentLockAutoLock = createContentLockAutoLock(async (targets) => {
-  const result = await contentLockStore.lockTargetsNow(targets)
+  const result = await contentLockStore.lockTargetsNow(targets, { automatic: true })
   if (!result.error) return true
   notificationStore.notify(result.error.message, {
     kind: 'warning',
@@ -679,7 +679,7 @@ async function handleBeforeClose() {
     // ユーザーがウィンドウを閉じようとした際、Wails側のデフォルト終了処理をフックしてこの関数が呼ばれる。
     // 即座にアプリを終了させず、未保存のノート（dirty notes）をバックエンドに書き込む時間を確保する。
     // フラッシュに成功した場合は CompleteClose を呼んで実際にアプリを終了させる。
-    if (await noteStore.flushAllDirtyNotes()) {
+    if (await noteStore.flushAllDirtyNotes({ mode: 'transition' })) {
       await CompleteClose()
       return
     }
@@ -692,7 +692,7 @@ async function handleBeforeClose() {
       return
     }
 
-    if (await noteStore.flushAllDirtyNotes()) {
+    if (await noteStore.flushAllDirtyNotes({ mode: 'transition' })) {
       await CompleteClose()
       return
     }
@@ -701,8 +701,8 @@ async function handleBeforeClose() {
       '再試行しても保存できませんでした。未保存の変更をすべて破棄して終了しますか？',
     )
     if (shouldDiscard) {
-      noteStore.discardAllDrafts()
-      await CompleteClose()
+      if (await noteStore.discardAllDrafts()) await CompleteClose()
+      else await CancelClose()
       return
     }
 

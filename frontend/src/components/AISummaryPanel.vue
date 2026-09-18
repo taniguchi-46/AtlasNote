@@ -189,7 +189,7 @@ async function handleAISummary() {
   const noteID = selectedNote.id
   let saved = false
   try {
-    saved = await noteStore.flushPendingDraft()
+    saved = await noteStore.flushPendingDraft({ mode: 'required' })
   } catch {
     aiStore.setSummaryPreconditionError('AI_DRAFT_NOT_SAVED', noteID)
     return false

@@ -48,11 +48,10 @@ const ERROR_MESSAGES: Record<MermaidRenderErrorCode, string> = {
 }
 
 const UNSUPPORTED_SYNTAX = [
-  // Reject configuration/metadata containers, not selected keys or URL schemes.
-  // Mermaid interprets YAML/JSON escapes and can fetch images during render().
+  // Mermaid interprets configuration/YAML/JSON containers before rendering.
+  // The narrowly allowlisted flowchart shape metadata is checked separately.
   /%%\s*\{/,
   /^\uFEFF?\s*---\s*(?:[\r\n]|$)/,
-  /@\s*\{/,
   /(?:^|[;\r\n])\s*(?:sequenceDiagram\s+)?(?:click|callback|properties|details|links?)\b/i,
   /\b(?:iconify|icon\s*pack|icon\s*[:(])/i,
   /\b(?:service|group)\s+[\w-]+\s*\([^)]*:/i,
@@ -62,6 +61,40 @@ const UNSUPPORTED_SYNTAX = [
   // CSS escapes/comments can hide url(), @import and property names.
   /(?:^|[;\r\n])\s*(?:style|classDef|linkStyle)\b[^\r\n]*(?:\\|\/\*)/i,
 ]
+
+const ALLOWED_FLOWCHART_SHAPES = new Set([
+  'rect',
+  'rounded',
+  'stadium',
+  'subroutine',
+  'cylinder',
+  'circle',
+  'doublecircle',
+  'diamond',
+  'hexagon',
+  'parallelogram',
+  'trapezoid',
+  'asymmetric',
+  'lean-right',
+  'lean-left',
+  'delay',
+  'cloud',
+  'document',
+  'stored-data',
+  'tagged-document',
+  'lined-document',
+  'manual-file',
+  'paper-tape',
+  'divided-process',
+  'lined-process',
+  'card',
+  'notched-rectangle',
+  'small-circle',
+  'framed-circle',
+  'crossed-circle',
+  'filled-circle',
+  'fork',
+])
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
 
@@ -81,8 +114,49 @@ function failure(code: MermaidRenderErrorCode): MermaidRenderResult {
 export function validateMermaidSource(source: string): MermaidRenderResult | null {
   if (source.trim().length === 0) return failure('empty')
   if (source.length > MERMAID_LIMITS.maxTextSize) return failure('too-large')
-  if (UNSUPPORTED_SYNTAX.some(pattern => pattern.test(source))) return failure('unsafe-syntax')
+  if (UNSUPPORTED_SYNTAX.some(pattern => pattern.test(source)) || hasUnsafeShapeMetadata(source)) {
+    return failure('unsafe-syntax')
+  }
   return null
+}
+
+function hasUnsafeShapeMetadata(source: string) {
+  const hasMetadata = /@\s*\{/.test(source)
+  if (!hasMetadata) return false
+  if (!/^\s*(?:flowchart|graph)\b/im.test(source)) return true
+
+  const metadataPattern = /@\s*\{/g
+  let match: RegExpExecArray | null
+  while ((match = metadataPattern.exec(source)) !== null) {
+    const closeIndex = source.indexOf('}', match.index + match[0].length)
+    if (closeIndex < 0) return true
+    const body = source.slice(match.index + match[0].length, closeIndex).trim()
+    const entries = body.split(',').map(entry => entry.trim()).filter(Boolean)
+    if (entries.length === 0 || entries.length > 2) return true
+
+    const keys = new Set<string>()
+    for (const entry of entries) {
+      const separator = entry.indexOf(':')
+      if (separator <= 0) return true
+      const key = entry.slice(0, separator).trim().toLowerCase()
+      const value = entry.slice(separator + 1).trim()
+      if (keys.has(key) || !['shape', 'label'].includes(key)) return true
+      keys.add(key)
+
+      if (key === 'shape') {
+        if (!/^[a-z][a-z0-9-]*$/i.test(value) || !ALLOWED_FLOWCHART_SHAPES.has(value.toLowerCase())) return true
+        continue
+      }
+
+      if (!/^"[^"\r\n]*"|'[^'\r\n]*'$/.test(value)) return true
+      if (/(?:https?:|data:|file:|javascript:|\/\/)|<\/?[a-z][^>]*>|!\[|@\s*\{/i.test(value)) return true
+    }
+
+    if (!keys.has('shape')) return true
+    metadataPattern.lastIndex = closeIndex + 1
+  }
+
+  return false
 }
 
 function getTheme(theme?: MermaidTheme): MermaidTheme {
@@ -159,7 +233,7 @@ function hasOnlyInternalSvgUrls(value: string) {
 
 function sanitizeSvg(svg: string) {
   if (
-    /<\s*(?:script|foreignObject|image|iframe|object|embed|a)\b/i.test(svg)
+    /<\s*(?:script|image|iframe|object|embed)\b/i.test(svg)
     || /\bon[a-z-]+\s*=/i.test(svg)
     || /\b(?:href|xlink:href|src|srcset)\s*=\s*["'`]?(?:https?:|data:|file:|javascript:|\/\/)/i.test(svg)
   ) {
@@ -170,7 +244,7 @@ function sanitizeSvg(svg: string) {
   const sanitized = purifier.sanitize(svg, {
     USE_PROFILES: { svg: true, svgFilters: false },
     ALLOW_DATA_ATTR: false,
-    FORBID_TAGS: ['script', 'foreignObject', 'image', 'iframe', 'object', 'embed', 'a'],
+    FORBID_TAGS: ['script', 'foreignObject', 'image', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['on*', 'href', 'xlink:href', 'src', 'srcset'],
     RETURN_TRUSTED_TYPE: false,
   }) as string
@@ -222,7 +296,7 @@ function sanitizeSvg(svg: string) {
     }
   }
 
-  if (root.querySelector('script,foreignObject,image,iframe,object,embed,a')) {
+  if (root.querySelector('script,foreignObject,image,iframe,object,embed')) {
     throwFailure('unsafe-output')
   }
 

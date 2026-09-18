@@ -356,15 +356,15 @@ const contextMenu = ref({
   isPinned: false,
 })
 
-function handleNoteClick(event: MouseEvent, note: note.Summary) {
+async function handleNoteClick(event: MouseEvent, note: note.Summary) {
   if (event.shiftKey) {
     toggleNoteSelection(note.id)
     return
   }
 
+  if (!await noteStore.selectNote(note.id)) return
   selectedNoteIds.value = new Set()
   lastSelectedNoteId.value = note.id
-  noteStore.selectNote(note.id)
 }
 
 function isNoteProtected(item: note.Summary) {

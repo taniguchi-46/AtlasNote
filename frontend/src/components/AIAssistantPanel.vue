@@ -77,7 +77,7 @@
           title="会話をクリア"
           aria-label="会話をクリア"
           :disabled="assistantStore.isBusy"
-          @click="assistantStore.clearConversation()"
+          @click="assistantStore.discardConversation()"
         >
           <EraserIcon :size="15" aria-hidden="true" />
         </button>
@@ -101,7 +101,7 @@
         title="会話をクリア"
         aria-label="会話をクリア"
         :disabled="assistantStore.isBusy"
-        @click="assistantStore.clearConversation()"
+        @click="assistantStore.discardConversation()"
       >
         <EraserIcon :size="15" aria-hidden="true" />
       </button>
@@ -125,7 +125,7 @@
     <p v-if="assistantStore.error" class="ai-v3-error" role="alert">
       {{ assistantStore.error.message }}
     </p>
-    <p v-if="assistantStore.historySaveState === 'failed'" class="ai-v3-warning" role="status">
+    <p v-if="assistantStore.hasHistorySaveFailure" class="ai-v3-warning" role="status">
       AI履歴を保存できませんでした。{{ assistantStore.historySaveError?.message ?? '' }}
       <button type="button" :disabled="assistantStore.isBusy" @click="retryHistorySave">
         履歴保存を再試行
@@ -267,7 +267,7 @@ async function ensureCurrentNotePersisted() {
   }
   const noteID = selectedNote.id
   try {
-    if (!await noteStore.flushPendingDraft()) {
+    if (!await noteStore.flushPendingDraft({ mode: 'required' })) {
       assistantStore.setPreconditionError('AI_DRAFT_NOT_SAVED')
       return false
     }

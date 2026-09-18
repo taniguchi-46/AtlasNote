@@ -1,4 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
+import { createImageWidthTitle, parseImageWidth } from './imageResize'
 
 export const EMPTY_PARAGRAPH_MARKDOWN = '&nbsp;'
 
@@ -167,7 +168,9 @@ function longestBacktickRun(source: string) {
 function serializeImage(node: JSONContent) {
   const src = typeof node.attrs?.src === 'string' ? node.attrs.src : ''
   const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : ''
-  return src ? `![${escapeBracketText(alt)}](${src})` : ''
+  const widthTitle = createImageWidthTitle(parseImageWidth(node.attrs?.width))
+  const title = widthTitle ? ` \"${widthTitle}\"` : ''
+  return src ? `![${escapeBracketText(alt)}](${src}${title})` : ''
 }
 
 function serializeTable(node: JSONContent) {

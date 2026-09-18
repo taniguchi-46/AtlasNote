@@ -207,7 +207,7 @@
         </div>
 
         <div
-          v-if="assistantStore.historySaveState === 'failed'"
+          v-if="assistantStore.hasHistorySaveFailure"
           class="ai-chat-state-warning is-history-save-failure"
           role="status"
         >
@@ -1102,7 +1102,7 @@ function toggleRecords() {
 async function startNewChat() {
   if (isAnyBusy.value) return
 
-  if (assistantStore.historySaveState === 'failed') {
+  if (assistantStore.hasHistorySaveFailure) {
     const shouldRetry = window.confirm(
       '現在の会話はAI履歴へ保存できていません。保存を再試行してから新しいチャットを開始しますか？\n「キャンセル」で会話を保持します。',
     )
@@ -1114,11 +1114,30 @@ async function startNewChat() {
   }
 
   closeContextPicker()
-  assistantStore.clearConversation()
+  assistantStore.discardConversation()
   chatStore.clearConversation()
   clearResultAnchors()
   recordsOpen.value = false
   void nextTick(focusComposer)
+}
+
+async function resolvePendingAssistantHistorySave(tool: AIChatTool | null) {
+  if (!assistantStore.hasHistorySaveFailure) return true
+
+  const shouldRetry = window.confirm(
+    '以前のAI履歴を保存できていません。履歴保存だけを再試行してから送信しますか？\n「キャンセル」で今回の送信を取り消します。',
+  )
+  if (shouldRetry) return assistantStore.retryHistorySave()
+
+  if (!window.confirm('保存できていない以前の会話を明示的に破棄して、今回の送信を新しい会話として開始しますか？')) {
+    return false
+  }
+
+  assistantStore.discardConversation()
+  chatStore.clearConversation()
+  if (tool) chatStore.selectTool(tool)
+  clearResultAnchors()
+  return true
 }
 
 function timelineRoleLabel(entry: AIChatTimelineEntry) {
@@ -1420,9 +1439,10 @@ async function runComposerSubmission() {
   closeContextPicker()
   const draftSnapshot = chatStore.draft
   const tool = chatStore.selectedTool
+  const toolLabel = selectedToolLabel.value
+  if ((!tool || tool === 'web-search') && !await resolvePendingAssistantHistorySave(tool)) return
   const agentEditPermission = settingsStore.aiAgentEditPermission
   const prompt = tool && fixedScopeTools.has(tool) ? '' : draftSnapshot.trim()
-  const toolLabel = selectedToolLabel.value
   const userEntryID = chatStore.appendUserMessage(userSubmissionLabel(prompt, tool))
   const agentProposalEntryID = !tool && chatStore.mode === 'agent'
     ? chatStore.appendAgentProposalPlaceholder()

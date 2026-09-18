@@ -9,7 +9,7 @@
       >
         <DialogTitle as="h2">Mermaid図を編集</DialogTitle>
         <DialogDescription class="mermaid-edit-dialog-description">
-          Mermaidのソースを編集し、プレビューを確認できます。保存すると本文の図へ反映します。
+          かんたん編集では図の要素を追加・編集・削除できます。ソースを直接編集することもできます。
         </DialogDescription>
 
         <div class="mermaid-edit-dialog-actions">
@@ -24,8 +24,34 @@
           </button>
         </div>
 
+        <div class="mermaid-edit-dialog-tabs" role="tablist" aria-label="Mermaid編集モード">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="editTab === 'visual'"
+            :class="{ 'is-active': editTab === 'visual' }"
+            :disabled="isInputLocked"
+            @click="editTab = 'visual'"
+          >かんたん編集</button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="editTab === 'source'"
+            :class="{ 'is-active': editTab === 'source' }"
+            :disabled="isInputLocked"
+            @click="editTab = 'source'"
+          >ソース</button>
+        </div>
+
         <div class="mermaid-edit-dialog-grid">
-          <label class="mermaid-edit-dialog-label" for="mermaid-edit-source">
+          <MermaidVisualEditor
+            v-if="editTab === 'visual'"
+            :source="localSource"
+            :disabled="isInputLocked"
+            class="mermaid-edit-dialog-visual"
+            @update:source="handleVisualSourceUpdate"
+          />
+          <label v-else class="mermaid-edit-dialog-label" for="mermaid-edit-source">
             ソース
             <textarea
               id="mermaid-edit-source"
@@ -42,11 +68,7 @@
           </label>
 
           <div class="mermaid-edit-dialog-preview" aria-live="polite" :aria-busy="status === 'loading'">
-            <div class="mermaid-edit-dialog-zoom" role="toolbar" aria-label="Mermaid図の表示サイズ">
-              <button type="button" title="縮小" aria-label="Mermaid図を縮小" :disabled="zoom <= 0.5" @click="adjustZoom(-0.1)">−</button>
-              <button type="button" title="表示倍率をリセット" @click="resetZoom">{{ Math.round(zoom * 100) }}%</button>
-              <button type="button" title="拡大" aria-label="Mermaid図を拡大" :disabled="zoom >= 2" @click="adjustZoom(0.1)">＋</button>
-            </div>
+            <div class="mermaid-edit-dialog-zoom">{{ Math.round(zoom * 100) }}%</div>
             <p v-if="status === 'loading'" class="mermaid-edit-dialog-status" role="status">
               Mermaid図を描画しています…
             </p>
@@ -54,7 +76,19 @@
               {{ errorMessage }}
             </p>
             <div v-else-if="svgUrl" class="mermaid-edit-dialog-image-viewport">
-              <img :src="svgUrl" alt="Mermaid図のプレビュー" class="mermaid-edit-dialog-image" :style="previewImageStyle" />
+              <div class="mermaid-edit-dialog-resize-frame" :class="{ 'is-resizing': isResizing }">
+                <img :src="svgUrl" alt="Mermaid図のプレビュー" class="mermaid-edit-dialog-image" :style="previewImageStyle" />
+                <button
+                  type="button"
+                  class="mermaid-edit-dialog-resize-handle"
+                  aria-label="Mermaid図の表示サイズを上下方向に変更"
+                  title="上下にドラッグして表示サイズを変更"
+                  @pointerdown.stop.prevent="startResize"
+                  @pointermove.stop.prevent="resize"
+                  @pointerup.stop="finishResize"
+                  @pointercancel.stop="finishResize"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -74,6 +108,7 @@ import {
   DialogTitle,
 } from 'reka-ui'
 import { renderMermaidDiagram, type MermaidTheme } from '../utils/mermaidRenderer'
+import MermaidVisualEditor from './MermaidVisualEditor.vue'
 
 const props = defineProps<{
   open: boolean
@@ -89,14 +124,15 @@ const emit = defineEmits<{
 }>()
 
 const localSource = ref(props.source)
+const editTab = ref<'visual' | 'source'>('visual')
 const sourceInput = ref<HTMLTextAreaElement | null>(null)
 const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorMessage = ref('')
 const svgUrl = ref<string | null>(null)
 const zoom = ref(1)
-const previewImageStyle = computed(() => zoom.value === 1
-  ? undefined
-  : { width: (zoom.value * 100) + '%', maxWidth: 'none' })
+const isResizing = ref(false)
+let resizeStart: { pointerId: number; startY: number; startZoom: number; baseHeight: number } | null = null
+const previewImageStyle = computed(() => ({ width: (zoom.value * 50) + '%', maxWidth: 'none' }))
 const isComposing = ref(false)
 const localInputLocked = ref(false)
 const isInputLocked = computed(() => props.inputLocked === true || localInputLocked.value)
@@ -119,12 +155,31 @@ function clearPreview() {
   svgUrl.value = null
 }
 
-function adjustZoom(delta: number) {
-  zoom.value = Math.min(2, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+function setZoom(value: number) {
+  zoom.value = Math.min(2, Math.max(0.1, Math.round(value * 100) / 100))
 }
 
-function resetZoom() {
-  zoom.value = 1
+function startResize(event: PointerEvent) {
+  if (event.button !== 0) return
+  const handle = event.currentTarget as HTMLElement | null
+  const image = handle?.parentElement?.querySelector('img')
+  const baseHeight = image?.getBoundingClientRect().height ?? 0
+  if (!baseHeight) return
+  resizeStart = { pointerId: event.pointerId, startY: event.clientY, startZoom: zoom.value, baseHeight }
+  isResizing.value = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+}
+
+function resize(event: PointerEvent) {
+  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+  setZoom(resizeStart.startZoom * ((resizeStart.baseHeight + event.clientY - resizeStart.startY) / resizeStart.baseHeight))
+}
+
+function finishResize(event: PointerEvent) {
+  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  resizeStart = null
+  isResizing.value = false
 }
 
 function schedulePreview() {
@@ -173,6 +228,12 @@ function handleSourceInput(event: Event) {
   // composition input that v-model intentionally defers until compositionend.
   if (inputValue !== localSource.value) localSource.value = inputValue
   if (!isComposing.value) emitSourceUpdate(inputValue)
+}
+
+function handleVisualSourceUpdate(source: string) {
+  if (isInputLocked.value) return
+  if (source !== localSource.value) localSource.value = source
+  emitSourceUpdate(source)
 }
 
 function commitSourceFromInput() {
@@ -248,7 +309,8 @@ watch(
     if (!open) commitSourceFromInput()
     if (open) {
       setLocalSource(props.source)
-      resetZoom()
+      editTab.value = 'visual'
+      setZoom(1)
       await nextTick()
       if (props.open) sourceInput.value?.focus()
     }
@@ -377,6 +439,39 @@ onBeforeUnmount(() => {
   margin-top: 18px;
 }
 
+.mermaid-edit-dialog-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mermaid-edit-dialog-tabs button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.mermaid-edit-dialog-tabs button.is-active {
+  border-bottom-color: var(--brand-primary);
+  color: var(--text-primary);
+}
+
+.mermaid-edit-dialog-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mermaid-edit-dialog-visual {
+  min-width: 0;
+}
+
 .mermaid-edit-dialog-label {
   display: flex;
   min-height: 0;
@@ -427,27 +522,9 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
-.mermaid-edit-dialog-zoom button {
-  min-width: 34px;
-  min-height: 28px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-editor);
-  color: var(--text-primary);
-  cursor: pointer;
-  font: inherit;
+.mermaid-edit-dialog-zoom {
+  color: var(--text-secondary);
   font-size: 12px;
-}
-
-.mermaid-edit-dialog-zoom button:hover:not(:disabled),
-.mermaid-edit-dialog-zoom button:focus-visible {
-  border-color: var(--brand-primary);
-}
-
-.mermaid-edit-dialog-zoom button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .mermaid-edit-dialog-image-viewport {
@@ -458,8 +535,41 @@ onBeforeUnmount(() => {
 
 .mermaid-edit-dialog-image {
   display: block;
-  max-width: 100%;
   height: auto;
+}
+
+.mermaid-edit-dialog-resize-frame {
+  position: relative;
+  display: inline-block;
+  min-width: 5%;
+  outline: 1px solid transparent;
+}
+
+.mermaid-edit-dialog-resize-frame:hover,
+.mermaid-edit-dialog-resize-frame:focus-within,
+.mermaid-edit-dialog-resize-frame.is-resizing {
+  outline-color: var(--brand-primary);
+}
+
+.mermaid-edit-dialog-resize-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--bg-editor);
+  border-radius: 2px;
+  background: var(--brand-primary);
+  cursor: ns-resize;
+  opacity: 0;
+  touch-action: none;
+}
+
+.mermaid-edit-dialog-resize-frame:hover .mermaid-edit-dialog-resize-handle,
+.mermaid-edit-dialog-resize-frame:focus-within .mermaid-edit-dialog-resize-handle,
+.mermaid-edit-dialog-resize-frame.is-resizing .mermaid-edit-dialog-resize-handle {
+  opacity: 1;
 }
 
 .mermaid-edit-dialog-status,

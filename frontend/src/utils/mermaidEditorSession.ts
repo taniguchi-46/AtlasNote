@@ -4,6 +4,7 @@ export type MermaidEditorInputLocker = (locked: boolean) => boolean | void
 export type MermaidEditorSessionStorage = {
   noteId?: string | null
   generation?: number
+  openMermaidEditorOnSelect?: boolean
   mermaidEditorFlushers?: Set<MermaidEditorInputFlusher>
   mermaidEditorInputLockers?: Set<MermaidEditorInputLocker>
 }

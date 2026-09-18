@@ -271,7 +271,7 @@ async function startOperation(requestedOperation: LibrarianOperation) {
 
   const noteID = selectedNote.id
   try {
-    if (!await noteStore.flushPendingDraft()) {
+    if (!await noteStore.flushPendingDraft({ mode: 'required' })) {
       librarianStore.setApplyError('AI_DRAFT_NOT_SAVED')
       return false
     }

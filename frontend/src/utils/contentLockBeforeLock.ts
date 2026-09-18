@@ -10,11 +10,15 @@ export type ContentLockPreparation = {
 
 export type ContentLockBeforeLockResult = boolean | ContentLockPreparation
 
+export type ContentLockBeforeLockOptions = {
+  automatic?: boolean
+}
+
 export function createContentLockBeforeLock(
   getEditor: () => ContentLockEditorBridge | null,
-  flushAllDirtyNotes: () => Promise<boolean>,
+  flushAllDirtyNotes: (options?: ContentLockBeforeLockOptions) => Promise<boolean>,
 ) {
-  return async (): Promise<ContentLockBeforeLockResult> => {
+  return async (options: ContentLockBeforeLockOptions = {}): Promise<ContentLockBeforeLockResult> => {
     const editor = getEditor()
     let inputLockPending = false
 
@@ -40,7 +44,7 @@ export function createContentLockBeforeLock(
         }
       }
 
-      if (!(await flushAllDirtyNotes())) {
+      if (!(await flushAllDirtyNotes(options))) {
         releaseInputLock()
         return false
       }

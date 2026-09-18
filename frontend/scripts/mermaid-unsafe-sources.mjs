@@ -4,7 +4,7 @@ export const unsafeSources = [
     ['https://example.test/p.png', '/p.png', '../p.png', 'p.png', '//example.test/p.png', 'data:image/png;base64,AA==']
       .map(url => `flowchart TD\n A@{ ${key}: "${url}" }`)),
   'flowchart TD\n A@{\n "img": >-\n  p.png\n }',
-  'flowchart TD\n A@{ shape: rect }',
+  'flowchart TD\n A@{ shape: unknown }',
   'flowchart TD\n A@{ "icon": "logos:github" }',
   '%%{init: {"themeCSS":"@import url(https://example.test/a.css)"}}%%\nflowchart TD\n A-->B',
   '%%{config: {}}%%\nflowchart TD\n A-->B',

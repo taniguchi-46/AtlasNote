@@ -19,6 +19,7 @@ import {
   type StorageSpaceLockStatus,
 } from '../api/contentLocks'
 import type {
+  ContentLockBeforeLockOptions,
   ContentLockBeforeLockResult,
   ContentLockPreparation,
 } from '../utils/contentLockBeforeLock'
@@ -28,7 +29,7 @@ const unavailableError: ContentLockError = {
   message: 'ロックを利用できませんでした。データは変更していません。',
 }
 
-type BeforeLock = () => Promise<ContentLockBeforeLockResult>
+type BeforeLock = (options?: ContentLockBeforeLockOptions) => Promise<ContentLockBeforeLockResult>
 
 type ContentLockAccessRequest = {
   target: ContentLockTarget
@@ -77,12 +78,12 @@ export const useContentLockStore = defineStore('content-locks', () => {
   let beforeLock: BeforeLock | null = null
   let accessRequestResolver: ((allowed: boolean) => void) | null = null
 
-  async function prepareBeforeLock() {
+  async function prepareBeforeLock(options: ContentLockBeforeLockOptions = {}) {
     if (!beforeLock) {
       return { allowed: true, preparation: null as ContentLockPreparation | null }
     }
 
-    const result = await beforeLock()
+    const result = await beforeLock(options)
     if (result === false) {
       return { allowed: false, preparation: null as ContentLockPreparation | null }
     }
@@ -310,7 +311,7 @@ export const useContentLockStore = defineStore('content-locks', () => {
     return result
   }
 
-  async function lockTargetsNow(targets: ContentLockTarget[]) {
+  async function lockTargetsNow(targets: ContentLockTarget[], options: ContentLockBeforeLockOptions = {}) {
     const unique = new Map<string, ContentLockTarget>()
     for (const target of targets) unique.set(targetKey(target), { ...target })
     const pendingTargets = Array.from(unique.values())
@@ -321,7 +322,7 @@ export const useContentLockStore = defineStore('content-locks', () => {
     error.value = null
     let preparation: ContentLockPreparation | null = null
     try {
-      const prepared = await prepareBeforeLock()
+      const prepared = await prepareBeforeLock(options)
       if (!prepared.allowed) {
         const saveError: ContentLockError = {
           code: 'CONTENT_LOCK_SAVE_FAILED',

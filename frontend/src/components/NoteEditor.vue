@@ -371,15 +371,10 @@
           <MinusIcon :size="15" />
         </button>
 
-        <button
-          class="format-btn"
-          type="button"
-          title="Mermaid図を挿入"
-          aria-label="Mermaid図を挿入"
-          @click="insertMermaidDiagram"
-        >
-          <WorkflowIcon :size="15" />
-        </button>
+        <MermaidInsertPopover
+          :disabled="isEditorInputLocked || noteStore.activeNote?.isTrashed"
+          @select="insertMermaidDiagram"
+        />
 
         <NoteLinkPopover
           v-if="noteStore.activeNote"
@@ -575,7 +570,6 @@ import {
   TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
-  WorkflowIcon,
   XIcon,
 } from '@lucide/vue'
 import {
@@ -637,6 +631,11 @@ import {
 } from '../utils/attachmentClipboard'
 import { createAttachmentObjectURL } from '../utils/attachmentImage'
 import { isManagedAttachmentReference } from '../utils/attachmentReference'
+import {
+  createImageWidthTitle,
+  parseImageWidth,
+  parseImageWidthFromTitle,
+} from '../utils/imageResize'
 import { logOperationFailure } from '../utils/operationLogger'
 import {
   createTableClipboardPayload,
@@ -670,9 +669,12 @@ import {
   continueMarkdownList,
   createMarkdownLineBreakTracker,
 } from '../utils/markdownListContinuation'
+import { createMermaidFence } from '../utils/mermaidClipboard'
+import { insertMermaidCodeBlock } from '../utils/mermaidInsertion'
 import {
-  createMermaidFence,
-} from '../utils/mermaidClipboard'
+  getMermaidDiagramDefinition,
+  type MermaidDiagramType,
+} from '../utils/mermaidVisualEditor'
 import {
   flushMermaidEditorInputs,
   setMermaidEditorInputsLocked,
@@ -681,6 +683,7 @@ import {
 } from '../utils/mermaidEditorSession'
 import { handleMermaidPaste } from '../utils/mermaidPaste'
 import MermaidCodeBlockView from './MermaidCodeBlockView.vue'
+import MermaidInsertPopover from './MermaidInsertPopover.vue'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -701,6 +704,7 @@ const MermaidCodeBlock = CodeBlockLowlight.extend({
       generation: 0,
       mermaidEditorFlushers: new Set<MermaidEditorInputFlusher>(),
       mermaidEditorInputLockers: new Set(),
+      openMermaidEditorOnSelect: false,
     }
   },
   addNodeView() {
@@ -719,14 +723,37 @@ const MermaidCodeBlock = CodeBlockLowlight.extend({
 })
 
 const ManagedImage = Image.extend({
+  addAttributes() {
+    return {
+      ...(this.parent?.() ?? {}),
+      width: {
+        default: null,
+        parseHTML: (element) => parseImageWidthFromTitle(element.getAttribute('title')),
+        renderHTML: (attributes) => {
+          const title = createImageWidthTitle(parseImageWidth(attributes.width))
+          return title ? { title } : {}
+        },
+      },
+    }
+  },
   addNodeView() {
-    return ({ node }) => {
+    return ({ node, editor, getPos }) => {
       let currentNode = node
       let objectURL: string | null = null
       let loadGeneration = 0
+      let resizeStart: { pointerId: number; startX: number; startWidth: number } | null = null
+      const wrapper = document.createElement('span')
+      wrapper.className = 'note-attachment-image-frame'
+      wrapper.contentEditable = 'false'
       const dom = document.createElement('img')
       dom.className = 'note-attachment-image'
       dom.draggable = false
+      const resizeHandle = document.createElement('button')
+      resizeHandle.type = 'button'
+      resizeHandle.className = 'visual-resize-handle'
+      resizeHandle.setAttribute('aria-label', '画像のサイズを変更')
+      resizeHandle.title = '右下をドラッグして画像サイズを変更'
+      wrapper.append(dom, resizeHandle)
 
       const revokeObjectURL = () => {
         if (!objectURL) return
@@ -738,10 +765,57 @@ const ManagedImage = Image.extend({
         const alt = typeof nextNode.attrs.alt === 'string' ? nextNode.attrs.alt : ''
         if (alt) dom.alt = alt
         else dom.removeAttribute('alt')
-        const title = typeof nextNode.attrs.title === 'string' ? nextNode.attrs.title : ''
-        if (title) dom.title = title
-        else dom.removeAttribute('title')
+        const width = parseImageWidth(nextNode.attrs.width)
+        if (width === null) dom.style.removeProperty('width')
+        else dom.style.width = `${width}px`
+        dom.removeAttribute('title')
       }
+
+      const updateWidth = (width: number) => {
+        const normalized = parseImageWidth(width)
+        if (normalized === null || editor.isDestroyed) return
+        let position: number | undefined
+        try {
+          position = getPos()
+        } catch {
+          return
+        }
+        if (position === undefined) return
+        const nodeAtPosition = editor.state.doc.nodeAt(position)
+        if (!nodeAtPosition || nodeAtPosition.type !== currentNode.type) return
+        editor.view.dispatch(editor.state.tr.setNodeMarkup(position, undefined, {
+          ...nodeAtPosition.attrs,
+          width: normalized,
+          title: createImageWidthTitle(normalized),
+        }))
+      }
+
+      const stopResize = (event: PointerEvent) => {
+        if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+        resizeHandle.releasePointerCapture?.(event.pointerId)
+        resizeStart = null
+      }
+
+      const handleResizeMove = (event: PointerEvent) => {
+        if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+        event.preventDefault()
+        updateWidth(resizeStart.startWidth + event.clientX - resizeStart.startX)
+      }
+
+      const handleResizeStart = (event: PointerEvent) => {
+        if (!editor.isEditable || event.button !== 0) return
+        event.preventDefault()
+        event.stopPropagation()
+        const renderedWidth = dom.getBoundingClientRect().width
+        if (!Number.isFinite(renderedWidth) || renderedWidth <= 0) return
+        resizeStart = { pointerId: event.pointerId, startX: event.clientX, startWidth: renderedWidth }
+        resizeHandle.setPointerCapture?.(event.pointerId)
+      }
+
+      resizeHandle.addEventListener('pointerdown', handleResizeStart)
+      resizeHandle.addEventListener('pointermove', handleResizeMove)
+      resizeHandle.addEventListener('pointerup', stopResize)
+      resizeHandle.addEventListener('pointercancel', stopResize)
 
       const loadSource = (source: string) => {
         const generation = ++loadGeneration
@@ -773,7 +847,7 @@ const ManagedImage = Image.extend({
       loadSource(typeof node.attrs.src === 'string' ? node.attrs.src : '')
 
       return {
-        dom,
+        dom: wrapper,
         update(nextNode: ProseMirrorNode) {
           if (nextNode.type !== currentNode.type) return false
           const sourceChanged = nextNode.attrs.src !== currentNode.attrs.src
@@ -785,14 +859,18 @@ const ManagedImage = Image.extend({
           return true
         },
         selectNode() {
-          dom.classList.add('ProseMirror-selectednode')
+          wrapper.classList.add('ProseMirror-selectednode')
         },
         deselectNode() {
-          dom.classList.remove('ProseMirror-selectednode')
+          wrapper.classList.remove('ProseMirror-selectednode')
         },
         destroy() {
           loadGeneration += 1
           revokeObjectURL()
+          resizeHandle.removeEventListener('pointerdown', handleResizeStart)
+          resizeHandle.removeEventListener('pointermove', handleResizeMove)
+          resizeHandle.removeEventListener('pointerup', stopResize)
+          resizeHandle.removeEventListener('pointercancel', stopResize)
         },
       }
     }
@@ -873,6 +951,10 @@ type MarkdownImagePasteContext = {
   start: number
   end: number
   generation: number
+}
+type MarkdownDropPosition = {
+  clientX: number
+  clientY: number
 }
 type DroppedImageFile = {
   file: File
@@ -1253,7 +1335,7 @@ watch(
 onBeforeUnmount(() => {
   invalidateImagePasteOperations()
   noteStore.clearAgentEditorHighlight(activeNoteId ?? undefined)
-  void noteStore.flushPendingDraft()
+  void noteStore.flushPendingDraft({ mode: 'automatic' })
   markdownHighlightResizeObserver?.disconnect()
   isMarkdownComposing = false
   markdownLineBreakTracker.reset()
@@ -1296,13 +1378,13 @@ function handleTitleSave() {
   const draft = noteStore.getDraft(noteStore.activeNote.id)
   if (localTitle.value === (draft?.title ?? noteStore.activeNote.title)) {
     if (draft) {
-      void noteStore.flushPendingDraft()
+      void noteStore.flushPendingDraft({ mode: 'automatic' })
     }
     return
   }
 
   scheduleAutoSave(localMarkdown.value)
-  void noteStore.flushPendingDraft()
+  void noteStore.flushPendingDraft({ mode: 'automatic' })
 }
 
 function handleTitleInput() {
@@ -1359,7 +1441,7 @@ async function handleExportNote(format: NoteExportFormat) {
     )
     if (!accessAllowed || noteStore.activeNote?.id !== selectedNoteId) return null
 
-    const saved = await noteStore.flushPendingDraft()
+    const saved = await noteStore.flushPendingDraft({ mode: 'required' })
     if (!saved) {
       notificationStore.notify('未保存の変更を保存できないため、エクスポートしませんでした。', {
         kind: 'warning',
@@ -1500,11 +1582,110 @@ function captureRichImagePasteContext(dropPosition?: number): RichImagePasteCont
   }
 }
 
-function captureMarkdownImagePasteContext(): MarkdownImagePasteContext | null {
+function getMarkdownDropOffset(
+  textarea: HTMLTextAreaElement,
+  content: string,
+  position: MarkdownDropPosition,
+): number | null {
+  if (
+    typeof document === 'undefined'
+    || typeof window === 'undefined'
+    || !Number.isFinite(position.clientX)
+    || !Number.isFinite(position.clientY)
+  ) return null
+
+  const rect = textarea.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+
+  const style = window.getComputedStyle(textarea)
+  const mirror = document.createElement('div')
+  const copiedStyles = [
+    'box-sizing',
+    'border-top-width',
+    'border-right-width',
+    'border-bottom-width',
+    'border-left-width',
+    'font-family',
+    'font-feature-settings',
+    'font-kerning',
+    'font-size',
+    'font-stretch',
+    'font-style',
+    'font-variant',
+    'font-variation-settings',
+    'font-weight',
+    'letter-spacing',
+    'line-height',
+    'padding-top',
+    'padding-right',
+    'padding-bottom',
+    'padding-left',
+    'tab-size',
+    'text-align',
+    'text-indent',
+    'text-rendering',
+    'text-transform',
+    'word-break',
+  ]
+  for (const property of copiedStyles) mirror.style.setProperty(property, style.getPropertyValue(property))
+  mirror.style.position = 'fixed'
+  mirror.style.left = `${rect.left - textarea.scrollLeft}px`
+  mirror.style.top = `${rect.top - textarea.scrollTop}px`
+  mirror.style.width = `${textarea.clientWidth}px`
+  mirror.style.height = 'auto'
+  mirror.style.minHeight = '0'
+  mirror.style.maxHeight = 'none'
+  mirror.style.visibility = 'hidden'
+  mirror.style.pointerEvents = 'none'
+  mirror.style.whiteSpace = 'pre-wrap'
+  mirror.style.overflowWrap = 'break-word'
+
+  const textNode = document.createTextNode(content || ' ')
+  mirror.appendChild(textNode)
+  document.body.appendChild(mirror)
+
+  try {
+    const range = document.createRange()
+    let bestOffset: number | null = null
+    let bestScore = Number.POSITIVE_INFINITY
+    const lineWeight = Math.max(textarea.clientWidth, 1) + 1
+
+    for (let offset = 0; offset <= content.length; offset += 1) {
+      range.setStart(textNode, offset)
+      range.collapse(true)
+      const caret = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      if (!caret || (!caret.width && !caret.height)) continue
+      const lineDistance = Math.abs(caret.top + caret.height / 2 - position.clientY)
+      const horizontalDistance = Math.abs(caret.left - position.clientX)
+      const score = lineDistance * lineWeight + horizontalDistance
+      if (score < bestScore) {
+        bestScore = score
+        bestOffset = offset
+      }
+    }
+
+    return bestOffset
+  } finally {
+    mirror.remove()
+  }
+}
+
+function captureMarkdownImagePasteContext(dropPosition?: MarkdownDropPosition): MarkdownImagePasteContext | null {
   const noteId = noteStore.activeNote?.id
   const textarea = markdownTextarea.value
   if (!noteId || !textarea || isEditorInputLocked.value || editMode.value !== 'markdown') {
     return null
+  }
+
+  let start = textarea.selectionStart
+  let end = textarea.selectionEnd
+  if (dropPosition) {
+    const offset = getMarkdownDropOffset(textarea, localMarkdown.value, dropPosition)
+    if (offset === null) return null
+    textarea.focus()
+    textarea.setSelectionRange(offset, offset)
+    start = offset
+    end = offset
   }
 
   updateMarkdownSelection()
@@ -1512,8 +1693,8 @@ function captureMarkdownImagePasteContext(): MarkdownImagePasteContext | null {
   return {
     noteId,
     content: localMarkdown.value,
-    start: textarea.selectionStart,
-    end: textarea.selectionEnd,
+    start,
+    end,
     generation: imagePasteGeneration,
   }
 }
@@ -1576,6 +1757,15 @@ function notifyUnsupportedDrop() {
   })
 }
 
+function notifyMarkdownDropPositionUnavailable() {
+  imagePasteError.value = '画像の挿入位置を特定できなかったため、本文は変更していません。'
+  notificationStore.notify(imagePasteError.value, {
+    kind: 'warning',
+    source: 'note-editor',
+    code: 'NOTE_EDITOR_DROP_POSITION_UNAVAILABLE',
+  })
+}
+
 function handleRichDrop(event: DragEvent) {
   if (!hasDroppedFiles(event)) return
   if (handledDropEvents.has(event)) return
@@ -1606,8 +1796,15 @@ function handleMarkdownDrop(event: DragEvent) {
     notifyUnsupportedDrop()
     return
   }
-  const context = captureMarkdownImagePasteContext()
-  if (context) void insertDroppedImages(files, 'markdown', context)
+  const context = captureMarkdownImagePasteContext({
+    clientX: event.clientX,
+    clientY: event.clientY,
+  })
+  if (context) {
+    void insertDroppedImages(files, 'markdown', context)
+  } else if (!isEditorInputLocked.value) {
+    notifyMarkdownDropPositionUnavailable()
+  }
 }
 
 async function insertDroppedImages(
@@ -1884,7 +2081,7 @@ async function handleExportAttachments() {
     )
     if (!accessAllowed || noteStore.activeNote?.id !== selectedNoteId) return
 
-    const saved = await noteStore.flushPendingDraft()
+    const saved = await noteStore.flushPendingDraft({ mode: 'required' })
     if (!saved) {
       notificationStore.notify('未保存の変更を保存できないため、添付ファイルを保存しませんでした。', {
         kind: 'warning',
@@ -2113,7 +2310,7 @@ async function saveCurrentNote(): Promise<boolean> {
     scheduleAutoSave(localMarkdown.value)
   }
 
-  return noteStore.flushPendingDraft()
+  return noteStore.flushPendingDraft({ mode: 'explicit' })
 }
 
 defineExpose({
@@ -2479,22 +2676,14 @@ function toggleHorizontalRule() {
   insertMarkdownBlock('---')
 }
 
-const MERMAID_STARTER = 'flowchart TD\n  A[開始] --> B[終了]'
-
-function insertMermaidDiagram() {
+function insertMermaidDiagram(type: MermaidDiagramType) {
+  const starter = getMermaidDiagramDefinition(type).sample
   if (editMode.value === 'markdown') {
-    insertMarkdownBlock(createMermaidFence(MERMAID_STARTER))
+    insertMarkdownBlock(createMermaidFence(starter))
     return
   }
 
-  editor.chain().focus().insertContent([
-    {
-      type: 'codeBlock',
-      attrs: { language: 'mermaid' },
-      content: [{ type: 'text', text: MERMAID_STARTER }],
-    },
-    { type: 'paragraph' },
-  ]).run()
+  insertMermaidCodeBlock(editor, starter)
 }
 
 function rememberRichSelection() {
@@ -3142,6 +3331,15 @@ function replaceMarkdownRange(
   options: { guardEditorInput?: boolean } = {},
 ): boolean {
   if (options.guardEditorInput && isEditorInputLocked.value) return false
+  if (
+    !Number.isInteger(start)
+    || !Number.isInteger(end)
+    || start < 0
+    || end < start
+    || end > localMarkdown.value.length
+    || selectionStart < 0
+    || selectionEnd < selectionStart
+  ) return false
 
   invalidateImagePasteOperations()
   const before = createMarkdownSnapshot()
@@ -3518,8 +3716,41 @@ function formatDate(iso: string): string {
 }
 
 .prose-editor :deep(.note-attachment-image) {
-  max-width: 100%;
   height: auto;
+  max-width: none;
+}
+
+.prose-editor :deep(.note-attachment-image-frame) {
+  position: relative;
+  display: inline-block;
+  max-width: none;
+  outline: 1px solid transparent;
+}
+
+.prose-editor :deep(.note-attachment-image-frame.ProseMirror-selectednode),
+.prose-editor :deep(.note-attachment-image-frame:hover) {
+  outline-color: var(--brand-primary);
+}
+
+.prose-editor :deep(.note-attachment-image-frame .visual-resize-handle) {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--bg-editor);
+  border-radius: 2px;
+  background: var(--brand-primary);
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+}
+
+.prose-editor :deep(.note-attachment-image-frame.ProseMirror-selectednode .visual-resize-handle),
+.prose-editor :deep(.note-attachment-image-frame:hover .visual-resize-handle),
+.prose-editor :deep(.note-attachment-image-frame .visual-resize-handle:focus-visible) {
+  opacity: 1;
 }
 
 .prose-editor :deep(.agent-editor-highlight-block) {

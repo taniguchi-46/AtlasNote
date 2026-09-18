@@ -461,6 +461,14 @@ assert.match(workspaceSource, /OpenRouter Web Search（Exa）を\$\{assistantSto
 assert.match(workspaceTemplate, /v-if="assistantStateWarning"/)
 assert.match(workspaceSource, /assistantStore\.state === 'orphaned'/)
 assert.match(workspaceSource, /assistantStore\.state === 'stale'/)
+assert.match(workspaceSource, /async function resolvePendingAssistantHistorySave\(tool: AIChatTool \| null\)[\s\S]*?assistantStore\.retryHistorySave\(\)[\s\S]*?assistantStore\.discardConversation\(\)/)
+const historyResolutionCallIndex = workspaceSource.indexOf('resolvePendingAssistantHistorySave(tool)')
+const composerUserEntryIndex = workspaceSource.indexOf('chatStore.appendUserMessage(userSubmissionLabel')
+assert.ok(
+  historyResolutionCallIndex >= 0
+    && composerUserEntryIndex > historyResolutionCallIndex,
+  'the common composer must resolve an old failed history save before creating a new timeline entry',
+)
 
 assert.match(workspaceSource, /settingsStore\.openSettings\('ai'\)/)
 assert.match(workspaceTemplate, /title="保存済みの履歴と成果物を開く"/)

@@ -12,22 +12,18 @@
       class="mermaid-code-block-preview"
       contenteditable="false"
       :aria-busy="status === 'loading'"
+      @pointerdown.capture="handlePreviewPointerDown"
+      @contextmenu.capture.prevent.stop="handlePreviewContextMenu"
     >
       <div class="mermaid-code-block-toolbar">
         <span>Mermaid図</span>
-        <div class="mermaid-code-block-actions" role="toolbar" aria-label="Mermaid図の表示サイズ">
-          <input type="button" title="縮小" aria-label="Mermaid図を縮小" value="−" :disabled="zoom <= 0.5" @click.stop="adjustZoom(-0.1)" />
-          <input type="button" title="表示倍率をリセット" :value="`${Math.round(zoom * 100)}%`" @click.stop="resetZoom" />
-          <input type="button" title="拡大" aria-label="Mermaid図を拡大" value="＋" :disabled="zoom >= 2" @click.stop="adjustZoom(0.1)" />
-          <button
-            type="button"
-            class="mermaid-code-block-edit"
-            :disabled="!canEdit"
-            @click.stop="openEditor"
-          >
-            編集
-          </button>
-        </div>
+        <button
+          type="button"
+          class="mermaid-code-block-edit-button"
+          :disabled="!canEdit || isInputLocked"
+          @click.stop="openEditor"
+        >編集</button>
+        <span class="mermaid-code-block-zoom">{{ Math.round(zoom * 100) }}%</span>
       </div>
       <p v-if="status === 'loading'" class="mermaid-code-block-status" role="status">
         Mermaid図を描画しています…
@@ -36,7 +32,19 @@
         {{ errorMessage }}
       </p>
       <div v-else-if="svgUrl" class="mermaid-code-block-viewport">
-        <img :src="svgUrl" :alt="altText" class="mermaid-code-block-image" :style="previewImageStyle" />
+        <div class="mermaid-code-block-resize-frame" :class="{ 'is-resizing': isResizing }">
+          <img :src="svgUrl" :alt="altText" class="mermaid-code-block-image" :style="previewImageStyle" />
+          <button
+            type="button"
+            class="visual-resize-handle"
+            aria-label="Mermaid図の表示サイズを上下方向に変更"
+            title="上下にドラッグして表示サイズを変更"
+            @pointerdown.stop.prevent="startResize"
+            @pointermove.stop.prevent="resize"
+            @pointerup.stop="finishResize"
+            @pointercancel.stop="finishResize"
+          />
+        </div>
       </div>
     </div>
     <MermaidEditDialog
@@ -140,9 +148,12 @@ const errorMessage = ref('')
 const svgUrl = ref<string | null>(null)
 const altText = ref('Mermaid図')
 const zoom = ref(1)
-const previewImageStyle = computed(() => zoom.value === 1
-  ? undefined
-  : { width: `${zoom.value * 100}%`, maxWidth: 'none' })
+const isResizing = ref(false)
+let resizeStart: { pointerId: number; startY: number; startZoom: number; baseHeight: number } | null = null
+const previewImageStyle = computed(() => ({
+  width: `${zoom.value * 50}%`,
+  maxWidth: 'none',
+}))
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null
 let renderGeneration = 0
@@ -162,12 +173,31 @@ function clearPreview() {
   altText.value = 'Mermaid図'
 }
 
-function adjustZoom(delta: number) {
-  zoom.value = Math.min(2, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+function setZoom(value: number) {
+  zoom.value = Math.min(2, Math.max(0.1, Math.round(value * 100) / 100))
 }
 
-function resetZoom() {
-  zoom.value = 1
+function startResize(event: PointerEvent) {
+  if (event.button !== 0) return
+  const handle = event.currentTarget as HTMLElement | null
+  const image = handle?.parentElement?.querySelector('img')
+  const baseHeight = image?.getBoundingClientRect().height ?? 0
+  if (!baseHeight) return
+  resizeStart = { pointerId: event.pointerId, startY: event.clientY, startZoom: zoom.value, baseHeight }
+  isResizing.value = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+}
+
+function resize(event: PointerEvent) {
+  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+  setZoom(resizeStart.startZoom * ((resizeStart.baseHeight + event.clientY - resizeStart.startY) / resizeStart.baseHeight))
+}
+
+function finishResize(event: PointerEvent) {
+  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  resizeStart = null
+  isResizing.value = false
 }
 
 function scheduleRender() {
@@ -245,7 +275,7 @@ async function render(generation: number) {
 }
 
 function openEditor() {
-  if (!canEdit.value || isInputLocked.value) return
+  if (editDialogOpen.value || editSession || !canEdit.value || isInputLocked.value) return
   const target = getCurrentMermaidTarget()
   if (!target) return
 
@@ -256,6 +286,18 @@ function openEditor() {
     node: target.node,
   }
   editDialogOpen.value = true
+}
+
+function handlePreviewPointerDown(event: PointerEvent) {
+  if (event.button !== 2) return
+  event.preventDefault()
+  event.stopPropagation()
+  openEditor()
+}
+
+function handlePreviewContextMenu(event: MouseEvent) {
+  event.preventDefault()
+  openEditor()
 }
 
 function applySource(nextSource: string) {
@@ -340,6 +382,13 @@ function handleDialogOpen(open: boolean) {
   if (!open) editSession = null
 }
 
+function openEditorOnSelection() {
+  const storage = getEditorStorage()
+  if (!props.selected || !storage?.openMermaidEditorOnSelect) return
+  storage.openMermaidEditorOnSelect = false
+  void nextTick(openEditor)
+}
+
 watch(
   () => [
     props.node.attrs.language,
@@ -360,6 +409,8 @@ watch(canEdit, (editable) => {
   })
 })
 
+watch(() => props.selected, openEditorOnSelection, { immediate: true })
+
 onBeforeUnmount(() => {
   getEditorStorage()?.mermaidEditorFlushers?.delete(editorInputFlusher)
   getEditorStorage()?.mermaidEditorInputLockers?.delete(editorInputLocker)
@@ -370,3 +421,66 @@ onBeforeUnmount(() => {
   clearPreview()
 })
 </script>
+
+<style scoped>
+.mermaid-code-block-resize-frame {
+  position: relative;
+  display: inline-block;
+  min-width: 5%;
+  outline: 1px solid transparent;
+}
+
+.mermaid-code-block-resize-frame:hover,
+.mermaid-code-block-resize-frame:focus-within,
+.mermaid-code-block-resize-frame.is-resizing {
+  outline-color: var(--brand-primary);
+}
+
+.mermaid-code-block-image {
+  display: block;
+  height: auto;
+}
+
+.visual-resize-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--bg-editor);
+  border-radius: 2px;
+  background: var(--brand-primary);
+  cursor: ns-resize;
+  opacity: 0;
+  touch-action: none;
+}
+
+.mermaid-code-block-resize-frame:hover .visual-resize-handle,
+.mermaid-code-block-resize-frame:focus-within .visual-resize-handle,
+.mermaid-code-block-resize-frame.is-resizing .visual-resize-handle {
+  opacity: 1;
+}
+
+.mermaid-code-block-zoom {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.mermaid-code-block-edit-button {
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.mermaid-code-block-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+</style>

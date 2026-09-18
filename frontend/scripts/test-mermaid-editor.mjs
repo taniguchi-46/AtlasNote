@@ -10,11 +10,16 @@ const rootDir = process.cwd()
 const outDir = path.join(rootDir, '.tmp', 'mermaid-editor-test')
 const clipboardOut = path.join(outDir, 'mermaidClipboard.mjs')
 const serializerOut = path.join(outDir, 'tiptapMarkdownSerializer.mjs')
+const imageResizeOut = path.join(outDir, 'imageResize.mjs')
 const sessionOut = path.join(outDir, 'mermaidEditorSession.mjs')
 const beforeLockOut = path.join(outDir, 'contentLockBeforeLock.mjs')
 const pasteOut = path.join(outDir, 'mermaidPaste.mjs')
 const dialogOut = path.join(outDir, 'MermaidEditDialog.mjs')
+const visualEditorOut = path.join(outDir, 'MermaidVisualEditor.mjs')
+const visualEditorModelOut = path.join(outDir, 'mermaidVisualEditorModel.mjs')
 const nodeViewOut = path.join(outDir, 'MermaidCodeBlockView.mjs')
+const nodeViewProductionOut = path.join(outDir, 'MermaidCodeBlockView.production.mjs')
+const insertionOut = path.join(outDir, 'mermaidInsertion.mjs')
 let restoreEmptyParagraphs = () => {}
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://atlasnote.test/',
@@ -45,13 +50,28 @@ await mkdir(outDir, { recursive: true })
 
 try {
   await compileTypeScript(path.join(rootDir, 'src', 'utils', 'mermaidClipboard.ts'), clipboardOut)
-  await compileTypeScript(path.join(rootDir, 'src', 'utils', 'tiptapMarkdownSerializer.ts'), serializerOut)
+  await compileTypeScript(path.join(rootDir, 'src', 'utils', 'imageResize.ts'), imageResizeOut)
+  await compileTypeScript(
+    path.join(rootDir, 'src', 'utils', 'tiptapMarkdownSerializer.ts'),
+    serializerOut,
+    [["from './imageResize'", "from './imageResize.mjs'"]],
+  )
   await compileTypeScript(path.join(rootDir, 'src', 'utils', 'mermaidEditorSession.ts'), sessionOut)
   await compileTypeScript(path.join(rootDir, 'src', 'utils', 'contentLockBeforeLock.ts'), beforeLockOut)
+  await compileTypeScript(path.join(rootDir, 'src', 'utils', 'mermaidInsertion.ts'), insertionOut)
   await compileTypeScript(
     path.join(rootDir, 'src', 'utils', 'mermaidPaste.ts'),
     pasteOut,
     [["from './mermaidClipboard'", "from './mermaidClipboard.mjs'"]],
+  )
+  await compileTypeScript(
+    path.join(rootDir, 'src', 'utils', 'mermaidVisualEditor.ts'),
+    visualEditorModelOut,
+  )
+  await compileVueComponent(
+    path.join(rootDir, 'src', 'components', 'MermaidVisualEditor.vue'),
+    visualEditorOut,
+    [["from '../utils/mermaidVisualEditor'", "from './mermaidVisualEditorModel.mjs'"]],
   )
   await compileVueComponent(
     path.join(rootDir, 'src', 'components', 'MermaidEditDialog.vue'),
@@ -59,14 +79,25 @@ try {
     [
       ["from 'reka-ui'", "from './component-mocks.mjs'"],
       ["from '../utils/mermaidRenderer'", "from './component-mocks.mjs'"],
+      ["from './MermaidVisualEditor.vue'", "from './MermaidVisualEditor.mjs'"],
     ],
   )
   await compileVueComponent(
     path.join(rootDir, 'src', 'components', 'MermaidCodeBlockView.vue'),
     nodeViewOut,
-      [
+    [
       ["from '@tiptap/vue-3'", "from './component-mocks.mjs'"],
       ["from '@tiptap/pm/model'", "from './component-mocks.mjs'"],
+      ["from '../stores/useAppStore'", "from './component-mocks.mjs'"],
+      ["from '../stores/useNoteStore'", "from './component-mocks.mjs'"],
+      ["from '../utils/mermaidRenderer'", "from './component-mocks.mjs'"],
+      ["from './MermaidEditDialog.vue'", "from './MermaidEditDialog.mjs'"],
+    ],
+  )
+  await compileVueComponent(
+    path.join(rootDir, 'src', 'components', 'MermaidCodeBlockView.vue'),
+    nodeViewProductionOut,
+    [
       ["from '../stores/useAppStore'", "from './component-mocks.mjs'"],
       ["from '../stores/useNoteStore'", "from './component-mocks.mjs'"],
       ["from '../utils/mermaidRenderer'", "from './component-mocks.mjs'"],
@@ -83,9 +114,11 @@ try {
   restoreEmptyParagraphs = restoreSerializedEmptyParagraphs
   const { flushMermaidEditorInputs, setMermaidEditorInputsLocked } = await import(pathToFileURL(sessionOut))
   const { createContentLockBeforeLock } = await import(pathToFileURL(beforeLockOut))
+  const { insertMermaidCodeBlock } = await import(pathToFileURL(insertionOut))
   const { handleMermaidPaste } = await import(pathToFileURL(pasteOut))
   const Dialog = (await import(pathToFileURL(dialogOut))).default
   const NodeView = (await import(pathToFileURL(nodeViewOut))).default
+  const ProductionNodeView = (await import(pathToFileURL(nodeViewProductionOut))).default
   const componentMocks = await import(pathToFileURL(path.join(outDir, 'component-mocks.mjs')))
   const { Editor } = await import('@tiptap/core')
   const StarterKit = (await import('@tiptap/starter-kit')).default
@@ -95,8 +128,60 @@ try {
   const { DOMParser: ProseMirrorDOMParser } = await import('@tiptap/pm/model')
   const { NodeSelection } = await import('@tiptap/pm/state')
   const { history, undo } = await import('@tiptap/pm/history')
+  const { EditorContent, VueNodeViewRenderer } = await import('@tiptap/vue-3')
 
   const editor = createEditor(Editor, StarterKit, CodeBlockLowlight, createLowlight, common, Markdown)
+
+  const MermaidInsertionCodeBlock = CodeBlockLowlight.extend({
+    addStorage() {
+      return {
+        ...this.parent?.(),
+        openMermaidEditorOnSelect: false,
+      }
+    },
+  })
+  const insertionEditor = new Editor({
+    extensions: [
+      StarterKit.configure({ codeBlock: false, undoRedo: false }),
+      MermaidInsertionCodeBlock.configure({ lowlight: createLowlight(common) }),
+    ],
+    content: {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'before' }] },
+        { type: 'codeBlock', attrs: { language: 'mermaid' }, content: [{ type: 'text', text: 'flowchart TD\n  A --> B' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'middle' }] },
+        { type: 'codeBlock', attrs: { language: 'mermaid' }, content: [{ type: 'text', text: 'flowchart TD\n  C --> D' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'after' }] },
+      ],
+    },
+  })
+  insertionEditor.registerPlugin(history({ depth: 20, newGroupDelay: 500 }))
+  let middleParagraphPosition = -1
+  insertionEditor.state.doc.descendants((node, position) => {
+    if (node.type.name === 'paragraph' && node.textContent === 'middle') middleParagraphPosition = position + 1
+  })
+  assert.notEqual(middleParagraphPosition, -1)
+  insertionEditor.commands.setTextSelection(middleParagraphPosition)
+  const insertedSource = 'flowchart TD\n  X --> Y'
+  assert.equal(insertMermaidCodeBlock(insertionEditor, insertedSource), true)
+  const insertedMermaidPositions = []
+  insertionEditor.state.doc.descendants((node, position) => {
+    if (node.type.name === 'codeBlock' && String(node.attrs.language ?? '').toLowerCase() === 'mermaid') {
+      insertedMermaidPositions.push(position)
+    }
+  })
+  assert.equal(insertedMermaidPositions.length, 3)
+  assert.ok(insertionEditor.state.selection instanceof NodeSelection)
+  assert.equal(insertionEditor.state.selection.node.textContent, insertedSource)
+  assert.equal(insertionEditor.state.selection.from, insertedMermaidPositions[1],
+    'inserting before the last Mermaid block must select the inserted block')
+  assert.equal(insertionEditor.storage.codeBlock.openMermaidEditorOnSelect, true,
+    'the inserted block must request the Mermaid edit dialog')
+  assert.equal(undo(insertionEditor.state, insertionEditor.view.dispatch), true,
+    'the insertion must remain one undoable transaction')
+  assert.equal(insertionEditor.state.doc.childCount, 5)
+  insertionEditor.destroy()
 
   const mixedMarkdown = [
     '前置段落',
@@ -343,9 +428,21 @@ try {
   await testProductMermaidComponents(
     Dialog,
     NodeView,
+    ProductionNodeView,
     componentMocks,
     dom.window,
-    { flushMermaidEditorInputs, setMermaidEditorInputsLocked, createContentLockBeforeLock },
+    {
+      Editor,
+      EditorContent,
+      StarterKit,
+      CodeBlockLowlight,
+      VueNodeViewRenderer,
+      common,
+      createLowlight,
+      flushMermaidEditorInputs,
+      setMermaidEditorInputsLocked,
+      createContentLockBeforeLock,
+    },
   )
 
   editor.destroy()
@@ -399,7 +496,7 @@ function componentMocksSource() {
   return `
 import { h, reactive } from 'vue'
 
-export const nodeViewProps = { node: Object, editor: Object, extension: Object, getPos: Function }
+export const nodeViewProps = { node: Object, editor: Object, extension: Object, getPos: Function, selected: Boolean }
 export const Fragment = { empty: {} }
 export const store = reactive({ theme: 'light' })
 export const useAppStore = () => store
@@ -456,7 +553,14 @@ export const DialogContent = {
 `
 }
 
-async function testProductMermaidComponents(Dialog, NodeView, mocks, browserWindow, integration) {
+async function testProductMermaidComponents(
+  Dialog,
+  NodeView,
+  ProductionNodeView,
+  mocks,
+  browserWindow,
+  integration,
+) {
   const { createApp, h, nextTick, reactive } = await import('vue')
   const previousCreateObjectUrl = URL.createObjectURL
   const previousRevokeObjectUrl = URL.revokeObjectURL
@@ -476,6 +580,12 @@ async function testProductMermaidComponents(Dialog, NodeView, mocks, browserWind
       h,
       nextTick,
       reactive,
+      ...integration,
+    })
+    await testActualTiptapMermaidNodeView(ProductionNodeView, mocks, {
+      createApp,
+      h,
+      nextTick,
       ...integration,
     })
   } finally {
@@ -519,11 +629,63 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
   try {
     props.open = true
     await nextTick()
+    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    await nextTick()
     const textarea = () => host.querySelector('textarea')
     assert.equal(textarea()?.value, source, 'the actual dialog opens with the node source')
     const initialRender = await waitForRender(mocks, source)
     mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'initial' })
+    await waitFor(() => host.querySelector('.mermaid-edit-dialog-image') !== null)
     await nextTick()
+
+    const zoomLabel = () => Number.parseInt(host.querySelector('.mermaid-edit-dialog-zoom')?.textContent ?? '', 10)
+    const image = host.querySelector('.mermaid-edit-dialog-image')
+    const handle = host.querySelector('.mermaid-edit-dialog-resize-handle')
+    assert.ok(image)
+    assert.ok(handle)
+    mockImageLayout(image, 100)
+    let capturedPointerId = null
+    let releasedPointerId = null
+    handle.setPointerCapture = (pointerId) => { capturedPointerId = pointerId }
+    handle.releasePointerCapture = (pointerId) => { releasedPointerId = pointerId }
+    assert.match(handle.getAttribute('title') ?? '', /上下/)
+    const initialZoom = zoomLabel()
+    const horizontalOnly = dispatchPointer(handle, 'pointerdown', {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 11,
+    })
+    assert.equal(horizontalOnly.defaultPrevented, true)
+    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 100, pointerId: 11 })
+    await nextTick()
+    assert.equal(zoomLabel(), initialZoom, 'horizontal movement must not change Mermaid zoom')
+    dispatchPointer(handle, 'pointermove', { clientX: 100, clientY: 140, pointerId: 11 })
+    await nextTick()
+    assert.equal(capturedPointerId, 11)
+    assert.ok(zoomLabel() > initialZoom, 'downward drag must increase Mermaid zoom')
+    dispatchPointer(handle, 'pointerup', { clientY: 140, pointerId: 11 })
+    assert.equal(releasedPointerId, 11)
+
+    const zoomBeforeUpwardDrag = zoomLabel()
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 12 })
+    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 50, pointerId: 12 })
+    await nextTick()
+    assert.ok(zoomLabel() < zoomBeforeUpwardDrag, 'upward drag must decrease Mermaid zoom')
+    dispatchPointer(handle, 'pointercancel', { clientY: 50, pointerId: 12 })
+    await nextTick()
+    assert.equal(host.querySelector('.mermaid-edit-dialog-resize-frame')?.classList.contains('is-resizing'), false)
+
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 13 })
+    dispatchPointer(handle, 'pointermove', { clientY: -10000, pointerId: 13 })
+    await nextTick()
+    assert.equal(zoomLabel(), 10, 'Mermaid zoom must clamp at 10%')
+    dispatchPointer(handle, 'pointerup', { clientY: -10000, pointerId: 13 })
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 14 })
+    dispatchPointer(handle, 'pointermove', { clientY: 10000, pointerId: 14 })
+    await nextTick()
+    assert.equal(zoomLabel(), 200, 'Mermaid zoom must clamp at 200%')
+    dispatchPointer(handle, 'pointerup', { clientY: 10000, pointerId: 14 })
 
     const externalSource = 'flowchart TD\n  A --> external'
     const updatesBeforeExternalSource = updates.length
@@ -557,7 +719,7 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
     await nextTick()
     assert.equal(props.source, composition, 'compositionend must commit the final source')
 
-    host.querySelectorAll('button')[0].click()
+    host.querySelector('.mermaid-edit-dialog-actions button:first-child')?.click()
     await nextTick()
     assert.equal(props.open, false, 'close must close the actual dialog')
     assert.equal(props.source, composition, 'close must preserve the latest source')
@@ -565,8 +727,10 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
 
     props.open = true
     await nextTick()
+    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    await nextTick()
     assert.equal(textarea()?.value, composition, 'reopening must use the committed source')
-    host.querySelectorAll('button')[1].click()
+    host.querySelector('.mermaid-edit-dialog-actions button:last-child')?.click()
     await nextTick()
     assert.equal(props.open, false)
     assert.equal(saves, 1, 'save must close after the source is already committed')
@@ -637,15 +801,71 @@ async function testActualMermaidNodeView(NodeView, mocks, vue) {
   app.mount(host)
 
   try {
+    const openDiagramEditor = async (trigger = 'pointerdown') => {
+      await waitFor(() => host.querySelector('.mermaid-code-block-preview') !== null)
+      const preview = host.querySelector('.mermaid-code-block-preview')
+      if (trigger === 'contextmenu') {
+        const contextMenu = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        preview.dispatchEvent(contextMenu)
+        assert.equal(contextMenu.defaultPrevented, true, 'contextmenu must be suppressed')
+      } else {
+        const pointerDown = dispatchPointer(preview, 'pointerdown', { button: 2, pointerId: 31 })
+        const contextMenu = new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        preview.dispatchEvent(contextMenu)
+        assert.equal(pointerDown.defaultPrevented, true, 'right-button pointerdown must suppress the native menu')
+        assert.equal(contextMenu.defaultPrevented, true, 'contextmenu must remain suppressed')
+      }
+      await nextTick()
+      host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+      await nextTick()
+      assert.equal(host.querySelectorAll('textarea').length, 1, 'right-click must open only one edit dialog')
+    }
     const initialRender = await waitForRender(mocks, currentNode.textContent)
     mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'node' })
+    await waitFor(() => host.querySelector('.mermaid-code-block-image') !== null)
     await nextTick()
     const hiddenSource = host.querySelector('.mermaid-code-block-source')
     assert.equal(hiddenSource?.getAttribute('contenteditable'), 'false')
     assert.equal(hiddenSource?.getAttribute('tabindex'), '-1')
     assert.equal(hiddenSource?.getAttribute('aria-hidden'), 'true')
 
-    host.querySelector('.mermaid-code-block-edit').click()
+    const zoomLabel = () => Number.parseInt(host.querySelector('.mermaid-code-block-zoom')?.textContent ?? '', 10)
+    const image = host.querySelector('.mermaid-code-block-image')
+    const handle = host.querySelector('.visual-resize-handle')
+    assert.ok(image)
+    assert.ok(handle)
+    mockImageLayout(image, 100)
+    assert.match(handle.getAttribute('title') ?? '', /上下/)
+    const initialZoom = zoomLabel()
+    dispatchPointer(handle, 'pointerdown', { clientX: 100, clientY: 100, pointerId: 21 })
+    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 100, pointerId: 21 })
+    await nextTick()
+    assert.equal(zoomLabel(), initialZoom, 'horizontal movement must not change NodeView Mermaid zoom')
+    dispatchPointer(handle, 'pointermove', { clientX: 100, clientY: 140, pointerId: 21 })
+    await nextTick()
+    assert.ok(zoomLabel() > initialZoom, 'NodeView downward drag must increase Mermaid zoom')
+    dispatchPointer(handle, 'pointerup', { clientY: 140, pointerId: 21 })
+    const zoomBeforeUpwardDrag = zoomLabel()
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 22 })
+    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 50, pointerId: 22 })
+    await nextTick()
+    assert.ok(zoomLabel() < zoomBeforeUpwardDrag, 'NodeView upward drag must decrease Mermaid zoom')
+    dispatchPointer(handle, 'pointercancel', { clientY: 50, pointerId: 22 })
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 23 })
+    dispatchPointer(handle, 'pointermove', { clientY: -10000, pointerId: 23 })
+    await nextTick()
+    assert.equal(zoomLabel(), 10, 'NodeView Mermaid zoom must clamp at 10%')
+    dispatchPointer(handle, 'pointerup', { clientY: -10000, pointerId: 23 })
+    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 24 })
+    dispatchPointer(handle, 'pointermove', { clientY: 10000, pointerId: 24 })
+    await nextTick()
+    assert.equal(zoomLabel(), 200, 'NodeView Mermaid zoom must clamp at 200%')
+    dispatchPointer(handle, 'pointerup', { clientY: 10000, pointerId: 24 })
+
+    await openDiagramEditor('contextmenu')
+    host.querySelector('.mermaid-edit-dialog-actions button').click()
+    await nextTick()
+    await openDiagramEditor('pointerdown')
     await nextTick()
     const textarea = () => host.querySelector('textarea')
     assert.equal(textarea()?.value, currentNode.textContent)
@@ -662,21 +882,21 @@ async function testActualMermaidNodeView(NodeView, mocks, vue) {
     assert.equal(currentNode.textContent, secondEdit, 'the edit session must survive its own node update')
     assert.equal(dispatchCount, 2)
 
-    host.querySelectorAll('button').item(1).click()
+    host.querySelector('.mermaid-edit-dialog-actions button').click()
     await nextTick()
     assert.equal(host.querySelector('textarea'), null, 'the actual dialog close button must close the session')
     assert.equal(currentNode.textContent, secondEdit)
 
-    host.querySelector('.mermaid-code-block-edit').click()
+    await openDiagramEditor()
     await nextTick()
     assert.equal(host.querySelector('textarea')?.value, secondEdit, 'reopening must retain NodeView edits')
-    host.querySelectorAll('button').item(2).click()
+    host.querySelector('.mermaid-edit-dialog-actions button').click()
     await nextTick()
     assert.equal(host.querySelector('textarea'), null)
 
     props.editor.isEditable = true
     mocks.deletionPreparing.delete('product-note')
-    host.querySelector('.mermaid-code-block-edit').click()
+    await openDiagramEditor()
     await nextTick()
     const composition = 'flowchart TD\n  A --> IME'
     const editingTextarea = host.querySelector('textarea')
@@ -781,6 +1001,107 @@ function createFakeMermaidNode(textContent) {
   }
 }
 
+async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
+  const {
+    createApp,
+    h,
+    nextTick,
+    Editor,
+    EditorContent,
+    StarterKit,
+    CodeBlockLowlight,
+    VueNodeViewRenderer,
+    common,
+    createLowlight,
+  } = vue
+  const source = 'flowchart TD\n  A --> B'
+  const mermaidCodeBlock = CodeBlockLowlight.extend({
+    addStorage() {
+      return {
+        ...this.parent?.(),
+        noteId: 'product-note',
+        generation: 1,
+        mermaidEditorFlushers: new Set(),
+        mermaidEditorInputLockers: new Set(),
+      }
+    },
+    addNodeView() {
+      return VueNodeViewRenderer(NodeView)
+    },
+  })
+  const editor = new Editor({
+    extensions: [
+      StarterKit.configure({ codeBlock: false, undoRedo: false }),
+      mermaidCodeBlock.configure({ lowlight: createLowlight(common) }),
+    ],
+    content: {
+      type: 'doc',
+      content: [
+        {
+          type: 'codeBlock',
+          attrs: { language: 'mermaid' },
+          content: [{ type: 'text', text: source }],
+        },
+        { type: 'paragraph' },
+      ],
+    },
+  })
+  const host = document.createElement('div')
+  document.body.append(host)
+  const app = createApp({ render: () => h(EditorContent, { editor }) })
+  app.mount(host)
+
+  try {
+    await waitFor(() => host.querySelector('.mermaid-code-block-preview') !== null)
+    const initialRender = await waitForRender(mocks, source)
+    mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'integrated node' })
+    await waitFor(() => host.querySelector('.mermaid-code-block-image') !== null)
+    await nextTick()
+
+    const preview = () => host.querySelector('.mermaid-code-block-preview')
+    const closeDialog = async () => {
+      host.querySelector('.mermaid-edit-dialog-actions button')?.click()
+      await nextTick()
+    }
+
+    const contextMenuOnly = new dom.window.MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    })
+    preview().dispatchEvent(contextMenuOnly)
+    await nextTick()
+    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    await nextTick()
+    assert.equal(contextMenuOnly.defaultPrevented, true,
+      'the actual Tiptap NodeView must suppress the native context menu')
+    assert.equal(host.querySelectorAll('textarea').length, 1,
+      'the actual Tiptap NodeView must open editing from contextmenu')
+    await closeDialog()
+
+    const pointerDown = dispatchPointer(preview(), 'pointerdown', { button: 2, pointerId: 41 })
+    const contextMenu = new dom.window.MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+    })
+    preview().dispatchEvent(contextMenu)
+    await nextTick()
+    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    await nextTick()
+    assert.equal(pointerDown.defaultPrevented, true,
+      'the actual Tiptap NodeView must suppress right-button pointerdown')
+    assert.equal(contextMenu.defaultPrevented, true,
+      'the actual Tiptap NodeView must suppress the follow-up contextmenu')
+    assert.equal(host.querySelectorAll('textarea').length, 1,
+      'pointerdown and contextmenu must open only one actual edit dialog')
+    assert.equal(editor.state.doc.firstChild.textContent, source,
+      'opening the actual edit dialog must not change the document')
+  } finally {
+    app.unmount()
+    editor.destroy()
+    host.remove()
+  }
+}
+
 function setInputValue(element, value, event) {
   if (!element) throw new Error('textarea was not rendered')
   element.value = value
@@ -792,12 +1113,12 @@ function browserInputEvent() {
 }
 
 async function waitForRender(mocks, source, theme) {
-  await waitFor(() => mocks.pendingRenders.some((pending) =>
-    pending.source === source && (theme === undefined || pending.options.theme === theme),
-  ))
-  return mocks.pendingRenders.findIndex((pending) =>
-    pending.source === source && (theme === undefined || pending.options.theme === theme),
-  )
+  const firstNewIndex = mocks.pendingRenders.length
+  const matches = (pending, index) => index >= firstNewIndex
+    && pending.source === source
+    && (theme === undefined || pending.options.theme === theme)
+  await waitFor(() => mocks.pendingRenders.some((pending, index) => matches(pending, index)))
+  return mocks.pendingRenders.findLastIndex((pending, index) => matches(pending, index))
 }
 
 async function waitFor(predicate) {
@@ -835,6 +1156,36 @@ function clipboardData(entries) {
       return entries[type] ?? ''
     },
   }
+}
+
+function dispatchPointer(target, type, options = {}) {
+  const event = new dom.window.MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX: 0,
+    clientY: 0,
+    ...options,
+  })
+  Object.defineProperty(event, 'pointerId', { value: options.pointerId ?? 1 })
+  target.dispatchEvent(event)
+  return event
+}
+
+function mockImageLayout(image, height) {
+  image.getBoundingClientRect = () => ({
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 200,
+    bottom: height,
+    width: 200,
+    height,
+    toJSON() {
+      return this
+    },
+  })
 }
 
 function findCodeBlockPosition(editor) {

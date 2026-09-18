@@ -7,8 +7,10 @@ import { unsafeSources } from './mermaid-unsafe-sources.mjs'
 
 const rootDir = process.cwd()
 const sourcePath = path.join(rootDir, 'src', 'utils', 'mermaidRenderer.ts')
+const visualSourcePath = path.join(rootDir, 'src', 'utils', 'mermaidVisualEditor.ts')
 const outDir = path.join(rootDir, '.tmp', 'mermaid-test')
 const outFile = path.join(outDir, 'mermaidRenderer.mjs')
+const visualOutFile = path.join(outDir, 'mermaidVisualEditor.mjs')
 
 const dom = new JSDOM('<!doctype html><html data-theme="light"><body></body></html>', {
   url: 'https://atlasnote.test/',
@@ -56,12 +58,27 @@ const compiled = ts.transpileModule(source, {
   },
 })
 await writeFile(outFile, compiled.outputText, 'utf8')
+const visualSource = await readFile(visualSourcePath, 'utf8')
+const visualCompiled = ts.transpileModule(visualSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+    importsNotUsedAsValues: ts.ImportsNotUsedAsValues.Remove,
+  },
+})
+await writeFile(visualOutFile, visualCompiled.outputText, 'utf8')
 
 const {
   MERMAID_LIMITS,
   renderMermaidDiagram,
   validateMermaidSource,
 } = await import(pathToFileUrl(outFile))
+const {
+  MERMAID_DIAGRAM_CATALOG,
+  createMermaidElement,
+  generateMermaidSource,
+  parseMermaidVisualSource,
+} = await import(pathToFileUrl(visualOutFile))
 
 assert.equal(validateMermaidSource('')?.code, 'empty')
 assert.equal(validateMermaidSource('x'.repeat(MERMAID_LIMITS.maxTextSize + 1))?.code, 'too-large')
@@ -69,6 +86,7 @@ assert.equal(validateMermaidSource('%%{init: {"theme":"dark"}}%%\nflowchart TD')
 assert.equal(validateMermaidSource('flowchart TD\n  A --> B\n  click A callMe')?.code, 'unsafe-syntax')
 assert.equal(validateMermaidSource('flowchart TD\n  A@{ img: "https://example.test/a.png" }')?.code, 'unsafe-syntax')
 assert.equal(validateMermaidSource('flowchart TD\n  A@{ icon: "fa:user" }')?.code, 'unsafe-syntax')
+assert.equal(validateMermaidSource('flowchart TD\n  A@{ shape: rect, label: "開始" }'), null)
 assert.equal(validateMermaidSource('flowchart TD\n  link A "https://example.test"')?.code, 'unsafe-syntax')
 assert.equal(validateMermaidSource('flowchart TD\n  A --> B'), null)
 assert.equal(validateMermaidSource(String.raw`flowchart TD; A[\Input\] --> B{Ready?}`), null)
@@ -131,7 +149,7 @@ const unsafeOutputApi = {
   async render() {
     return {
       svg: '<svg onload="alert(1)"><script>alert(1)</script>'
-        + '<foreignObject><div>unsafe</div></foreignObject></svg>',
+        + '<rect width="10" height="10"></rect></svg>',
     }
   },
 }
@@ -209,13 +227,137 @@ for (const input of [
   'sequenceDiagram\n A->>B: callback returned',
   String.raw`flowchart TD; A[\Input\] --> B{Ready?}`,
   'flowchart TD\n A-->B\n style A fill:#fff,stroke:#333',
+  'flowchart TD\n A@{ shape: rect, label: "開始" } --> B@{ shape: diamond, label: "判断" }',
 ]) {
   assert.equal(validateMermaidSource(input), null, input)
   assert.equal((await renderMermaidDiagram(input, { mermaid: realMermaid })).ok, true, input)
 }
+dom.window.HTMLCanvasElement.prototype.getContext = function getContext() {
+  const context = {
+    canvas: this,
+    font: '',
+    measureText: (value) => ({ width: String(value ?? '').length * 8 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+  }
+  const noop = () => {}
+  return new Proxy(context, {
+    get(target, property) {
+      if (property in target) return target[property]
+      target[property] = noop
+      return noop
+    },
+  })
+}
+
+async function assertMermaidSourceRenders(source, label) {
+  assert.equal(validateMermaidSource(source), null, `${label} must pass source validation`)
+  const parsed = await realMermaid.parse(source, { suppressErrors: true })
+  assert.notEqual(parsed, false, `${label} must parse in Mermaid 11.17.2`)
+  const result = await renderMermaidDiagram(source, {
+    theme: 'light',
+    mermaid: realMermaid,
+  })
+  assert.equal(result.ok, true, `${label} must render in Mermaid 11.17.2`)
+}
+
+const classDocument = parseMermaidVisualSource([
+  'classDiagram',
+  '  class User {',
+  '    %% keep this unsupported line',
+  '    +String name',
+  '  }',
+  '  User --> Account : owns',
+].join('\n'))
+assert.ok(classDocument)
+const addedClass = createMermaidElement('class', 'class', classDocument.elements.length)
+addedClass.fields.name = 'AuditLog'
+classDocument.elements.push(addedClass)
+const addedAttribute = createMermaidElement('class', 'attribute', classDocument.elements.length)
+addedAttribute.fields.owner = 'AuditLog'
+addedAttribute.fields.visibility = '+'
+addedAttribute.fields.name = 'id'
+addedAttribute.fields.type = 'string'
+classDocument.elements.push(addedAttribute)
+const addedMethod = createMermaidElement('class', 'method', classDocument.elements.length)
+addedMethod.fields.owner = 'AuditLog'
+addedMethod.fields.visibility = '+'
+addedMethod.fields.name = 'record'
+addedMethod.fields.parameters = 'event'
+classDocument.elements.push(addedMethod)
+const generatedClass = generateMermaidSource(classDocument)
+assert.match(generatedClass, /class AuditLog \{\n(?:.*\n)*    \+id : string\n    \+record\(event\)\n  \}/)
+assert.match(generatedClass, /%% keep this unsupported line/)
+await assertMermaidSourceRenders(generatedClass, 'class add operations')
+
+classDocument.elements = classDocument.elements.filter((item) => item !== addedClass)
+await assertMermaidSourceRenders(generateMermaidSource(classDocument), 'class block delete with members')
+classDocument.elements = classDocument.elements.filter((item) => ![addedClass, addedAttribute, addedMethod].includes(item))
+await assertMermaidSourceRenders(generateMermaidSource(classDocument), 'class delete operations')
+classDocument.elements = classDocument.elements.filter((item) => item.kind !== 'attribute')
+await assertMermaidSourceRenders(generateMermaidSource(classDocument), 'class member delete operations')
+
+const erDocument = parseMermaidVisualSource([
+  'erDiagram',
+  '  USER ||--o{ ORDER : places',
+  '  USER {',
+  '    string id PK',
+  '  }',
+].join('\n'))
+assert.ok(erDocument)
+const addedEntity = createMermaidElement('er', 'entity', erDocument.elements.length)
+addedEntity.fields.name = 'AUDIT'
+erDocument.elements.push(addedEntity)
+const addedField = createMermaidElement('er', 'field', erDocument.elements.length)
+addedField.fields.owner = 'AUDIT'
+addedField.fields.type = 'string'
+addedField.fields.name = 'id'
+erDocument.elements.push(addedField)
+const generatedEr = generateMermaidSource(erDocument)
+assert.match(generatedEr, /AUDIT \{\n    string id\n  \}/)
+await assertMermaidSourceRenders(generatedEr, 'ER add operations')
+erDocument.elements = erDocument.elements.filter((item) => item !== addedEntity)
+await assertMermaidSourceRenders(generateMermaidSource(erDocument), 'ER block delete with fields')
+erDocument.elements = erDocument.elements.filter((item) => ![addedEntity, addedField].includes(item))
+await assertMermaidSourceRenders(generateMermaidSource(erDocument), 'ER delete operations')
+erDocument.elements = erDocument.elements.filter((item) => item.kind !== 'field')
+await assertMermaidSourceRenders(generateMermaidSource(erDocument), 'ER field delete operations')
+
+for (const type of ['gantt', 'journey']) {
+  const document = parseMermaidVisualSource(type === 'gantt'
+    ? 'gantt\n  title Plan\n  dateFormat YYYY-MM-DD'
+    : 'journey\n  title Flow')
+  assert.ok(document)
+  const section = createMermaidElement(type, 'section', document.elements.length)
+  section.fields.name = '追加区分'
+  document.elements.push(section)
+  const item = createMermaidElement(type, 'item', document.elements.length)
+  item.fields.name = '追加項目'
+  item.fields.actor = '利用者'
+  document.elements.push(item)
+  const generated = generateMermaidSource(document)
+  assert.match(generated, /section 追加区分/)
+  await assertMermaidSourceRenders(generated, `${type} add operations`)
+}
+
+const browserLayoutOnlyTypes = new Set(['mindmap', 'c4'])
+for (const definition of MERMAID_DIAGRAM_CATALOG) {
+  if (browserLayoutOnlyTypes.has(definition.type)) {
+    const parsed = await realMermaid.parse(definition.sample, { suppressErrors: true })
+    assert.notEqual(parsed, false, `${definition.type} catalog sample must parse`)
+    continue
+  }
+  const result = await renderMermaidDiagram(definition.sample, {
+    theme: 'light',
+    mermaid: realMermaid,
+  })
+  assert.equal(result.ok, true, `${definition.type} catalog sample must render`)
+}
 
 await rm(outDir, { recursive: true, force: true })
+dom.window.close()
 console.log('Mermaid renderer tests passed')
+process.exit(0)
 
 function pathToFileUrl(filePath) {
   return `file:///${filePath.replace(/\\/g, '/')}`

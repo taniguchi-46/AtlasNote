@@ -148,7 +148,7 @@ Go Backend
 
 ### Mermaid図のRich表示
 
-- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして図のみを表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。ソース編集はNodeViewのダイアログで行う。NodeViewとダイアログの表示倍率は表示専用で、Markdown・SQLite・同期へ保存しない。
+- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして図のみを表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。ソース編集はNodeViewのダイアログで行い、かんたん編集の行モデルはダイアログ内だけで保持してcanonical sourceへ反映する。NodeViewとダイアログの表示倍率は表示専用で、Markdown・SQLite・同期へ保存しない。
 - MarkdownモードとエクスポートはMermaidのコードソースを扱い、AI回答プレビューは対象外とする。raw HTML、raw SVG、`div.mermaid`はMermaid入力として扱わない。
 - ダイアログの保存は対象ノードとアクティブノートの世代を再検証し、成功したソーステキスト置換だけを通常のTiptap transaction、Undo、autosaveへ接続する。Rich貼り付けはfenced/raw/許可したHTML code sourceに限定し、コピーは動的長のMermaidフェンスを使う。
 - Mermaidは固定した安全設定と入力上限で描画し、init／frontmatter設定、click／callback、外部画像・アイコン・URLを拒否する。生成SVGは専用サニタイズ後にBlob URLの`img`として表示し、外部参照・イベント・`foreignObject`を許可しない。

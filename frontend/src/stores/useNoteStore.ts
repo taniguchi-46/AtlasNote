@@ -45,6 +45,8 @@ export type AgentEditProposalApplyOutcome =
   | 'conflict'
   | 'save-failure'
 
+export type DraftOperationMode = 'automatic' | 'required' | 'transition' | 'explicit'
+
 export type AgentEditorHighlight = {
   id: number
   noteId: string
@@ -289,8 +291,8 @@ export const useNoteStore = defineStore('notes', () => {
       || !accessAllowed
     ) return false
 
+    if (!await prepareDraftForOperation(activeNote.value?.id ?? null, 'transition')) return false
     clearAgentEditorHighlight()
-    await flushPendingDraft()
     if (!isLatestRequest() || !isNoteSelectionCurrent(id, deletionGeneration)) return false
 
     isLoading.value = true
@@ -319,8 +321,8 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function newNote(title = DEFAULT_NOTE_TITLE, content = '', notebookId: string | null = null) {
+    if (!await prepareDraftForOperation(activeNote.value?.id ?? null, 'transition')) return null
     clearAgentEditorHighlight()
-    await flushPendingDraft()
     const endSaving = savingRequests.begin()
     error.value = null
     try {
@@ -606,9 +608,89 @@ export const useNoteStore = defineStore('notes', () => {
     return snapshot
   }
 
-  async function flushPendingDraft() {
-    const noteId = activeNote.value?.id
-    return noteId ? autoSave.flush(noteId) : true
+  function resolveDraftOperation(mode: DraftOperationMode): 'save' | 'discard' | 'cancel' {
+    if (mode === 'automatic') return settingsStore.autoSaveEnabled ? 'save' : 'cancel'
+    if (mode === 'explicit' || settingsStore.autoSaveEnabled) return 'save'
+    if (typeof window === 'undefined' || typeof window.confirm !== 'function') return 'cancel'
+
+    const shouldSave = window.confirm(
+      '自動保存がOFFです。未保存の変更を保存してから操作を続けますか？',
+    )
+    if (shouldSave) return 'save'
+    if (mode !== 'transition') return 'cancel'
+
+    return window.confirm('未保存の変更を破棄して、操作を続けますか？') ? 'discard' : 'cancel'
+  }
+
+  async function flushDraftAfterDecision(noteId: string, mode: DraftOperationMode) {
+    const current = getDraft(noteId)
+    if (!current) return true
+    if (current.status === 'conflicted') return false
+    if (current.status === 'failed') {
+      if (mode === 'automatic') return false
+      const retry = { ...current, status: 'dirty' as const, error: null, conflict: null }
+      replaceDraft(noteId, retry)
+      autoSave.retry(retry)
+    }
+    const saved = await autoSave.flush(noteId)
+    return saved && !getDraft(noteId)
+  }
+
+  async function prepareDraftForOperation(noteId: string | null, mode: DraftOperationMode) {
+    if (!noteId) return true
+    try {
+      await autoSave.waitForInFlight(noteId)
+    } catch {
+      return false
+    }
+
+    const current = getDraft(noteId)
+    if (!current) return true
+    if (mode === 'automatic' && !settingsStore.autoSaveEnabled) return false
+
+    const resolution = resolveDraftOperation(mode)
+    if (resolution === 'discard') {
+      discardDraft(noteId)
+      return true
+    }
+    if (resolution !== 'save') return false
+    return flushDraftAfterDecision(noteId, mode)
+  }
+
+  async function prepareDraftsForOperation(noteIds: string[] | undefined, mode: DraftOperationMode) {
+    const targetIds = uniqueNoteIds(noteIds ?? Object.keys(drafts.value))
+    if (targetIds.length === 0) return true
+
+    const decisions = new Map<string, 'save' | 'discard'>()
+    for (const noteId of targetIds) {
+      try {
+        await autoSave.waitForInFlight(noteId)
+      } catch {
+        return false
+      }
+      const current = getDraft(noteId)
+      if (!current) continue
+      if (mode === 'automatic' && !settingsStore.autoSaveEnabled) return false
+
+      const resolution = resolveDraftOperation(mode)
+      if (resolution === 'cancel') return false
+      decisions.set(noteId, resolution)
+    }
+
+    for (const [noteId, resolution] of decisions) {
+      if (resolution === 'discard') {
+        discardDraft(noteId)
+        continue
+      }
+      if (!await flushDraftAfterDecision(noteId, mode)) return false
+    }
+
+    return targetIds.every((noteId) => !getDraft(noteId))
+  }
+
+  async function flushPendingDraft(options: { mode?: DraftOperationMode } = {}) {
+    const noteId = activeNote.value?.id ?? null
+    return prepareDraftForOperation(noteId, options.mode ?? 'required')
   }
 
   async function retryDraftSave(noteId: string) {
@@ -622,19 +704,8 @@ export const useNoteStore = defineStore('notes', () => {
     return getDraft(noteId) === null
   }
 
-  async function flushAllDirtyNotes() {
-    await autoSave.flush()
-
-    for (const draft of Object.values(drafts.value)) {
-      const current = getDraft(draft.noteId)
-      if (!current || current.draftVersion !== draft.draftVersion) continue
-      if (current.status === 'conflicted') continue
-
-      autoSave.retry(current)
-      await autoSave.flush(current.noteId)
-    }
-
-    return Object.keys(drafts.value).length === 0
+  async function flushAllDirtyNotes(options: { mode?: DraftOperationMode } = {}) {
+    return prepareDraftsForOperation(undefined, options.mode ?? 'transition')
   }
 
   function discardDraft(noteId: string) {
@@ -894,10 +965,16 @@ export const useNoteStore = defineStore('notes', () => {
     })
   }
 
-  function discardAllDrafts() {
+  async function discardAllDrafts() {
+    try {
+      await Promise.all(Object.keys(drafts.value).map((noteId) => autoSave.waitForInFlight(noteId)))
+    } catch {
+      return false
+    }
     autoSave.cancel()
     drafts.value = {}
     discardedDraftsVersion.value += 1
+    return true
   }
 
   async function saveNote(id: string, input: note.UpdateInput) {
@@ -911,8 +988,7 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function flushDraftBeforeDeletion(noteId: string): Promise<DeletionDraftCheckpoint | null> {
-    const saved = await autoSave.flush(noteId)
-    if (saved && !getDraft(noteId)) {
+    if (!getDraft(noteId)) {
       return {
         draftVersion: latestDraftVersions.get(noteId) ?? 0,
         selectionGeneration: deletionSelectionGenerations.get(noteId) ?? 0,
@@ -953,15 +1029,14 @@ export const useNoteStore = defineStore('notes', () => {
 
   async function trashNote(id: string) {
     try {
-      await trashNotes([id])
-      return true
+      return (await trashNotes([id])).includes(id)
     } catch {
       return false
     }
   }
 
   async function restoreNote(id: string) {
-    await saveNote(id, { isTrashed: false })
+    await restoreNotes([id])
   }
 
   async function updateNotes(ids: string[], input: note.UpdateInput) {
@@ -999,6 +1074,7 @@ export const useNoteStore = defineStore('notes', () => {
     const endSaving = savingRequests.begin()
     error.value = null
     try {
+      if (!await prepareDraftsForOperation(targetIds, 'transition')) return []
       return await withDeletionPreparation(targetIds, async () => updateNotesSequentially(
         targetIds,
         async (id) => {
@@ -1029,7 +1105,10 @@ export const useNoteStore = defineStore('notes', () => {
   }
 
   async function restoreNotes(ids: string[]) {
-    await updateNotes(ids, { isTrashed: false })
+    const targetIds = uniqueNoteIds(ids)
+    if (targetIds.length === 0) return []
+    if (!await prepareDraftsForOperation(targetIds, 'transition')) return []
+    return updateNotes(targetIds, { isTrashed: false })
   }
 
   async function moveNotesToNotebook(ids: string[], notebookId: string | null) {
@@ -1051,6 +1130,7 @@ export const useNoteStore = defineStore('notes', () => {
     error.value = null
     let deletedIds: string[] = []
     try {
+      if (!await prepareDraftsForOperation(targetIds, 'transition')) return []
       deletedIds = await withDeletionPreparation(targetIds, async () => deleteNotesSequentially(
         targetIds,
         async (id) => {

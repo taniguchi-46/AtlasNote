@@ -16,7 +16,7 @@
     <p v-if="aiStore.summaryHistoryError" class="ai-records-error" role="alert">
       {{ aiStore.summaryHistoryError.message }}
     </p>
-    <p v-if="assistantStore.historySaveState === 'failed'" class="ai-records-error" role="status">
+    <p v-if="assistantStore.hasHistorySaveFailure" class="ai-records-error" role="status">
       AI履歴の自動保存に失敗しました。{{ assistantStore.historySaveError?.message ?? '' }}
       <button type="button" :disabled="assistantStore.isBusy" @click="assistantStore.retryHistorySave()">
         履歴保存を再試行

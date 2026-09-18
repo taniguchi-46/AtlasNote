@@ -5,12 +5,21 @@ import ts from 'typescript'
 
 const rootDir = process.cwd()
 const serializerPath = path.join(rootDir, 'src', 'utils', 'tiptapMarkdownSerializer.ts')
+const imageResizePath = path.join(rootDir, 'src', 'utils', 'imageResize.ts')
 const outDir = path.join(rootDir, '.tmp', 'serializer-test')
 const outFile = path.join(outDir, 'tiptapMarkdownSerializer.mjs')
+const imageResizeOutFile = path.join(outDir, 'imageResize.mjs')
 
 await mkdir(outDir, { recursive: true })
 
 const source = await readFile(serializerPath, 'utf8')
+const imageResizeSource = await readFile(imageResizePath, 'utf8')
+await writeFile(imageResizeOutFile, ts.transpileModule(imageResizeSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ES2022,
+    target: ts.ScriptTarget.ES2022,
+  },
+}).outputText, 'utf8')
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.ES2022,
@@ -19,7 +28,7 @@ const compiled = ts.transpileModule(source, {
   },
 })
 
-await writeFile(outFile, compiled.outputText, 'utf8')
+await writeFile(outFile, compiled.outputText.replace("'./imageResize'", "'./imageResize.mjs'"), 'utf8')
 
 const { serializeTiptapJsonToMarkdown } = await import(pathToFileUrl(outFile))
 
@@ -168,6 +177,11 @@ const cases = [
     name: 'image',
     input: doc({ type: 'image', attrs: { src: 'note-assets/a.png', alt: 'a]b' } }),
     expected: '![a\\]b](note-assets/a.png)',
+  },
+  {
+    name: 'resized image',
+    input: doc({ type: 'image', attrs: { src: 'note-assets/a.png', alt: 'a', width: 480 } }),
+    expected: '![a](note-assets/a.png "atlasnote-width:480")',
   },
 ]
 
