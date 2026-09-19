@@ -1010,6 +1010,7 @@ function formatDate(iso: string): string {
 }
 
 .note-item-layout {
+  position: relative;
   display: flex;
   align-items: stretch;
 }
@@ -1017,16 +1018,19 @@ function formatDate(iso: string): string {
 .note-item-layout .note-item-btn {
   min-width: 0;
   flex: 1 1 auto;
+  padding-right: 76px;
 }
 
 .note-item-actions {
-  position: static;
+  position: absolute;
+  top: 27px;
+  right: 7px;
   transform: none;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   flex: 0 0 auto;
   gap: 2px;
-  margin: 8px 7px 8px 0;
+  margin: 5px 0;
 }
 
 .note-item-edit-button,
