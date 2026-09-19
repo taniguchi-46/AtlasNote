@@ -353,7 +353,7 @@
         </button>
         <button
           class="format-btn"
-          :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('codeBlock') }"
+          :class="{ 'is-active': editMode === 'wysiwyg' && isOrdinaryCodeBlockActive() }"
           type="button"
           title="コードブロック"
           @click="toggleCodeBlock"
@@ -3022,6 +3022,10 @@ function isSelectionInsideMermaid(selection: Selection) {
   return Boolean(range && isMermaidCodeBlock(range.node)
     && selection.from >= range.from
     && selection.to <= range.to)
+}
+
+function isOrdinaryCodeBlockActive() {
+  return editor.isActive('codeBlock') && !isSelectionInsideMermaid(editor.state.selection)
 }
 
 function selectionContainsMermaid(selection: Selection) {

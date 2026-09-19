@@ -1,6 +1,8 @@
 # プロジェクト状況
 
-最終更新: 2026-09-18
+最終更新: 2026-09-19
+
+Mermaidかんたん編集を追補。Flowchartの暗黙ノードとSequenceのparticipant／message／actor／Note／alt／loopを重複なく編集できるようにし、キャンバスの選択・移動・接続・複製／貼り付け・Undo／Redo・自動整列・ズーム・プロパティ編集をダイアログ内の一時モデルへ接続した。座標・スタイルは保存せず、検証済みcanonical sourceだけをTiptapへ渡す。`npm --prefix frontend run test:mermaid`、Frontend typecheck、同じVueランタイムでのVite＋Chromiumコンポーネント確認は成功。ViteプレビューではWailsバインディングがないため、Wails実画面全体の手動受け入れは未確認。
 
 Mermaid図の図種別カタログと、要素・接続・注釈を行単位で編集する「かんたん編集」を追加した。未対応の行は原文を保持し、ソースタブから継続して編集できる。Mermaidは表示ハンドルの上下ドラッグで10〜200%を変更する表示専用倍率とし、現在の100%を従来の50%相当へ合わせ、図上の右ボタン操作または「編集」ボタンでソース編集ダイアログを開く。添付画像の幅は右下ハンドルで変更し、管理参照を変えずMarkdown本文に保存する。`npm --prefix frontend run test:mermaid`、`npm run frontend:typecheck`、`npm run frontend:lint`は成功した。実Wails画面での上下ドラッグ・右ボタン編集・かんたん編集の手動受け入れは未実施。
 

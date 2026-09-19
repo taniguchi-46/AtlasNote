@@ -8,9 +8,7 @@
         @interact-outside="handleInteractOutside"
       >
         <DialogTitle as="h2">Mermaid図を編集</DialogTitle>
-        <DialogDescription class="mermaid-edit-dialog-description">
-          かんたん編集では図の要素を追加・編集・削除できます。ソースを直接編集することもできます。
-        </DialogDescription>
+        <DialogDescription class="mermaid-edit-dialog-description">キャンバス上で図を選択・移動・編集できます。</DialogDescription>
 
         <div class="mermaid-edit-dialog-actions">
           <button type="button" @click="close">閉じる</button>
@@ -24,74 +22,33 @@
           </button>
         </div>
 
-        <div class="mermaid-edit-dialog-tabs" role="tablist" aria-label="Mermaid編集モード">
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="editTab === 'visual'"
-            :class="{ 'is-active': editTab === 'visual' }"
-            :disabled="isInputLocked"
-            @click="editTab = 'visual'"
-          >かんたん編集</button>
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="editTab === 'source'"
-            :class="{ 'is-active': editTab === 'source' }"
-            :disabled="isInputLocked"
-            @click="editTab = 'source'"
-          >ソース</button>
-        </div>
-
         <div class="mermaid-edit-dialog-grid">
           <MermaidVisualEditor
-            v-if="editTab === 'visual'"
+            ref="visualEditorRef"
             :source="localSource"
             :disabled="isInputLocked"
             class="mermaid-edit-dialog-visual"
             @update:source="handleVisualSourceUpdate"
           />
-          <label v-else class="mermaid-edit-dialog-label" for="mermaid-edit-source">
-            ソース
-            <textarea
-              id="mermaid-edit-source"
-              ref="sourceInput"
-              :value="localSource"
-              class="mermaid-edit-dialog-source"
-              :readonly="isInputLocked"
-              :aria-readonly="isInputLocked ? 'true' : undefined"
-              spellcheck="false"
-              @input="handleSourceInput"
-              @compositionstart="handleCompositionStart"
-              @compositionend="handleCompositionEnd"
-            />
-          </label>
-
-          <div class="mermaid-edit-dialog-preview" aria-live="polite" :aria-busy="status === 'loading'">
-            <div class="mermaid-edit-dialog-zoom">{{ Math.round(zoom * 100) }}%</div>
-            <p v-if="status === 'loading'" class="mermaid-edit-dialog-status" role="status">
-              Mermaid図を描画しています…
-            </p>
-            <p v-else-if="status === 'error'" class="mermaid-edit-dialog-error" role="alert">
-              {{ errorMessage }}
-            </p>
-            <div v-else-if="svgUrl" class="mermaid-edit-dialog-image-viewport">
-              <div class="mermaid-edit-dialog-resize-frame" :class="{ 'is-resizing': isResizing }">
-                <img :src="svgUrl" alt="Mermaid図のプレビュー" class="mermaid-edit-dialog-image" :style="previewImageStyle" />
-                <button
-                  type="button"
-                  class="mermaid-edit-dialog-resize-handle"
-                  aria-label="Mermaid図の表示サイズを上下方向に変更"
-                  title="上下にドラッグして表示サイズを変更"
-                  @pointerdown.stop.prevent="startResize"
-                  @pointermove.stop.prevent="resize"
-                  @pointerup.stop="finishResize"
-                  @pointercancel.stop="finishResize"
-                />
-              </div>
-            </div>
-          </div>
         </div>
+        <div class="mermaid-edit-dialog-render-status" :class="`is-${status}`" aria-live="polite" :aria-busy="status === 'loading'">
+          <span v-if="status === 'loading'">Mermaid図を確認しています…</span>
+          <span v-else-if="status === 'error'" role="alert">{{ errorMessage }}</span>
+          <span v-else-if="status === 'ready'">Mermaidの構文を確認しました。</span>
+        </div>
+        <details v-if="status === 'ready' && svgUrl" class="mermaid-edit-dialog-render-preview">
+          <summary>Mermaidレンダラーの出力を確認</summary>
+          <div class="mermaid-edit-dialog-render-preview-viewport">
+            <img :src="svgUrl" alt="Mermaid図のレンダラー出力" />
+          </div>
+        </details>
+        <section class="mermaid-edit-dialog-source-panel">
+          <button type="button" class="mermaid-edit-dialog-source-toggle" :aria-expanded="sourceOpen" @click="sourceOpen = !sourceOpen"><span>&lt;/&gt;</span> Mermaidソース <span class="source-chevron">{{ sourceOpen ? '⌃' : '⌄' }}</span></button>
+          <label v-if="sourceOpen" class="mermaid-edit-dialog-label" for="mermaid-edit-source">
+            <span class="visually-hidden">Mermaidソース</span>
+            <textarea id="mermaid-edit-source" ref="sourceInput" :value="localSource" class="mermaid-edit-dialog-source" :readonly="isInputLocked" :aria-readonly="isInputLocked ? 'true' : undefined" spellcheck="false" @input="handleSourceInput" @compositionstart="handleCompositionStart" @compositionend="handleCompositionEnd" />
+          </label>
+        </section>
       </DialogContent>
     </DialogPortal>
   </DialogRoot>
@@ -110,6 +67,11 @@ import {
 import { renderMermaidDiagram, type MermaidTheme } from '../utils/mermaidRenderer'
 import MermaidVisualEditor from './MermaidVisualEditor.vue'
 
+type MermaidVisualEditorExpose = {
+  flushInput: () => void
+  setInputLocked: (locked: boolean) => void
+}
+
 const props = defineProps<{
   open: boolean
   source: string
@@ -124,16 +86,14 @@ const emit = defineEmits<{
 }>()
 
 const localSource = ref(props.source)
-const editTab = ref<'visual' | 'source'>('visual')
+const sourceOpen = ref(false)
+const visualEditorRef = ref<MermaidVisualEditorExpose | null>(null)
 const sourceInput = ref<HTMLTextAreaElement | null>(null)
 const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const errorMessage = ref('')
 const svgUrl = ref<string | null>(null)
-const zoom = ref(1)
-const isResizing = ref(false)
-let resizeStart: { pointerId: number; startY: number; startZoom: number; baseHeight: number } | null = null
-const previewImageStyle = computed(() => ({ width: (zoom.value * 50) + '%', maxWidth: 'none' }))
 const isComposing = ref(false)
+const sourceInputDirty = ref(false)
 const localInputLocked = ref(false)
 const isInputLocked = computed(() => props.inputLocked === true || localInputLocked.value)
 let lastEmittedSource = props.source
@@ -153,33 +113,6 @@ function revokeObjectUrl() {
 function clearPreview() {
   revokeObjectUrl()
   svgUrl.value = null
-}
-
-function setZoom(value: number) {
-  zoom.value = Math.min(2, Math.max(0.1, Math.round(value * 100) / 100))
-}
-
-function startResize(event: PointerEvent) {
-  if (event.button !== 0) return
-  const handle = event.currentTarget as HTMLElement | null
-  const image = handle?.parentElement?.querySelector('img')
-  const baseHeight = image?.getBoundingClientRect().height ?? 0
-  if (!baseHeight) return
-  resizeStart = { pointerId: event.pointerId, startY: event.clientY, startZoom: zoom.value, baseHeight }
-  isResizing.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-}
-
-function resize(event: PointerEvent) {
-  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
-  setZoom(resizeStart.startZoom * ((resizeStart.baseHeight + event.clientY - resizeStart.startY) / resizeStart.baseHeight))
-}
-
-function finishResize(event: PointerEvent) {
-  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
-  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
-  resizeStart = null
-  isResizing.value = false
 }
 
 function schedulePreview() {
@@ -206,6 +139,7 @@ function schedulePreview() {
 function setLocalSource(source: string) {
   lastEmittedSource = source
   localSource.value = source
+  sourceInputDirty.value = false
 }
 
 function emitSourceUpdate(source = localSource.value) {
@@ -226,6 +160,7 @@ function handleSourceInput(event: Event) {
 
   // Read the value from the input event itself. This also captures browsers'
   // composition input that v-model intentionally defers until compositionend.
+  sourceInputDirty.value = true
   if (inputValue !== localSource.value) localSource.value = inputValue
   if (!isComposing.value) emitSourceUpdate(inputValue)
 }
@@ -233,25 +168,36 @@ function handleSourceInput(event: Event) {
 function handleVisualSourceUpdate(source: string) {
   if (isInputLocked.value) return
   if (source !== localSource.value) localSource.value = source
+  sourceInputDirty.value = false
   emitSourceUpdate(source)
 }
 
 function commitSourceFromInput() {
-  const inputValue = sourceInput.value?.value
+  const input = sourceInput.value
+  const sourceBeforeVisualFlush = localSource.value
+  visualEditorRef.value?.flushInput()
+  const visualSourceChanged = localSource.value !== sourceBeforeVisualFlush
   if (isInputLocked.value) {
-    const input = sourceInput.value
-    if (input && inputValue !== undefined && input.value !== localSource.value) {
+    if (input && input.value !== localSource.value) {
       input.value = localSource.value
     }
     return
   }
-  if (inputValue !== undefined) {
+
+  // The visual editor flushes its inline IME value synchronously. When the
+  // source panel is open, Vue may not have patched the textarea DOM yet, so
+  // reading it unconditionally can overwrite a newer visual value with a
+  // stale snapshot. The textarea wins only when it actually received input
+  // and the visual flush did not produce a newer source. A focused textarea
+  // alone is not enough while Vue is still patching its previous value.
+  if (input && !visualSourceChanged && sourceInputDirty.value) {
+    const inputValue = input.value
     if (inputValue !== localSource.value) localSource.value = inputValue
     emitSourceUpdate(inputValue)
-    return
+  } else {
+    emitSourceUpdate()
   }
-
-  emitSourceUpdate()
+  sourceInputDirty.value = false
 }
 
 async function renderPreview(generation: number) {
@@ -309,8 +255,7 @@ watch(
     if (!open) commitSourceFromInput()
     if (open) {
       setLocalSource(props.source)
-      editTab.value = 'visual'
-      setZoom(1)
+      sourceOpen.value = false
       await nextTick()
       if (props.open) sourceInput.value?.focus()
     }
@@ -378,6 +323,7 @@ function flushInput() {
 
 function setInputLocked(locked: boolean) {
   localInputLocked.value = locked
+  visualEditorRef.value?.setInputLocked(locked)
 }
 
 defineExpose({ flushInput, setInputLocked })
@@ -439,37 +385,49 @@ onBeforeUnmount(() => {
   margin-top: 18px;
 }
 
-.mermaid-edit-dialog-tabs {
-  display: flex;
-  gap: 4px;
-  margin-top: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.mermaid-edit-dialog-tabs button {
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-.mermaid-edit-dialog-tabs button.is-active {
-  border-bottom-color: var(--brand-primary);
-  color: var(--text-primary);
-}
-
-.mermaid-edit-dialog-tabs button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
 .mermaid-edit-dialog-visual {
   min-width: 0;
+}
+
+.mermaid-edit-dialog-render-status {
+  min-height: 18px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.mermaid-edit-dialog-render-status.is-error {
+  color: var(--color-danger, #c0392b);
+}
+
+.mermaid-edit-dialog-render-preview {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.mermaid-edit-dialog-render-preview summary {
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.mermaid-edit-dialog-render-preview-viewport {
+  max-height: 180px;
+  padding: 8px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-input);
+}
+
+.mermaid-edit-dialog-render-preview-viewport img {
+  display: block;
+  width: max-content;
+  min-width: 160px;
+  max-width: 100%;
+  height: auto;
 }
 
 .mermaid-edit-dialog-label {
@@ -501,88 +459,6 @@ onBeforeUnmount(() => {
 .mermaid-edit-dialog-source:focus-visible {
   border-color: var(--brand-primary);
   outline: 2px solid color-mix(in srgb, var(--brand-primary) 28%, transparent);
-}
-
-.mermaid-edit-dialog-preview {
-  display: flex;
-  min-height: 320px;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-input);
-}
-
-.mermaid-edit-dialog-zoom {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.mermaid-edit-dialog-zoom {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.mermaid-edit-dialog-image-viewport {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.mermaid-edit-dialog-image {
-  display: block;
-  height: auto;
-}
-
-.mermaid-edit-dialog-resize-frame {
-  position: relative;
-  display: inline-block;
-  min-width: 5%;
-  outline: 1px solid transparent;
-}
-
-.mermaid-edit-dialog-resize-frame:hover,
-.mermaid-edit-dialog-resize-frame:focus-within,
-.mermaid-edit-dialog-resize-frame.is-resizing {
-  outline-color: var(--brand-primary);
-}
-
-.mermaid-edit-dialog-resize-handle {
-  position: absolute;
-  right: -5px;
-  bottom: -5px;
-  width: 12px;
-  height: 12px;
-  padding: 0;
-  border: 1px solid var(--bg-editor);
-  border-radius: 2px;
-  background: var(--brand-primary);
-  cursor: ns-resize;
-  opacity: 0;
-  touch-action: none;
-}
-
-.mermaid-edit-dialog-resize-frame:hover .mermaid-edit-dialog-resize-handle,
-.mermaid-edit-dialog-resize-frame:focus-within .mermaid-edit-dialog-resize-handle,
-.mermaid-edit-dialog-resize-frame.is-resizing .mermaid-edit-dialog-resize-handle {
-  opacity: 1;
-}
-
-.mermaid-edit-dialog-status,
-.mermaid-edit-dialog-error {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: center;
-}
-
-.mermaid-edit-dialog-error {
-  color: var(--color-danger, #c0392b);
 }
 
 .mermaid-edit-dialog-actions {
@@ -620,5 +496,34 @@ onBeforeUnmount(() => {
   .mermaid-edit-dialog-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.mermaid-edit-dialog-content {
+  width: min(1180px, calc(100vw - 32px));
+  max-height: min(900px, calc(100vh - 24px));
+  padding: 20px 28px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.mermaid-edit-dialog-grid {
+  display: block;
+  min-height: 0;
+  margin-top: 14px;
+  order: 1;
+}
+
+.mermaid-edit-dialog-visual { min-height: 0; }
+.mermaid-edit-dialog-source-panel { order: 2; margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
+.mermaid-edit-dialog-actions { order: 3; }
+.mermaid-edit-dialog-source-toggle { display:flex; width:100%; align-items:center; gap:8px; min-height:42px; padding:0 12px; border:0; background:transparent; color:var(--text-primary); cursor:pointer; font:inherit; font-size:13px; text-align:left; }
+.mermaid-edit-dialog-source-toggle span:first-child { color:var(--brand-primary); font-family:var(--editor-font-family, monospace); font-weight:700; }
+.mermaid-edit-dialog-source-toggle .source-chevron { margin-left:auto; color:var(--text-secondary); font-size:16px; }
+.mermaid-edit-dialog-source-panel .mermaid-edit-dialog-label { display:block; padding:0 10px 10px; }
+.mermaid-edit-dialog-source-panel .mermaid-edit-dialog-source { min-height:150px; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+@media (max-width: 720px) {
+  .mermaid-edit-dialog-content { width:calc(100vw - 16px); padding:14px; }
 }
 </style>

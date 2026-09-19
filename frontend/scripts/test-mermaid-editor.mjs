@@ -575,6 +575,11 @@ async function testProductMermaidComponents(
   URL.revokeObjectURL = (url) => revoked.push(url)
 
   try {
+    const { default: Canvas } = await import(pathToFileURL(visualEditorOut))
+    await testCanvasDragRelease(Canvas, { createApp, h, nextTick, reactive })
+    await testSequenceCanvasOperations(Canvas, { createApp, h, nextTick, reactive })
+    await testCanvasRegressionOperations(Canvas, { createApp, h, nextTick, reactive })
+    await testDialogVisualFlush(Dialog, { createApp, h, nextTick, reactive })
     await testActualMermaidDialog(Dialog, mocks, { createApp, h, nextTick, reactive })
     await testActualMermaidNodeView(NodeView, mocks, {
       createApp,
@@ -598,6 +603,459 @@ async function testProductMermaidComponents(
   }
   assert.ok(created.length > 0, 'product Mermaid components should create preview Blob URLs')
   assert.ok(revoked.length > 0, 'product Mermaid components should revoke preview Blob URLs')
+}
+
+async function testCanvasDragRelease(Canvas, { createApp, h, nextTick, reactive }) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const props = reactive({ source: 'flowchart TD\n  A[Start]\n  B[End]', disabled: false })
+  const app = createApp({ render: () => h(Canvas, props) })
+  app.mount(host)
+  try {
+    const node = host.querySelector('.mermaid-visual-editor-node')
+    const target = host.querySelectorAll('.mermaid-visual-editor-node')[1]
+    for (const stop of ['release', 'cancel', 'blur', 'disabled', 'buttons']) {
+      props.disabled = false
+      await nextTick()
+      dispatchPointer(node, 'pointerdown', { clientX: 100, clientY: 100, buttons: 1 })
+      const before = node.style.left
+      dispatchPointer(window, 'pointermove', { clientX: 120, clientY: 100, buttons: 1 })
+      await nextTick()
+      assert.notEqual(node.style.left, before, 'held pointer must move the node')
+      if (stop === 'release') dispatchPointer(node, 'pointerup')
+      if (stop === 'cancel') dispatchPointer(node, 'pointercancel')
+      if (stop === 'blur') window.dispatchEvent(new Event('blur'))
+      if (stop === 'disabled') props.disabled = true
+      if (stop === 'buttons') dispatchPointer(window, 'pointermove', { clientX: 180, buttons: 0 })
+      await nextTick()
+      const stopped = node.style.left
+      dispatchPointer(window, 'pointermove', { clientX: 200, clientY: 100, buttons: 1 })
+      await nextTick()
+      assert.equal(node.style.left, stopped, `${stop} must end node movement`)
+    }
+    props.disabled = false
+    await nextTick()
+    const point = node.querySelector('.mermaid-visual-editor-connection-point')
+    dispatchPointer(point, 'pointerdown', { buttons: 1 })
+    await nextTick()
+    assert.ok(host.querySelector('.mermaid-visual-editor-connection-preview'))
+    dispatchPointer(target, 'pointerup')
+    await nextTick()
+    assert.equal(host.querySelector('.mermaid-visual-editor-connection-preview'), null)
+    assert.equal(host.querySelectorAll('.mermaid-visual-editor-edges g').length, 1, 'release on target must still create a connection')
+    dispatchPointer(point, 'pointerdown', { buttons: 1 })
+    dispatchPointer(node, 'pointerup')
+    await nextTick()
+    assert.equal(host.querySelector('.mermaid-visual-editor-connection-preview'), null, 'release on source must cancel connection')
+    dispatchPointer(node, 'pointerdown', { buttons: 1 })
+    const beforeUnmount = node.style.left
+    app.unmount()
+    dispatchPointer(window, 'pointermove', { clientX: 250, buttons: 1 })
+    await nextTick()
+    assert.equal(node.style.left, beforeUnmount)
+  } finally {
+    if (host.firstChild) app.unmount()
+    host.remove()
+  }
+}
+
+async function testSequenceCanvasOperations(Canvas, { createApp, h, nextTick, reactive }) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const props = reactive({
+    source: 'sequenceDiagram\n  participant A as 利用者\n  participant B as システム',
+    disabled: false,
+  })
+  const updates = []
+  const app = createApp({
+    render: () => h(Canvas, {
+      source: props.source,
+      disabled: props.disabled,
+      'onUpdate:source': (source) => {
+        updates.push(source)
+        props.source = source
+      },
+    }),
+  })
+  app.mount(host)
+  try {
+    await nextTick()
+    assert.equal(host.querySelectorAll('.mermaid-visual-editor-node').length, 2,
+      'sequence messages must not be rendered as participant cards')
+    const connectButton = host.querySelector('button[aria-label="接続を作成"]')
+    connectButton?.click()
+    const nodes = host.querySelectorAll('.mermaid-visual-editor-node')
+    nodes[0]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    nodes[1]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    assert.equal(host.querySelectorAll('.mermaid-visual-editor-node').length, 2,
+      'connecting sequence participants must not add a third participant')
+    assert.equal(host.querySelectorAll('.mermaid-visual-editor-edge').length, 1,
+      'connecting sequence participants must add one message edge')
+    assert.equal((updates.at(-1) ?? '').split('\n').filter((line) => line.trim().startsWith('participant ')).length, 2,
+      'sequence connection source must retain exactly two participants')
+
+    const propertyInput = [...host.querySelectorAll('input')].find((input) => input.value === 'A' || input.value === '利用者')
+    const beforeEdges = host.querySelectorAll('.mermaid-visual-editor-edge').length
+    propertyInput?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }))
+    await nextTick()
+    assert.equal(host.querySelectorAll('.mermaid-visual-editor-edge').length, beforeEdges,
+      'Backspace in a property input must not delete a canvas element')
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+}
+
+async function testCanvasRegressionOperations(Canvas, { createApp, h, nextTick, reactive }) {
+  async function mountCanvas(source) {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const props = reactive({ source, disabled: false })
+    const updates = []
+    const app = createApp({
+      render: () => h(Canvas, {
+        source: props.source,
+        disabled: props.disabled,
+        'onUpdate:source': (nextSource) => {
+          updates.push(nextSource)
+          props.source = nextSource
+        },
+      }),
+    })
+    app.mount(host)
+    await nextTick()
+    return { host, props, updates, app }
+  }
+
+  const orphaned = await mountCanvas('flowchart TD\n  A[開始] --> B[終了]')
+  try {
+    const firstNode = orphaned.host.querySelector('.mermaid-visual-editor-node')
+    firstNode?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    orphaned.host.querySelector('.mermaid-visual-editor-property-actions .danger')?.click()
+    await nextTick()
+    assert.equal(orphaned.props.source, 'flowchart TD\n  B[終了]',
+      'deleting a flow node must promote an orphaned derived endpoint into source')
+  } finally {
+    orphaned.app.unmount()
+    orphaned.host.remove()
+  }
+
+  const deletedEdge = await mountCanvas('flowchart TD\n  A[開始] --> B[終了]')
+  try {
+    deletedEdge.host.querySelector('.mermaid-visual-editor-edge')?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    deletedEdge.host.querySelector('.mermaid-visual-editor-property-actions .danger')?.click()
+    await nextTick()
+    assert.doesNotMatch(deletedEdge.props.source, /-->/,
+      'deleting only a flow connection must remove the edge from source')
+    assert.match(deletedEdge.props.source, /A\[開始\]/)
+    assert.match(deletedEdge.props.source, /B\[終了\]/)
+  } finally {
+    deletedEdge.app.unmount()
+    deletedEdge.host.remove()
+  }
+
+  const connectedShapes = await mountCanvas('flowchart TD\n  A{判断}\n  B([終了])')
+  try {
+    connectedShapes.host.querySelector('button[aria-label="接続を作成"]')?.click()
+    const nodes = connectedShapes.host.querySelectorAll('.mermaid-visual-editor-node')
+    nodes[0]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    nodes[1]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    assert.match(connectedShapes.props.source, /A --> B/,
+      'a new flow connection must reference existing node identifiers')
+    assert.doesNotMatch(connectedShapes.props.source, /A\{判断\} --> B/,
+      'a new flow connection must not redefine endpoint shapes')
+  } finally {
+    connectedShapes.app.unmount()
+    connectedShapes.host.remove()
+  }
+
+  const collision = await mountCanvas('flowchart TD\n  A[開始]\n  B[終了]')
+  try {
+    collision.host.querySelector('.mermaid-visual-editor-node')?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    const identifier = [...collision.host.querySelectorAll('input')].find((input) => input.value === 'A')
+    setInputValue(identifier, 'B', browserInputEvent())
+    await nextTick()
+    assert.equal(collision.props.source, 'flowchart TD\n  A[開始]\n  B[終了]',
+      'identifier collision must reject the draft without changing source')
+    assert.match(collision.host.querySelector('[role="alert"]')?.textContent ?? '', /同じ種類/)
+  } finally {
+    collision.app.unmount()
+    collision.host.remove()
+  }
+
+  const sequenceDefaults = await mountCanvas('sequenceDiagram\n  participant P1 as 利用者\n  participant P2 as システム')
+  try {
+    sequenceDefaults.host.querySelector('button[aria-label="メッセージ"]')?.click()
+    await nextTick()
+    assert.equal(sequenceDefaults.props.source.split('\n').filter((line) => line.trim().startsWith('participant ')).length, 2,
+      'adding a sequence message must not add implicit participants')
+    assert.match(sequenceDefaults.props.source, /P1->>P2:/,
+      'new sequence messages must use existing participants as defaults')
+  } finally {
+    sequenceDefaults.app.unmount()
+    sequenceDefaults.host.remove()
+  }
+
+  const multiSelect = await mountCanvas('flowchart TD\n  A[開始]\n  B[終了]')
+  try {
+    const nodes = multiSelect.host.querySelectorAll('.mermaid-visual-editor-node')
+    nodes[0]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    dispatchPointer(nodes[1], 'pointerdown', { ctrlKey: true, pointerId: 41 })
+    dispatchPointer(nodes[1], 'pointerup', { pointerId: 41 })
+    nodes[1]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    await nextTick()
+    assert.equal(multiSelect.host.querySelectorAll('.mermaid-visual-editor-node.is-selected').length, 2,
+      'Ctrl/Cmd-click must add a node once instead of toggling twice')
+  } finally {
+    multiSelect.app.unmount()
+    multiSelect.host.remove()
+  }
+
+  const noteReferences = await mountCanvas('sequenceDiagram\n  participant A as 利用者\n  participant B as システム\n  Note over A,B: 共有')
+  try {
+    noteReferences.host.querySelector('.mermaid-visual-editor-node')?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    const identifier = [...noteReferences.host.querySelectorAll('input')].find((input) => input.value === 'A')
+    setInputValue(identifier, 'C', browserInputEvent())
+    await nextTick()
+    assert.match(noteReferences.props.source, /participant C as 利用者/)
+    assert.match(noteReferences.props.source, /Note over C,B: 共有/,
+      'renaming a participant must update every target in a multi-reference Note')
+  } finally {
+    noteReferences.app.unmount()
+    noteReferences.host.remove()
+  }
+
+  const blocks = await mountCanvas('sequenceDiagram\n  participant A as 利用者\n  participant B as システム\n  alt 条件\n    A->>B: 一つ目\n  else 別条件\n    B-->>A: 二つ目\n  end')
+  try {
+    assert.equal(blocks.host.querySelectorAll('.mermaid-visual-editor-sequence-block').length, 1,
+      'sequence branches must render an enclosing frame')
+    const control = [...blocks.host.querySelectorAll('.mermaid-visual-editor-node')].find((node) => node.textContent?.includes('条件'))
+    control?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    blocks.host.querySelector('.mermaid-visual-editor-property-actions .danger')?.click()
+    await nextTick()
+    assert.doesNotMatch(blocks.props.source, /\b(?:alt|else|end)\b/,
+      'deleting a sequence block must remove its start, members, and end together')
+  } finally {
+    blocks.app.unmount()
+    blocks.host.remove()
+  }
+
+  const duplicatedBlock = await mountCanvas('sequenceDiagram\n  participant A as 利用者\n  participant B as システム\n  loop 反復\n    A->>B: 一つ目\n  end')
+  try {
+    const control = [...duplicatedBlock.host.querySelectorAll('.mermaid-visual-editor-node')].find((node) => node.textContent?.includes('反復'))
+    control?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    duplicatedBlock.host.querySelector('button[aria-label="複製"]')?.click()
+    await nextTick()
+    assert.equal((duplicatedBlock.props.source.match(/^  loop /gm) ?? []).length, 2,
+      'duplicating a sequence loop must duplicate its block unit')
+    assert.equal((duplicatedBlock.props.source.match(/^  end$/gm) ?? []).length, 2,
+      'duplicating a sequence loop must retain the matching end')
+  } finally {
+    duplicatedBlock.app.unmount()
+    duplicatedBlock.host.remove()
+  }
+
+  const blockContent = await mountCanvas('sequenceDiagram\n  participant A as 利用者\n  participant B as システム')
+  try {
+    blockContent.host.querySelector('button[aria-label="分岐"]')?.click()
+    blockContent.host.querySelector('button[aria-label="メッセージ"]')?.click()
+    await nextTick()
+    const source = blockContent.props.source
+    assert.ok(source.indexOf('  alt ') < source.indexOf('  A->>B:') && source.indexOf('  A->>B:') < source.indexOf('  end'),
+      'a message added after a block start must be inserted before its end')
+  } finally {
+    blockContent.app.unmount()
+    blockContent.host.remove()
+  }
+
+  const history = await mountCanvas('sequenceDiagram\n  participant A as Alice\n  participant B as システム')
+  try {
+    history.host.querySelector('.mermaid-visual-editor-node')?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    const alias = [...history.host.querySelectorAll('input')].find((input) => input.value === 'Alice')
+    setInputValue(alias, 'Changed', browserInputEvent())
+    await nextTick()
+    history.props.source = `${history.props.source}\n  participant C as 追加`
+    await nextTick()
+    history.host.querySelector('button[aria-label="元に戻す"]')?.click()
+    await nextTick()
+    assert.match(history.props.source, /participant A as Changed/)
+    assert.doesNotMatch(history.props.source, /participant C as 追加/,
+      'undo after a source edit must preserve the preceding GUI edit')
+    history.host.querySelector('button[aria-label="やり直す"]')?.click()
+    await nextTick()
+    assert.match(history.props.source, /participant C as 追加/,
+      'redo must restore the external source edit')
+    history.props.source = 'これはMermaidではありません'
+    await nextTick()
+    assert.ok(history.host.querySelector('.mermaid-visual-editor-fallback'),
+      'an invalid source must keep the source editor available')
+    history.host.querySelector('button[aria-label="元に戻す"]')?.click()
+    await nextTick()
+    assert.match(history.props.source, /participant C as 追加/,
+      'undo must recover from an invalid source')
+    history.host.querySelector('button[aria-label="やり直す"]')?.click()
+    await nextTick()
+    assert.equal(history.props.source, 'これはMermaidではありません',
+      'redo must restore the invalid source state without losing its history')
+  } finally {
+    history.app.unmount()
+    history.host.remove()
+  }
+
+  const messageOrder = await mountCanvas('sequenceDiagram\n  participant A as 利用者\n  participant B as システム\n  A->>B: 一つ目\n  B-->>A: 二つ目')
+  try {
+    const edges = messageOrder.host.querySelectorAll('.mermaid-visual-editor-edge')
+    edges[0]?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    const messageInput = [...messageOrder.host.querySelectorAll('input')].find((input) => input.value === '一つ目')
+    setInputValue(messageInput, '編集済み', browserInputEvent())
+    await nextTick()
+    assert.match(messageOrder.props.source, /編集済み/,
+      'selecting a sequence message must expose direct property editing')
+    dispatchPointer(edges[1], 'pointerdown', { clientY: 180, pointerId: 51 })
+    dispatchPointer(window, 'pointermove', { clientY: 90, buttons: 1, pointerId: 51 })
+    dispatchPointer(window, 'pointerup', { clientY: 90, pointerId: 51 })
+    await nextTick()
+    assert.ok(messageOrder.props.source.indexOf('B-->>A: 二つ目') < messageOrder.props.source.indexOf('A->>B: 編集済み'),
+      'dragging a sequence message must reorder the source lines')
+  } finally {
+    messageOrder.app.unmount()
+    messageOrder.host.remove()
+  }
+
+  const branchOrder = await mountCanvas('sequenceDiagram\n  participant A\n  participant B\n  alt success\n    A->>B: successOnly\n  else failure\n    A->>B: failureOnly\n  end')
+  try {
+    const branchSource = branchOrder.props.source
+    const edge = branchOrder.host.querySelector('.mermaid-visual-editor-edge')
+    dispatchPointer(edge, 'pointerdown', { clientY: 100, pointerId: 61 })
+    dispatchPointer(window, 'pointermove', { clientY: 158, buttons: 1, pointerId: 61 })
+    dispatchPointer(window, 'pointerup', { clientY: 158, pointerId: 61 })
+    await nextTick()
+    assert.equal(branchOrder.props.source, branchSource,
+      'dragging a message must not cross an else branch boundary')
+  } finally {
+    branchOrder.app.unmount()
+    branchOrder.host.remove()
+  }
+
+  const repeatedDrag = await mountCanvas('sequenceDiagram\n  participant A\n  participant B\n  A->>B: first\n  A->>B: second\n  A->>B: third\n  A->>B: fourth')
+  try {
+    const edges = repeatedDrag.host.querySelectorAll('.mermaid-visual-editor-edge')
+    dispatchPointer(edges[0], 'pointerdown', { clientY: 100, pointerId: 62 })
+    dispatchPointer(window, 'pointermove', { clientY: 158, buttons: 1, pointerId: 62 })
+    await nextTick()
+    dispatchPointer(window, 'pointermove', { clientY: 159, buttons: 1, pointerId: 62 })
+    await nextTick()
+    dispatchPointer(window, 'pointerup', { clientY: 159, pointerId: 62 })
+    await nextTick()
+    assert.deepEqual(sequenceMessageLabels(repeatedDrag.props.source), ['second', 'first', 'third', 'fourth'],
+      'one row plus a small additional pointermove must move the message exactly one row')
+    repeatedDrag.host.querySelector('button[aria-label="元に戻す"]')?.click()
+    await nextTick()
+    assert.deepEqual(sequenceMessageLabels(repeatedDrag.props.source), ['first', 'second', 'third', 'fourth'],
+      'one message drag must be one undo operation')
+    repeatedDrag.host.querySelector('button[aria-label="やり直す"]')?.click()
+    await nextTick()
+    assert.deepEqual(sequenceMessageLabels(repeatedDrag.props.source), ['second', 'first', 'third', 'fourth'],
+      'redo must restore the completed one-row message drag')
+  } finally {
+    repeatedDrag.app.unmount()
+    repeatedDrag.host.remove()
+  }
+
+  const zoomedDrag = await mountCanvas('sequenceDiagram\n  participant A\n  participant B\n  A->>B: first\n  A->>B: second\n  A->>B: third\n  A->>B: fourth')
+  try {
+    for (let index = 0; index < 5; index += 1) zoomedDrag.host.querySelector('button[aria-label="拡大"]')?.click()
+    await nextTick()
+    const edge = zoomedDrag.host.querySelector('.mermaid-visual-editor-edge')
+    dispatchPointer(edge, 'pointerdown', { clientY: 100, pointerId: 63 })
+    dispatchPointer(window, 'pointermove', { clientY: 187, buttons: 1, pointerId: 63 })
+    dispatchPointer(window, 'pointerup', { clientY: 187, pointerId: 63 })
+    await nextTick()
+    assert.deepEqual(sequenceMessageLabels(zoomedDrag.props.source), ['second', 'first', 'third', 'fourth'],
+      'message drag distance must be converted from zoomed screen coordinates')
+  } finally {
+    zoomedDrag.app.unmount()
+    zoomedDrag.host.remove()
+  }
+
+  const rawBlockSource = 'sequenceDiagram\n  participant A\n  participant B\n  loop repeat\n    activate B\n    alt ready\n      A->>B: request\n    else skip\n      A-->>B: skipped\n    end\n    deactivate B\n  end'
+  const duplicatedRawBlock = await mountCanvas(rawBlockSource)
+  try {
+    const control = [...duplicatedRawBlock.host.querySelectorAll('.mermaid-visual-editor-node')]
+      .find((node) => node.textContent?.includes('repeat'))
+    control?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    duplicatedRawBlock.host.querySelector('button[aria-label="複製"]')?.click()
+    await nextTick()
+    assert.equal((duplicatedRawBlock.props.source.match(/^    activate B$/gm) ?? []).length, 2,
+      'duplicating a block must retain unsupported activate lines')
+    assert.equal((duplicatedRawBlock.props.source.match(/^    deactivate B$/gm) ?? []).length, 2,
+      'duplicating a block must retain unsupported deactivate lines')
+    assert.equal((duplicatedRawBlock.props.source.match(/^[ \t]+alt ready$/gm) ?? []).length, 2,
+      'duplicating a block must retain nested block controls')
+  } finally {
+    duplicatedRawBlock.app.unmount()
+    duplicatedRawBlock.host.remove()
+  }
+
+  const copiedRawBlock = await mountCanvas(rawBlockSource)
+  try {
+    const control = [...copiedRawBlock.host.querySelectorAll('.mermaid-visual-editor-node')]
+      .find((node) => node.textContent?.includes('repeat'))
+    control?.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
+    const editor = copiedRawBlock.host.querySelector('.mermaid-visual-editor')
+    editor?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }))
+    editor?.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true }))
+    await nextTick()
+    assert.equal((copiedRawBlock.props.source.match(/^    activate B$/gm) ?? []).length, 2,
+      'copy and paste of a block must retain unsupported activate lines')
+    assert.equal((copiedRawBlock.props.source.match(/^    deactivate B$/gm) ?? []).length, 2,
+      'copy and paste of a block must retain unsupported deactivate lines')
+  } finally {
+    copiedRawBlock.app.unmount()
+    copiedRawBlock.host.remove()
+  }
+}
+
+async function testDialogVisualFlush(Dialog, { createApp, h, nextTick, reactive }) {
+  const source = 'sequenceDiagram\n  participant A as 利用者\n  participant B as システム'
+  const props = reactive({ open: false, source, theme: 'light' })
+  const host = document.createElement('div')
+  document.body.append(host)
+  const app = createApp({
+    render: () => h(Dialog, {
+      open: props.open,
+      source: props.source,
+      theme: props.theme,
+      'onUpdate:open': (open) => { props.open = open },
+      'onUpdate:source': (nextSource) => { props.source = nextSource },
+    }),
+  })
+  app.mount(host)
+  try {
+    props.open = true
+    await nextTick()
+    host.querySelector('.mermaid-edit-dialog-source-toggle')?.click()
+    await nextTick()
+    const firstNode = host.querySelector('.mermaid-visual-editor-node')
+    firstNode?.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }))
+    await nextTick()
+    const inlineInput = host.querySelector('.mermaid-visual-editor-inline-input')
+    assert.ok(inlineInput, 'sequence participant must support visual inline editing')
+    inlineInput.dispatchEvent(new Event('compositionstart', { bubbles: true }))
+    inlineInput.value = 'Renamed'
+    host.querySelector('.mermaid-edit-dialog-actions button:first-child')?.click()
+    await nextTick()
+    assert.match(props.source, /participant A as Renamed/,
+      'flushing visual IME input with the source panel open must keep the visual rename')
+    assert.doesNotMatch(props.source, /participant A as 利用者/,
+      'a stale source textarea DOM value must not overwrite a newer visual rename')
+  } finally {
+    app.unmount()
+    host.remove()
+  }
 }
 
 async function testActualMermaidDialog(Dialog, mocks, vue) {
@@ -630,64 +1088,14 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
   try {
     props.open = true
     await nextTick()
-    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    const initialRender = await waitForRender(mocks, source)
+    mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'initial' })
+    await waitFor(() => host.querySelector('.mermaid-edit-dialog-render-preview') !== null)
+    assert.match(host.querySelector('.mermaid-edit-dialog-render-status')?.textContent ?? '', /構文を確認/)
+    host.querySelector('.mermaid-edit-dialog-source-toggle')?.click()
     await nextTick()
     const textarea = () => host.querySelector('textarea')
     assert.equal(textarea()?.value, source, 'the actual dialog opens with the node source')
-    const initialRender = await waitForRender(mocks, source)
-    mocks.resolveRender(initialRender, { ok: true, svg: '<svg/>', altText: 'initial' })
-    await waitFor(() => host.querySelector('.mermaid-edit-dialog-image') !== null)
-    await nextTick()
-
-    const zoomLabel = () => Number.parseInt(host.querySelector('.mermaid-edit-dialog-zoom')?.textContent ?? '', 10)
-    const image = host.querySelector('.mermaid-edit-dialog-image')
-    const handle = host.querySelector('.mermaid-edit-dialog-resize-handle')
-    assert.ok(image)
-    assert.ok(handle)
-    mockImageLayout(image, 100)
-    let capturedPointerId = null
-    let releasedPointerId = null
-    handle.setPointerCapture = (pointerId) => { capturedPointerId = pointerId }
-    handle.releasePointerCapture = (pointerId) => { releasedPointerId = pointerId }
-    assert.match(handle.getAttribute('title') ?? '', /上下/)
-    const initialZoom = zoomLabel()
-    const horizontalOnly = dispatchPointer(handle, 'pointerdown', {
-      button: 0,
-      clientX: 100,
-      clientY: 100,
-      pointerId: 11,
-    })
-    assert.equal(horizontalOnly.defaultPrevented, true)
-    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 100, pointerId: 11 })
-    await nextTick()
-    assert.equal(zoomLabel(), initialZoom, 'horizontal movement must not change Mermaid zoom')
-    dispatchPointer(handle, 'pointermove', { clientX: 100, clientY: 140, pointerId: 11 })
-    await nextTick()
-    assert.equal(capturedPointerId, 11)
-    assert.ok(zoomLabel() > initialZoom, 'downward drag must increase Mermaid zoom')
-    dispatchPointer(handle, 'pointerup', { clientY: 140, pointerId: 11 })
-    assert.equal(releasedPointerId, 11)
-
-    const zoomBeforeUpwardDrag = zoomLabel()
-    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 12 })
-    dispatchPointer(handle, 'pointermove', { clientX: 900, clientY: 50, pointerId: 12 })
-    await nextTick()
-    assert.ok(zoomLabel() < zoomBeforeUpwardDrag, 'upward drag must decrease Mermaid zoom')
-    dispatchPointer(handle, 'pointercancel', { clientY: 50, pointerId: 12 })
-    await nextTick()
-    assert.equal(host.querySelector('.mermaid-edit-dialog-resize-frame')?.classList.contains('is-resizing'), false)
-
-    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 13 })
-    dispatchPointer(handle, 'pointermove', { clientY: -10000, pointerId: 13 })
-    await nextTick()
-    assert.equal(zoomLabel(), 10, 'Mermaid zoom must clamp at 10%')
-    dispatchPointer(handle, 'pointerup', { clientY: -10000, pointerId: 13 })
-    dispatchPointer(handle, 'pointerdown', { clientY: 100, pointerId: 14 })
-    dispatchPointer(handle, 'pointermove', { clientY: 10000, pointerId: 14 })
-    await nextTick()
-    assert.equal(zoomLabel(), 200, 'Mermaid zoom must clamp at 200%')
-    dispatchPointer(handle, 'pointerup', { clientY: 10000, pointerId: 14 })
-
     const externalSource = 'flowchart TD\n  A --> external'
     const updatesBeforeExternalSource = updates.length
     props.source = externalSource
@@ -696,19 +1104,11 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
     assert.equal(updates.length, updatesBeforeExternalSource, 'external source sync must not emit the stale textarea value')
     const externalRender = await waitForRender(mocks, externalSource)
     mocks.resolveRender(externalRender, { ok: true, svg: '<svg/>', altText: 'external' })
-    await nextTick()
-
     const edited = 'flowchart LR\n  A --> C'
     setInputValue(textarea(), edited, browserInputEvent())
     await nextTick()
     assert.equal(props.source, edited, 'dialog input must immediately update its source model')
     assert.equal(updates.at(-1), edited)
-
-    props.theme = 'dark'
-    const darkRender = await waitForRender(mocks, edited, 'dark')
-    assert.equal(mocks.pendingRenders[darkRender].source, edited, 'theme changes must not restore old source')
-    assert.equal(mocks.pendingRenders[darkRender].options.theme, 'dark')
-    mocks.resolveRender(darkRender, { ok: true, svg: '<svg/>', altText: 'dark' })
 
     const composition = ' \nflowchart TD\n  A --> D\n '
     const updateCountBeforeComposition = updates.length
@@ -719,6 +1119,11 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
     textarea().dispatchEvent(new Event('compositionend', { bubbles: true }))
     await nextTick()
     assert.equal(props.source, composition, 'compositionend must commit the final source')
+    props.theme = 'dark'
+    await nextTick()
+    const darkRender = await waitForRender(mocks, composition, 'dark')
+    assert.equal(mocks.pendingRenders[darkRender].options.theme, 'dark', 'theme changes must rerender the latest source')
+    mocks.resolveRender(darkRender, { ok: true, svg: '<svg/>', altText: 'dark' })
 
     host.querySelector('.mermaid-edit-dialog-actions button:first-child')?.click()
     await nextTick()
@@ -728,7 +1133,7 @@ async function testActualMermaidDialog(Dialog, mocks, vue) {
 
     props.open = true
     await nextTick()
-    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    host.querySelector('.mermaid-edit-dialog-source-toggle')?.click()
     await nextTick()
     assert.equal(textarea()?.value, composition, 'reopening must use the committed source')
     host.querySelector('.mermaid-edit-dialog-actions button:last-child')?.click()
@@ -806,7 +1211,7 @@ async function testActualMermaidNodeView(NodeView, mocks, vue) {
       await waitFor(() => host.querySelector('.mermaid-code-block-preview') !== null)
       host.querySelector('.mermaid-code-block-icon-button')?.click()
       await nextTick()
-      host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+      host.querySelector('.mermaid-edit-dialog-source-toggle')?.click()
       await nextTick()
       assert.equal(host.querySelectorAll('textarea').length, 1, 'the edit button must open one edit dialog')
     }
@@ -1056,7 +1461,7 @@ async function testActualTiptapMermaidNodeView(NodeView, mocks, vue) {
 
     host.querySelector('.mermaid-code-block-icon-button')?.click()
     await nextTick()
-    host.querySelector('.mermaid-edit-dialog-tabs button:last-child')?.click()
+    host.querySelector('.mermaid-edit-dialog-source-toggle')?.click()
     await nextTick()
     assert.equal(host.querySelectorAll('textarea').length, 1,
       'the actual Vue Editor NodeView must open editing from the edit button')
@@ -1139,6 +1544,12 @@ function dispatchPointer(target, type, options = {}) {
   Object.defineProperty(event, 'pointerId', { value: options.pointerId ?? 1 })
   target.dispatchEvent(event)
   return event
+}
+
+function sequenceMessageLabels(source) {
+  return source.split('\n')
+    .filter((line) => line.includes(':') && !/^\s*(?:participant|actor|Note)\b/.test(line))
+    .map((line) => line.slice(line.indexOf(':') + 1).trim())
 }
 
 function mockImageLayout(image, height) {

@@ -67,6 +67,10 @@ export type MermaidVisualElement = {
   dirty: boolean
   blockId?: string
   blockRole?: 'start' | 'member' | 'end'
+  /** The source line index is used only to keep untouched lines in order. */
+  sourceLine?: number
+  /** Derived flowchart nodes have no source line of their own. */
+  derived?: boolean
 }
 
 export type MermaidVisualDocument = {
@@ -170,6 +174,16 @@ const flowchartElementKinds: MermaidElementKindDefinition[] = [
     kind: 'direction',
     label: '向き',
     fields: [select('direction', '向き', ['TB', 'TD', 'BT', 'RL', 'LR'])],
+  },
+  {
+    kind: 'style',
+    label: 'スタイル',
+    fields: [
+      text('target', '対象'),
+      text('fill', '塗りつぶし'),
+      text('stroke', '枠線'),
+      text('text', 'テキスト色'),
+    ],
   },
 ]
 
@@ -375,6 +389,7 @@ function element(
     fields,
     editable,
     dirty: false,
+    sourceLine: index,
   }
 }
 
@@ -426,6 +441,21 @@ function parseFlowLine(line: string, index: number, seenNodes: Set<string>) {
   const trimmed = line.trim()
   if (!trimmed || trimmed.startsWith('%%')) return element(index, 'raw', line, { content: line }, false)
 
+  const styleMatch = trimmed.match(/^style\s+([A-Za-z_][\w-]*)\s+(.+)$/i)
+  if (styleMatch) {
+    const fields = { target: styleMatch[1], fill: '', stroke: '', text: '', styleRaw: styleMatch[2] }
+    for (const declaration of styleMatch[2].split(',').map((part) => part.trim()).filter(Boolean)) {
+      const separator = declaration.indexOf(':')
+      if (separator <= 0) continue
+      const key = declaration.slice(0, separator).trim().toLowerCase()
+      const value = declaration.slice(separator + 1).trim()
+      if (key === 'fill') fields.fill = value
+      if (key === 'stroke') fields.stroke = value
+      if (key === 'color') fields.text = value
+    }
+    return element(index, 'style', line, fields)
+  }
+
   const edgeMatch = trimmed.match(/^(.+?)\s*(<-->|-->|---|-.->|==>|===|--o|--x|->|~>)\s*(?:\|([^|]*)\|\s*)?(.+)$/)
   if (edgeMatch) {
     const from = parseFlowEndpoint(edgeMatch[1])
@@ -452,6 +482,7 @@ function parseFlowLine(line: string, index: number, seenNodes: Set<string>) {
   }
 
   if (/^subgraph\b/i.test(trimmed)) return element(index, 'group', line, { title: trimmed.replace(/^subgraph\s*/i, ''), content: '' })
+  if (/^end$/i.test(trimmed)) return element(index, 'group', line, { groupEnd: 'true', title: '', content: '' })
   if (/^direction\s+/i.test(trimmed)) return element(index, 'direction', line, { direction: trimmed.split(/\s+/)[1] ?? 'TD' })
   return element(index, 'raw', line, { content: line }, false)
 }
@@ -459,9 +490,12 @@ function parseFlowLine(line: string, index: number, seenNodes: Set<string>) {
 function parseSequenceLine(line: string, index: number) {
   const trimmed = line.trim()
   let match = trimmed.match(/^(participant|actor)\s+([^\s]+)(?:\s+as\s+(.+))?$/i)
-  if (match) return element(index, 'participant', line, { name: match[2], alias: match[3] ?? '' })
-  match = trimmed.match(/^Note\s+(?:over|left of|right of)\s+([^:]+):\s*(.*)$/i)
-  if (match) return element(index, 'note', line, { over: match[1].trim(), message: match[2] })
+  if (match) return element(index, 'participant', line, { name: match[2], alias: match[3] ?? '', participantType: match[1].toLowerCase() })
+  match = trimmed.match(/^Note\s+(over|left of|right of)\s+([^:]+):\s*(.*)$/i)
+  if (match) {
+    const position = match[1].toLowerCase().replace(/\s+of$/, '')
+    return element(index, 'note', line, { position, over: match[2].trim(), message: match[3] })
+  }
   match = trimmed.match(/^([^\s]+)\s*(-->>|->>|--x|-[xX]|-->|->|\-\-\)|\-\))\s*([^:]+):\s*(.*)$/)
   if (match) return element(index, 'message', line, { from: match[1], arrow: match[2], to: match[3].trim(), message: match[4] })
   match = trimmed.match(/^(alt|else|opt|loop|par|and|critical|break|end)\b\s*(.*)$/i)
@@ -566,8 +600,111 @@ function parseLine(type: MermaidDiagramType, line: string, index: number, state:
   return parseGenericLine(type, line, index)
 }
 
+function derivedFlowNode(id: string, label: string, shape: string): MermaidVisualElement {
+  return {
+    id: `mermaid-flow-node-${encodeURIComponent(id)}`,
+    kind: 'node',
+    raw: '',
+    fields: { id, label: label || id, shape: shape || 'rect' },
+    editable: true,
+    dirty: false,
+    derived: true,
+    sourceLine: undefined,
+  }
+}
+
+function addImplicitFlowNodes(elements: MermaidVisualElement[]) {
+  const nodes = new Map<string, MermaidVisualElement>()
+  for (const item of elements) {
+    if (item.kind === 'node' && !item.derived && item.fields.id) nodes.set(item.fields.id, item)
+  }
+
+  for (const edge of elements) {
+    if (edge.kind !== 'edge') continue
+    const endpoints = [
+      { id: edge.fields.from ?? '', label: edge.fields.fromLabel ?? '', shape: edge.fields.fromShape ?? 'rect' },
+      { id: edge.fields.to ?? '', label: edge.fields.toLabel ?? '', shape: edge.fields.toShape ?? 'rect' },
+    ]
+    for (const endpoint of endpoints) {
+      if (!endpoint.id || nodes.has(endpoint.id)) continue
+      const node = derivedFlowNode(endpoint.id, endpoint.label, endpoint.shape)
+      nodes.set(endpoint.id, node)
+      elements.push(node)
+    }
+  }
+}
+
+function annotateSequenceBlocks(elements: MermaidVisualElement[]) {
+  const stack: MermaidVisualElement[] = []
+  const blockStarts = new Set(['alt', 'opt', 'loop', 'par', 'critical', 'break'])
+  for (const item of elements) {
+    if (item.kind !== 'control') {
+      const current = stack[stack.length - 1]
+      if (current) {
+        item.blockId = current.blockId ?? current.id
+        item.blockRole = 'member'
+      }
+      continue
+    }
+    const command = fieldValueOrEmpty(item.fields, 'command').toLowerCase()
+    if (blockStarts.has(command)) {
+      item.blockId = item.id
+      item.blockRole = 'start'
+      stack.push(item)
+      continue
+    }
+    const current = stack[stack.length - 1]
+    if (command === 'else' || command === 'and') {
+      if (current) {
+        item.blockId = current.blockId ?? current.id
+        item.blockRole = 'member'
+      }
+      continue
+    }
+    if (command === 'end') {
+      if (current) {
+        item.blockId = current.blockId ?? current.id
+        item.blockRole = 'end'
+        stack.pop()
+      }
+    }
+  }
+}
+
+function annotateFlowBlocks(elements: MermaidVisualElement[]) {
+  const stack: MermaidVisualElement[] = []
+  for (const item of elements) {
+    if (item.kind === 'group' && item.fields.groupEnd !== 'true') {
+      item.blockId = item.id
+      item.blockRole = 'start'
+      stack.push(item)
+      continue
+    }
+    const current = stack[stack.length - 1]
+    if (item.kind === 'group' && item.fields.groupEnd === 'true') {
+      if (current) {
+        item.blockId = current.blockId ?? current.id
+        item.blockRole = 'end'
+        stack.pop()
+      }
+      continue
+    }
+    if (current) {
+      item.blockId = current.blockId ?? current.id
+      item.blockRole = 'member'
+    }
+  }
+}
+
 function fieldValueOrEmpty(fields: Record<string, string>, key: string) {
   return (fields[key] ?? '').replace(/\r?\n|\r/g, ' ').trim()
+}
+
+const SAFE_STYLE_VALUE = /^(?:#[0-9a-f]{3,8}|[a-z][a-z0-9-]{0,31})$/i
+
+export function sanitizeMermaidStyleValue(value: string | undefined, fallback = '') {
+  const normalized = value?.trim() ?? ''
+  return SAFE_STYLE_VALUE.test(normalized) ? normalized : fallback
 }
 
 function shapeSyntax(shape: string, label: string) {
@@ -609,11 +746,41 @@ function formatElement(type: MermaidDiagramType, item: MermaidVisualElement) {
       }
       return `  ${fieldValueOrEmpty(fields, 'from') || 'A'} ${fieldValue(fields, 'arrow', '-->')} ${fieldValue(fields, 'label') ? `|${fieldValueOrEmpty(fields, 'label')}| ` : ''}${fieldValueOrEmpty(fields, 'to') || 'B'}`
     case 'group':
-      return `  subgraph ${fieldValueOrEmpty(fields, 'title') || 'グループ'}${fieldValue(fields, 'content') ? `\n${fieldValue(fields, 'content')}` : ''}\n  end`
+      if (fields.groupEnd === 'true') return '  end'
+      return `  subgraph ${fieldValueOrEmpty(fields, 'title') || 'グループ'}${fieldValue(fields, 'content') ? `\n${fieldValue(fields, 'content')}` : ''}${fields.autoClose === 'true' ? '\n  end' : ''}`
     case 'direction': return `  direction ${fieldValue(fields, 'direction', 'TD')}`
-    case 'participant': return `  participant ${fieldValueOrEmpty(fields, 'name') || 'A'}${fieldValue(fields, 'alias') ? ` as ${fieldValueOrEmpty(fields, 'alias')}` : ''}`
+    case 'style': {
+      const currentColors: Record<string, string> = {
+        fill: sanitizeMermaidStyleValue(fields.fill),
+        stroke: sanitizeMermaidStyleValue(fields.stroke),
+        color: sanitizeMermaidStyleValue(fields.text),
+      }
+      const declarations: string[] = []
+      const seenColors = new Set<string>()
+      for (const rawDeclaration of (fields.styleRaw ?? '').split(',').map((part) => part.trim()).filter(Boolean)) {
+        const separator = rawDeclaration.indexOf(':')
+        if (separator <= 0) {
+          declarations.push(rawDeclaration)
+          continue
+        }
+        const key = rawDeclaration.slice(0, separator).trim().toLowerCase()
+        if (key in currentColors) {
+          const value = currentColors[key]
+          if (value) declarations.push(`${key}:${value}`)
+          else declarations.push(rawDeclaration)
+          seenColors.add(key)
+          continue
+        }
+        declarations.push(rawDeclaration)
+      }
+      for (const [key, value] of Object.entries(currentColors)) {
+        if (value && !seenColors.has(key)) declarations.push(`${key}:${value}`)
+      }
+      return `  style ${fieldValueOrEmpty(fields, 'target') || 'A'} ${declarations.join(',') || 'fill:#eef2ff'}`
+    }
+    case 'participant': return `  ${fieldValue(fields, 'participantType', 'participant')} ${fieldValueOrEmpty(fields, 'name') || 'A'}${fieldValue(fields, 'alias') ? ` as ${fieldValueOrEmpty(fields, 'alias')}` : ''}`
     case 'message': return `  ${fieldValueOrEmpty(fields, 'from') || 'A'}${fieldValue(fields, 'arrow', '->>')}${fieldValueOrEmpty(fields, 'to') || 'B'}: ${fieldValueOrEmpty(fields, 'message') || 'メッセージ'}`
-    case 'note': return `  Note over ${fieldValueOrEmpty(fields, 'over') || 'A'}: ${fieldValueOrEmpty(fields, 'message') || '注釈'}`
+    case 'note': return `  Note ${fieldValue(fields, 'position', 'over') === 'left' ? 'left of' : fieldValue(fields, 'position', 'over') === 'right' ? 'right of' : 'over'} ${fieldValueOrEmpty(fields, 'over') || 'A'}: ${fieldValueOrEmpty(fields, 'message') || '注釈'}`
     case 'control': return `  ${fieldValueOrEmpty(fields, 'command') || 'alt'}${fieldValue(fields, 'label') ? ` ${fieldValueOrEmpty(fields, 'label')}` : ''}`
     case 'class': return `  class ${fieldValueOrEmpty(fields, 'name') || 'NewClass'} {`
     case 'attribute': return `    ${fieldValue(fields, 'visibility', '+')}${fieldValueOrEmpty(fields, 'name') || 'value'}${fieldValue(fields, 'type') ? ` : ${fieldValueOrEmpty(fields, 'type')}` : ''}`
@@ -673,7 +840,9 @@ function blockName(item: MermaidVisualElement) {
 
 function generateBlockAwareElements(document: MermaidVisualDocument) {
   if (document.type !== 'class' && document.type !== 'er') {
-    return document.elements.map((item) => item.dirty && item.editable ? formatElement(document.type, item) : item.raw)
+    return document.elements
+      .filter((item) => !item.derived)
+      .map((item) => item.dirty && item.editable ? formatElement(document.type, item) : item.raw)
   }
 
   const blocks = new Map<string, MermaidBlock>()
@@ -782,6 +951,11 @@ export function parseMermaidVisualSource(source: string): MermaidVisualDocument 
     if (!parsed.editable) unknownCount += 1
     elements.push(parsed)
   }
+  if (type === 'flowchart' || type === 'block' || type === 'architecture') {
+    annotateFlowBlocks(elements)
+    addImplicitFlowNodes(elements)
+  }
+  if (type === 'sequence') annotateSequenceBlocks(elements)
   return { type, prefix, header, elements, trailingNewline, unknownCount }
 }
 
@@ -790,6 +964,7 @@ export function createMermaidElement(type: MermaidDiagramType, kind: string, ind
   const definition = definitionsForType.find((candidate) => candidate.kind === kind) ?? definitionsForType[0] ?? rawKind
   const fields = Object.fromEntries(definition.fields.map((field) => [field.key, field.options?.[0] ?? '']))
   if (kind === 'node' && type === 'flowchart') Object.assign(fields, { id: `N${index + 1}`, label: '新しい要素', shape: 'rect' })
+  if (kind === 'style') Object.assign(fields, { target: 'A', fill: '#eef2ff', stroke: '#7c8ff5', text: '#172554' })
   if (kind === 'edge') Object.assign(fields, {
     from: 'A',
     fromLabel: 'A',
@@ -800,8 +975,12 @@ export function createMermaidElement(type: MermaidDiagramType, kind: string, ind
     arrow: '-->',
     label: '',
   })
-  if (kind === 'participant') Object.assign(fields, { name: `P${index + 1}`, alias: '参加者' })
+  if (kind === 'participant') Object.assign(fields, { name: `P${index + 1}`, alias: '参加者', participantType: 'participant' })
   if (kind === 'message') Object.assign(fields, { from: 'A', to: 'B', arrow: '->>', message: 'メッセージ' })
+  if (kind === 'note') Object.assign(fields, { position: 'over', over: 'A', message: '注釈' })
+  if (kind === 'control') Object.assign(fields, { command: 'alt', label: '条件' })
+  if (kind === 'group') Object.assign(fields, { title: 'グループ', autoClose: 'true' })
+  if (kind === 'relation' && type === 'class') fields.arrow = '-->'
   if (kind === 'class') Object.assign(fields, { name: `Class${index + 1}` })
   if (kind === 'entity') Object.assign(fields, { name: `ENTITY${index + 1}` })
   if (kind === 'state') Object.assign(fields, { id: `State${index + 1}`, label: '新しい状態' })

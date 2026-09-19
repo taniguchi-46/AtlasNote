@@ -5,7 +5,7 @@
 - 通常ノートのRich（WYSIWYG）エディタで、`mermaid`言語付きコードフェンスを図として表示する。
 - Markdownモードでは、従来どおり` ```mermaid `コードフェンスを編集する。
 - Rich表示ではソースを画面上に常時表示せず、読み取り専用の図だけを表示する。図の「編集」から開くダイアログでソースとプレビューを編集する。
-- Mermaid挿入時はローカルの図種別カタログから型と安全なサンプルを選択できる。編集ダイアログの「かんたん編集」では、図種別ごとの要素・接続・注釈を行単位で編集し、「ソース」タブでは未対応の行も含めて直接確認・修正できる。
+- Mermaid挿入時はローカルの図種別カタログから型と安全なサンプルを選択できる。編集ダイアログの「かんたん編集」では、図種別ごとの要素・接続・注釈を行単位で編集し、キャンバス上で選択・移動・接続・自動整列・表示倍率変更を行える。「ソース」タブでは未対応の行も含めて直接確認・修正できる。
 - 構文エラーや安全性検証の失敗時もソースを保持し、図の領域だけへエラーを表示する。
 - Mermaidの生成SVGは表示時だけ作成し、Markdown、SQLite、同期、バックアップへ保存しない。
 
@@ -23,7 +23,7 @@
 - `language`が`mermaid`（大文字小文字を区別しない）の場合だけRich表示へ図を追加する。
 - Mermaidの描画はNodeView内に閉じ、図のHTML／SVGをProseMirror文書へ挿入しない。NodeViewのcontentDOMにあるソースは編集状態を保持するためだけに使い、通常の画面では視覚的に隠す。
 - 編集ダイアログの保存は対象NodeViewの位置、ノード内容、アクティブノートID、エディタ世代を再検証する。条件が変わった場合は保存せず閉じる。成功時はソーステキストだけを1トランザクションで置換し、通常のTiptap履歴とautosaveへ渡す。
-- かんたん編集のモデルはダイアログ表示中だけの一時的な行モデルであり、保存形式・ノード型・SQLiteスキーマを追加しない。未対応の行は原文を保持してソースタブへ引き継ぎ、自由配置・キャンバス上のドラッグ・接続線の直接操作は対象外とする。
+- かんたん編集のモデルとキャンバス座標・スタイルはダイアログ表示中だけの一時状態であり、保存形式・ノード型・SQLiteスキーマを追加しない。保存対象は検証済みのcanonical Mermaid sourceだけとし、未対応の行は原文を保持してソースタブへ引き継ぐ。Flowchartの暗黙ノードは編集用に導出するが、保存時に重複行を生成しない。Sequenceのmessageは参加者カードではなく接続線として扱い、alt／loopなどの終了行は対応するブロックへまとめる。
 - コンテンツロック前は、開いている編集ダイアログのDOM値を回収してTiptap本文へ反映してからdraftをflushする。入力ガードはdraft保存完了後のロックAPIとロック後の表示反映まで保持し、保存／ロック失敗時に解除する。IMEのcompositionendを待てないロックでも入力を失わない。
 - 描画は短いデバウンスを挟み、古い非同期結果を世代番号で破棄する。ノート切替、ロック、アンマウント後にDOMを更新しない。
 - ライト／ダークテーマ変更時は現在のソースを再描画する。
@@ -45,7 +45,7 @@
 - `maxTextSize: 50000`、`maxEdges: 500`を描画設定へ明示する。
 - init／frontmatter設定、`click`／callback、外部URL・画像・アイコン記法は入力段階で拒否する。
 - YAML／JSONのキーやURLを部分的に判定せず、外部画像・任意のedge設定などを含む`@{...}`メタデータとsequenceの`properties`／`details`を構文の入口で拒否する。ただし、flowchart／graphのノードに限り、許可リスト内の`shape`と任意の引用符付き`label`だけを持つ`@{...}`は、かんたん編集の図形選択と整合するため利用できる。従来の角括弧・丸括弧・菱形などのノード記法も利用できる。
-- directive、リンク／アイコン、raw HTML（`<br/>`を含む）、Markdown画像、CSSの`url()`／`@import`を拒否する。style／classDef／linkStyle内のCSSエスケープ・コメントも拒否する。clickなどの命令は改行・セミコロン・sequenceDiagramヘッダー直後の文境界で判定し、通常ラベル中の単語は許可する。メタデータ・URLなどの禁止トークンはコメントやラベル内でも保守的に拒否し、原文は変更しない。
+- directive、リンク／アイコン、raw HTML（`<br/>`を含む）、Markdown画像、CSSの`url()`／`@import`を拒否する。style／classDef／linkStyle内のCSSエスケープ・コメントも拒否する。かんたん編集のキャンバスへ反映するstyle値は単純な色値へ限定し、入力ソースの危険なstyle値をDOMのインラインCSSへ渡さない。clickなどの命令は改行・セミコロン・sequenceDiagramヘッダー直後の文境界で判定し、通常ラベル中の単語は許可する。メタデータ・URLなどの禁止トークンはコメントやラベル内でも保守的に拒否し、原文は変更しない。
 - 生成SVGは専用のサニタイズを通し、スクリプト、`foreignObject`、画像、イベント属性、外部参照を許可しない。
 - SVG名前空間`http://www.w3.org/2000/svg`は外部リソースURLと区別して保持・補完し、シリアライズ後もXMLとして再解析できることを確認する。
 - サニタイズ済みSVGはBlob URLで`img`へ表示し、再描画・アンマウント時にURLを破棄する。
@@ -60,6 +60,7 @@
 - 空・不正・制限超過・安全性検証失敗時にソースを失わず、図単位でフォールバックする。
 - 複数図、テーマ変更、連続編集、ノート切替、ロック、アンマウントで古い描画が残らない。
 - 外部リソース、危険なSVG、任意イベントが実行・取得されない。
+- かんたん編集でFlowchart／Sequenceの要素を選択・移動・接続・複製・削除でき、Flowchartの暗黙ノード、Sequenceの参加者・message・actor・Note、alt／loopブロックを重複なくcanonical sourceへ反映できる。IME中の入力とテキストフィールドのDelete／Undoショートカットを横取りしない。
 - 対象テスト、Frontend typecheck／build、既存のMarkdown・保存・エクスポート回帰テストが成功する。
 
 Mermaidの設定・APIは[公式Usage](https://mermaid.js.org/config/usage)、セキュリティ設定は[securityLevel](https://mermaid.js.org/config/schema-docs/config-properties-securitylevel.html)を参照する。
@@ -84,6 +85,14 @@ Mermaidの設定・APIは[公式Usage](https://mermaid.js.org/config/usage)、�
 - 図種別カタログの全サンプルを実Mermaid 11.17.2でparseし、レイアウト依存の2種類を除くサンプルを描画した。行モデルの解析・未変更時の原文ラウンドトリップ・フローチャート／シーケンス図の要素編集・安全性判定も確認した。
 - `npm --prefix frontend run test:mermaid`、`npm run frontend:lint`、`npm --prefix frontend run build`が成功した。buildには既存依存由来のannotation／chunk-size警告が残る。
 - Wails実画面全体、実ブラウザーでの図種別選択・かんたん編集・手動UI受け入れ、今回の変更に対するGoテストは今回実施していない。
+
+## 今回の実装・再確認（2026-09-19）
+
+- 行モデルを拡張し、Flowchartのエッジから導出した暗黙ノード、Sequenceのactor／Note位置、alt／loopブロック、Flowchartの安全なstyle行を保持して、未変更行の原文ラウンドトリップを確認した。
+- キャンバスを共通座標系へ統一し、選択・複数選択・移動・接続・複製／貼り付け・Undo／Redo・自動整列・ズーム・プロパティ編集を追加した。接続、削除、複製時のID／参照更新と、入力欄／IME中のキーボードガードを回帰テストへ追加した。
+- `npm --prefix frontend run test:mermaid`、Frontend typecheck／lint／build、serializer・Markdown safety・content-locksの関連回帰を成功させた。実コンポーネントを同じVueランタイムでViteへマウントしたChromium確認では、Sequenceの参加者2件・messageエッジ1件・参加者行2件を確認した。
+- `test:note-export`は、既存実装の`flushPendingDraft({ mode: ... })`に対してテストが引数なしの`flushPendingDraft()`を要求する既存契約不一致で失敗する。今回の変更対象外のため修正していない。
+- Wailsバインディングを提供しないViteプレビューではアプリ全体のノート作成・保存操作ができないため、Wails実画面全体の手動受け入れとGoテストは未確認である。
 
 実ブラウザー検証はプロジェクト依存を追加せず、別ターミナルでローカルViteを起動して再実行できる。
 
