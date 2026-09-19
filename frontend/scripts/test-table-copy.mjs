@@ -14,7 +14,13 @@ const clipboardOut = path.join(outDir, 'tableClipboard.mjs')
 await mkdir(outDir, { recursive: true })
 
 try {
-  await compile(serializerPath, serializerOut)
+  await compile(
+    path.join(rootDir, 'src', 'utils', 'imageResize.ts'),
+    path.join(outDir, 'imageResize.mjs'),
+  )
+  await compile(serializerPath, serializerOut, [
+    ["from './imageResize'", "from './imageResize.mjs'"],
+  ])
   await compile(clipboardPath, clipboardOut, [
     ["from './tiptapMarkdownSerializer'", "from './tiptapMarkdownSerializer.mjs'"],
   ])

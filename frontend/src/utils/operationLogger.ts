@@ -19,7 +19,6 @@ const KNOWN_STAGES = new Set([
   'note-editor.flush-before-lock',
   'note-editor.image-paste',
   'note-editor.markdown-to-rich',
-  'note-editor.mermaid-paste',
   'note-editor.table-copy',
   'note-editor.attachments-export',
   'note-export.markdown-to-html',
@@ -29,7 +28,6 @@ const KNOWN_STAGES = new Set([
 
 const KNOWN_ERROR_CATEGORIES = new Set([
   'flush-or-close',
-  'mermaid-input-flush-failed',
   'parse-failed',
   'render-failed',
   'rich-content-snapshot-failed',

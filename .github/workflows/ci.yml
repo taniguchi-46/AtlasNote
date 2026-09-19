@@ -59,11 +59,11 @@ jobs:
       - name: Run frontend typecheck
         run: npm --prefix frontend run typecheck
 
+      - name: Run code block round-trip tests
+        run: npm --prefix frontend run test:code-block
+
       - name: Run serializer tests
         run: npm --prefix frontend run test:serializer
-
-      - name: Run Mermaid renderer tests
-        run: npm --prefix frontend run test:mermaid
 
       - name: Run autosave concurrency tests
         run: npm --prefix frontend run test:auto-save

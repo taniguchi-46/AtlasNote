@@ -381,11 +381,6 @@
 
         <span class="format-divider" />
 
-        <MermaidInsertPopover
-          :disabled="isEditorInputLocked || noteStore.activeNote?.isTrashed"
-          @select="insertMermaidDiagram"
-        />
-
         <button
           class="format-btn"
           :class="{ 'is-active': editMode === 'wysiwyg' && editor?.isActive('table') }"
@@ -479,28 +474,6 @@
             @dragover="handleEditorDragOver"
             @drop="handleRichDrop"
           />
-          <div
-            v-if="mermaidCommandOpen"
-            class="mermaid-command-menu"
-            :style="mermaidCommandStyle"
-            role="listbox"
-            aria-label="Mermaid図の候補"
-          >
-            <button
-              v-for="(diagram, index) in mermaidCommandSuggestions"
-              :key="diagram.type"
-              type="button"
-              class="mermaid-command-item"
-              :class="{ 'is-selected': index === mermaidCommandIndex }"
-              role="option"
-              :aria-selected="index === mermaidCommandIndex"
-              @mousedown.prevent
-              @click="selectMermaidCommand(diagram.type)"
-            >
-              <WorkflowIcon :size="15" aria-hidden="true" />
-              <span>{{ diagram.label }}</span>
-            </button>
-          </div>
           <div v-if="editMode === 'markdown'" class="markdown-editor-shell">
             <div
               v-if="markdownAgentHighlight"
@@ -559,7 +532,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { textblockTypeInputRule, type JSONContent } from '@tiptap/core'
+import type { JSONContent } from '@tiptap/core'
 import {
   BoldIcon,
   CheckSquareIcon,
@@ -592,7 +565,6 @@ import {
   TableRowsSplitIcon,
   TerminalIcon,
   Trash2Icon,
-  WorkflowIcon,
   XIcon,
 } from '@lucide/vue'
 import {
@@ -602,13 +574,13 @@ import {
   DropdownMenuRoot,
   DropdownMenuTrigger,
 } from 'reka-ui'
-import { Editor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3'
+import { Editor, EditorContent } from '@tiptap/vue-3'
 import {
   DOMParser as ProseMirrorDOMParser,
   DOMSerializer as ProseMirrorDOMSerializer,
   type Node as ProseMirrorNode,
 } from '@tiptap/pm/model'
-import { NodeSelection, Plugin, PluginKey, TextSelection, type Selection } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection, type Selection } from '@tiptap/pm/state'
 import {
   history as createRichHistoryPlugin,
   redo as redoRichHistory,
@@ -692,22 +664,6 @@ import {
   continueMarkdownList,
   createMarkdownLineBreakTracker,
 } from '../utils/markdownListContinuation'
-import { createMermaidFence } from '../utils/mermaidClipboard'
-import { insertMermaidCodeBlock } from '../utils/mermaidInsertion'
-import {
-  getMermaidDiagramSuggestions,
-  getMermaidDiagramDefinition,
-  type MermaidDiagramType,
-} from '../utils/mermaidVisualEditor'
-import {
-  flushMermaidEditorInputs,
-  setMermaidEditorInputsLocked,
-  type MermaidEditorInputFlusher,
-  type MermaidEditorSessionStorage,
-} from '../utils/mermaidEditorSession'
-import { handleMermaidPaste } from '../utils/mermaidPaste'
-import MermaidCodeBlockView from './MermaidCodeBlockView.vue'
-import MermaidInsertPopover from './MermaidInsertPopover.vue'
 
 const CustomTableCell = TableCell.extend({
   content: '(paragraph | heading | blockquote | codeBlock | bulletList | orderedList | taskList | horizontalRule)+',
@@ -719,32 +675,6 @@ const CustomTableHeader = TableHeader.extend({
 
 const lowlight = createLowlight(common)
 const agentEditorHighlightPluginKey = new PluginKey<DecorationSet>('agentEditorHighlight')
-
-const MermaidCodeBlock = CodeBlockLowlight.extend({
-  addStorage() {
-    return {
-      ...this.parent?.(),
-      noteId: null as string | null,
-      generation: 0,
-      mermaidEditorFlushers: new Set<MermaidEditorInputFlusher>(),
-      mermaidEditorInputLockers: new Set(),
-      openMermaidEditorOnSelect: false,
-    }
-  },
-  addNodeView() {
-    return VueNodeViewRenderer(MermaidCodeBlockView)
-  },
-  addInputRules() {
-    return [
-      textblockTypeInputRule({
-        find: /^(?:```|~~~)mermaid[\s\n]$/i,
-        type: this.type,
-        getAttributes: () => ({ language: 'mermaid' }),
-      }),
-      ...(this.parent?.() ?? []),
-    ]
-  },
-})
 
 const ManagedImage = Image.extend({
   addAttributes() {
@@ -953,34 +883,6 @@ const isApplyingContent = ref(false)
 const isRichDirty = ref(false)
 const editorStateVersion = ref(0)
 const markdownSelectionVersion = ref(0)
-const mermaidCommandOpen = ref(false)
-const mermaidCommandQuery = ref('')
-const mermaidCommandIndex = ref(0)
-const mermaidCommandRange = ref<{ start: number; end: number } | { from: number; to: number } | null>(null)
-const mermaidCommandSuggestions = computed(() => getMermaidDiagramSuggestions(mermaidCommandQuery.value).slice(0, 8))
-const mermaidCommandStyle = computed(() => {
-  editorStateVersion.value
-  if (editMode.value === 'wysiwyg') {
-    const editorElement = editor.view.dom
-    const body = editorElement.closest('.editor-body')
-    if (body) {
-      const coords = editor.view.coordsAtPos(editor.state.selection.from)
-      const bodyRect = body.getBoundingClientRect()
-      return {
-        top: `${coords.bottom - bodyRect.top + 8}px`,
-        left: `${coords.left - bodyRect.left}px`,
-      }
-    }
-    return undefined
-  }
-  if (!mermaidCommandRange.value || !('start' in mermaidCommandRange.value)) {
-    return undefined
-  }
-  const lineStart = localMarkdown.value.lastIndexOf('\n', mermaidCommandRange.value.start - 1) + 1
-  const lineIndex = localMarkdown.value.slice(0, lineStart).split('\n').length - 1
-  const scrollTop = markdownTextarea.value?.scrollTop ?? 0
-  return { top: `${24 + lineIndex * 24 - scrollTop}px` }
-})
 let imagePasteGeneration = 0
 let lastMarkdownSelection = { start: 0, end: 0 }
 let savedMessageTimer: ReturnType<typeof setTimeout> | null = null
@@ -1110,31 +1012,19 @@ const editor: Editor = new Editor({
     TaskItem.configure({
       nested: true,
     }),
-    MermaidCodeBlock.configure({
+    CodeBlockLowlight.configure({
       lowlight,
     }),
   ],
   editorProps: {
-    clipboardTextSerializer(content, view) {
+    clipboardTextSerializer(_content, view) {
       const selection = view.state.selection
-      const mermaidSource = findRichMermaidSource(selection)
-      if (mermaidSource !== null && isSelectionInsideMermaid(selection)) {
-        return createMermaidFence(mermaidSource)
-      }
-
-      if (selectionContainsMermaid(selection)) {
-        return serializeTiptapJsonToMarkdown({
-          type: 'doc',
-          content: content.content.toJSON() as JSONContent[],
-        })
-      }
-
       const table = findRichTableNode(selection)
       if (table) return createTiptapTableClipboardPayload(table).plainText
 
       return ''
     },
-    handlePaste(view, event): boolean {
+    handlePaste(_view, event): boolean {
       const clipboardImage = getClipboardImage(event)
       if (clipboardImage) {
         event.preventDefault()
@@ -1142,21 +1032,7 @@ const editor: Editor = new Editor({
         return true
       }
 
-      return handleMermaidPaste({
-        editor,
-        view,
-        event,
-        parseMarkdown: (markdown) => editor.schema.nodeFromJSON(
-          parseRichHtmlToJson(parseMarkdownToRichHtml(markdown)),
-        ),
-        onError: (error) => {
-          logOperationFailure({
-            noteId: noteStore.activeNote?.id,
-            stage: 'note-editor.mermaid-paste',
-            errorCategory: error instanceof Error ? error.name : 'paste-failed',
-          })
-        },
-      })
+      return false
     },
     handleDrop(_view, event): boolean {
       if (!hasDroppedFiles(event)) return false
@@ -1175,7 +1051,6 @@ const editor: Editor = new Editor({
       return true
     },
     handleKeyDown(view, event) {
-      if (handleMermaidCommandKeydown(event, 'rich')) return true
       const actionId = findMatchingShortcutAction(
         event,
         settingsStore.shortcutBindings,
@@ -1199,7 +1074,6 @@ const editor: Editor = new Editor({
   onSelectionUpdate() {
     invalidateImagePasteOperations()
     editorStateVersion.value += 1
-    updateMermaidCommandState('rich')
   },
   onUpdate({ editor }) {
     invalidateImagePasteOperations()
@@ -1217,34 +1091,17 @@ const editor: Editor = new Editor({
       updateAutoTitleFromMarkdown(markdown)
       scheduleAutoSave(markdown)
     }
-    updateMermaidCommandState('rich')
   },
 })
 
 editor.registerPlugin(createRichHistoryPlugin({ depth: 100, newGroupDelay: 500 }))
 editor.registerPlugin(agentEditorHighlightPlugin)
 
-function updateMermaidEditorContext(noteId: string | null) {
-  if (editor.isDestroyed) return
-
-  const storage = (editor.storage as {
-    codeBlock?: {
-      noteId?: string | null
-      generation?: number
-    }
-  }).codeBlock
-  if (!storage) return
-
-  storage.noteId = noteId
-  storage.generation = (storage.generation ?? 0) + 1
-}
-
 watch(
   () => noteStore.activeNote,
   (note) => {
     invalidateImagePasteOperations()
     if (!note) {
-      updateMermaidEditorContext(null)
       noteStore.clearAgentEditorHighlight()
       activeNoteId = null
       savedRichSelection = null
@@ -2270,7 +2127,6 @@ function setEditMode(mode: 'wysiwyg' | 'markdown') {
 
   if (mode === 'markdown') {
     applyRichEditorToMarkdown()
-    updateMermaidEditorContext(null)
     editMode.value = 'markdown'
     resetMarkdownEditHistory(localMarkdown.value)
     resetRichEditorToEmpty()
@@ -2301,46 +2157,20 @@ function setContentLockPending(pending: boolean): boolean {
 
   if (pending) {
     contentLockPreviousEditable = editor.isEditable
-    if (!setMermaidEditorInputsLocked(
-      (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
-      true,
-    )) {
-      setMermaidEditorInputsLocked(
-        (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
-        false,
-      )
-      contentLockPreviousEditable = null
-      return false
-    }
-
     isContentLockPending.value = true
     editor.setEditable(false)
     return true
   }
 
-  const unlocked = setMermaidEditorInputsLocked(
-    (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock,
-    false,
-  )
   isContentLockPending.value = false
   const previousEditable = contentLockPreviousEditable
   contentLockPreviousEditable = null
   editor.setEditable((previousEditable ?? true) && !isActiveNoteDeletionPreparing.value)
-  return unlocked
+  return true
 }
 
 function flushEditorInput(): boolean {
   if (editMode.value !== 'wysiwyg' || editor.isDestroyed) return true
-
-  const storage = (editor.storage as { codeBlock?: MermaidEditorSessionStorage }).codeBlock
-  if (!flushMermaidEditorInputs(storage)) {
-    logOperationFailure({
-      noteId: noteStore.activeNote?.id,
-      stage: 'note-editor.flush-before-lock',
-      errorCategory: 'mermaid-input-flush-failed',
-    })
-    return false
-  }
 
   try {
     applyRichEditorToMarkdown()
@@ -2402,7 +2232,6 @@ function resetRichEditorToEmpty() {
 }
 
 function setEditorFromMarkdown(markdown: string): boolean {
-  updateMermaidEditorContext(noteStore.activeNote?.id ?? null)
   isApplyingContent.value = true
   try {
     const html = parseMarkdownToRichHtml(markdown)
@@ -2731,108 +2560,6 @@ function toggleHorizontalRule() {
   insertMarkdownBlock('---')
 }
 
-function insertMermaidDiagram(
-  type: MermaidDiagramType,
-  commandRange?: { start: number; end: number } | { from: number; to: number },
-) {
-  const starter = getMermaidDiagramDefinition(type).sample
-  if (editMode.value === 'markdown') {
-    if (commandRange && 'start' in commandRange) {
-      replaceMarkdownRange(commandRange.start, commandRange.end, createMermaidFence(starter))
-      closeMermaidCommand()
-      return
-    }
-    insertMarkdownBlock(createMermaidFence(starter))
-    return
-  }
-
-  insertMermaidCodeBlock(editor, starter, commandRange && 'from' in commandRange ? commandRange : undefined)
-  closeMermaidCommand()
-}
-
-function getMermaidCommandMatch(value: string, cursor: number) {
-  const beforeCursor = value.slice(0, cursor)
-  const match = beforeCursor.match(/(?:^|\s)\/mermaid(?:\s+([^\s]*))?$/i)
-  if (!match || match.index === undefined) return null
-  const commandOffset = match[0].lastIndexOf('/mermaid')
-  return {
-    start: match.index + commandOffset,
-    end: cursor,
-    query: match[1] ?? '',
-  }
-}
-
-function updateMermaidCommandState(mode: 'markdown' | 'rich') {
-  if (mode === 'markdown') {
-    const selection = getMarkdownSelection()
-    const lineStart = localMarkdown.value.lastIndexOf('\n', Math.max(selection.start - 1, 0)) + 1
-    const match = getMermaidCommandMatch(localMarkdown.value.slice(lineStart, selection.start), selection.start - lineStart)
-    if (!match || selection.start !== selection.end) {
-      closeMermaidCommand()
-      return
-    }
-    mermaidCommandRange.value = { start: lineStart + match.start, end: lineStart + match.end }
-    mermaidCommandQuery.value = match.query
-  } else {
-    if (editMode.value !== 'wysiwyg' || editor.state.selection.empty === false) {
-      closeMermaidCommand()
-      return
-    }
-    const selection = editor.state.selection
-    const parent = selection.$from.parent
-    const match = getMermaidCommandMatch(parent.textContent, selection.$from.parentOffset)
-    if (!match) {
-      closeMermaidCommand()
-      return
-    }
-    mermaidCommandRange.value = {
-      from: selection.$from.start() + match.start,
-      to: selection.$from.pos,
-    }
-    mermaidCommandQuery.value = match.query
-  }
-
-  mermaidCommandOpen.value = mermaidCommandSuggestions.value.length > 0
-  mermaidCommandIndex.value = Math.min(mermaidCommandIndex.value, Math.max(0, mermaidCommandSuggestions.value.length - 1))
-}
-
-function closeMermaidCommand() {
-  mermaidCommandOpen.value = false
-  mermaidCommandQuery.value = ''
-  mermaidCommandRange.value = null
-  mermaidCommandIndex.value = 0
-}
-
-function selectMermaidCommand(type: MermaidDiagramType) {
-  const range = mermaidCommandRange.value
-  if (!range) return
-  insertMermaidDiagram(type, range)
-}
-
-function handleMermaidCommandKeydown(event: KeyboardEvent, mode: 'markdown' | 'rich') {
-  if (!mermaidCommandOpen.value || (mode === 'markdown' && editMode.value !== 'markdown')) return false
-
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeMermaidCommand()
-    return true
-  }
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    event.preventDefault()
-    const delta = event.key === 'ArrowDown' ? 1 : -1
-    const length = mermaidCommandSuggestions.value.length
-    mermaidCommandIndex.value = (mermaidCommandIndex.value + delta + length) % length
-    return true
-  }
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-    event.preventDefault()
-    const diagram = mermaidCommandSuggestions.value[mermaidCommandIndex.value]
-    if (diagram) selectMermaidCommand(diagram.type)
-    return true
-  }
-  return false
-}
-
 function rememberRichSelection() {
   if (editMode.value !== 'wysiwyg') return
 
@@ -2982,62 +2709,6 @@ function findRichTableNode(selection: Selection): JSONContent | null {
   return null
 }
 
-function findRichCodeBlockNode(selection: Selection): ProseMirrorNode | null {
-  return findRichCodeBlockRange(selection)?.node ?? null
-}
-
-function findRichMermaidSource(selection: Selection): string | null {
-  const codeBlock = findRichCodeBlockNode(selection)
-  if (!codeBlock) return null
-
-  const language = String(codeBlock.attrs.language ?? '').trim().toLowerCase()
-  return language === 'mermaid' ? codeBlock.textContent : null
-}
-
-function findRichCodeBlockRange(selection: Selection) {
-  if (selection instanceof NodeSelection) {
-    return selection.node.type.name === 'codeBlock'
-      ? { node: selection.node, from: selection.from, to: selection.to }
-      : null
-  }
-
-  const { $from } = selection
-  for (let depth = $from.depth; depth > 0; depth -= 1) {
-    const node = $from.node(depth)
-    if (node.type.name === 'codeBlock') {
-      return { node, from: $from.before(depth), to: $from.after(depth) }
-    }
-  }
-
-  return null
-}
-
-function isMermaidCodeBlock(node: ProseMirrorNode) {
-  return node.type.name === 'codeBlock'
-    && String(node.attrs.language ?? '').trim().toLowerCase() === 'mermaid'
-}
-
-function isSelectionInsideMermaid(selection: Selection) {
-  const range = findRichCodeBlockRange(selection)
-  return Boolean(range && isMermaidCodeBlock(range.node)
-    && selection.from >= range.from
-    && selection.to <= range.to)
-}
-
-function selectionContainsMermaid(selection: Selection) {
-  if (isSelectionInsideMermaid(selection)) return true
-
-  let contains = false
-  editor.state.doc.nodesBetween(selection.from, selection.to, (node) => {
-    if (isMermaidCodeBlock(node)) {
-      contains = true
-      return false
-    }
-    return !contains
-  })
-  return contains
-}
-
 function serializeRichTableToHtml(table: JSONContent) {
   const node = editor.schema.nodeFromJSON(table)
   const serializer = ProseMirrorDOMSerializer.fromSchema(editor.schema)
@@ -3134,7 +2805,6 @@ function handleMarkdownBeforeInput(event: InputEvent) {
 }
 
 function handleMarkdownKeydown(event: KeyboardEvent) {
-  if (handleMermaidCommandKeydown(event, 'markdown')) return
   markdownLineBreakTracker.handleKeydown(event)
   if (
     event.key === 'Enter'
@@ -3246,14 +2916,12 @@ function handleMarkdownInput(event: Event) {
   localMarkdown.value = textarea.value
   dismissAgentEditorHighlight()
   updateMarkdownSelection()
-  updateMermaidCommandState('markdown')
   updateAutoTitleFromMarkdown(localMarkdown.value)
   scheduleAutoSave(localMarkdown.value)
 }
 
 function handleMarkdownClick(event: MouseEvent) {
   updateMarkdownSelection()
-  updateMermaidCommandState('markdown')
   if (!event.ctrlKey && !event.metaKey) return
 
   const textarea = markdownTextarea.value
@@ -3300,7 +2968,6 @@ function updateMarkdownSelection() {
   }
 
   markdownSelectionVersion.value += 1
-  if (editMode.value === 'markdown') updateMermaidCommandState('markdown')
 }
 
 function toggleMarkdownInlineWrap(marker: string) {
@@ -3803,42 +3470,6 @@ function formatDate(iso: string): string {
 
 .editor-body {
   position: relative;
-}
-
-.mermaid-command-menu {
-  position: absolute;
-  z-index: 1100;
-  top: 18px;
-  left: 24px;
-  display: flex;
-  width: min(260px, calc(100% - 48px));
-  flex-direction: column;
-  padding: 6px;
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: 8px;
-  background: var(--bg-editor);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
-}
-
-.mermaid-command-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-  font-size: 12px;
-}
-
-.mermaid-command-item:hover,
-.mermaid-command-item.is-selected {
-  background: var(--bg-hover);
-  color: var(--brand-primary);
 }
 
 .agent-editor-highlight-status {

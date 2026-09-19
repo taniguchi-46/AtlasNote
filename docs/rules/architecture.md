@@ -146,13 +146,9 @@ Go Backend
 - AIプレビューで許可する要素は見出し、段落、改行、リスト、引用、強調、コード、区切り線、リンクに限定する。`script`、`style`、イベント属性、外部リソース要素、画像、SVG、フォーム、`javascript:`・`data:`・`file:` URLは許可しない。
 - AIの保存済み回答は原文を保持し、表示時に毎回サニタイズする。プロンプトのMarkdown出力規則はユーザビリティ向けであり、セキュリティ境界は表示時サニタイズとする。
 
-### Mermaid図のRich表示
+### Mermaidの分離
 
-- Mermaidは通常ノートのRichエディタで`codeBlock.attrs.language === 'mermaid'`のときだけNodeViewとして図のみを表示し、Markdown本文とProseMirrorの永続ノードへ生成SVGを保存しない。ソース編集はNodeViewのダイアログで行い、かんたん編集の行モデルはダイアログ内だけで保持してcanonical sourceへ反映する。NodeViewとダイアログの表示倍率は表示専用で、Markdown・SQLite・同期へ保存しない。
-- MarkdownモードとエクスポートはMermaidのコードソースを扱い、AI回答プレビューは対象外とする。raw HTML、raw SVG、`div.mermaid`はMermaid入力として扱わない。
-- ダイアログの保存は対象ノードとアクティブノートの世代を再検証し、成功したソーステキスト置換だけを通常のTiptap transaction、Undo、autosaveへ接続する。Rich貼り付けはfenced/raw/許可したHTML code sourceに限定し、コピーは動的長のMermaidフェンスを使う。
-- Mermaidは固定した安全設定と入力上限で描画し、init／frontmatter設定、click／callback、外部画像・アイコン・URLを拒否する。生成SVGは専用サニタイズ後にBlob URLの`img`として表示し、外部参照・イベント・`foreignObject`を許可しない。
-- 描画は非同期結果の世代管理とアンマウント時のBlob URL破棄を行い、ノート切替・ロック・テーマ変更時に古い図が残らないようにする。詳細は `docs/development/mermaid.md` を正とする。
+Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。 保存形式・DB・同期は変更しない。
 
 ### 外部ノートインポート
 

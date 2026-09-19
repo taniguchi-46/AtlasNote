@@ -1,6 +1,14 @@
 # プロジェクト状況
 
-最終更新: 2026-09-18
+最終更新: 2026-09-20
+
+## ブランチ分離（2026-09-20）
+
+Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。未コミットだった11ファイルの編集も `codex/mermaid-full` の `eafb13e` に保持済み。自動保存・添付画像・削除・ロック・AI履歴は継続する。以下の過去のMermaid実装・検証記録は分離前／対応ブランチの記録であり、通常開発ブランチの提供機能ではない。
+
+分離後の検証: `npm run frontend:build`（型チェック含む）、`test:code-block`、`test:serializer`、`test:markdown-safety`、`test:table-copy`、`test:auto-save`、`test:note-delete`、`test:content-locks`、`test:shortcuts`、`test:operation-logger`、`node scripts/test-attachments.mjs` は成功。表コピーのテストには既存の画像幅モジュールのコンパイルを補い、Mermaidフェンスと空段落のRich往復・編集・Undo／Redoを専用描画なしで回帰確認した。Wails実画面の手動確認は未実施。
+
+## 分離前の作業記録
 
 Mermaid図の図種別カタログと、要素・接続・注釈を行単位で編集する「かんたん編集」を追加した。未対応の行は原文を保持し、ソースタブから継続して編集できる。Mermaidは表示ハンドルの上下ドラッグで10〜200%を変更する表示専用倍率とし、現在の100%を従来の50%相当へ合わせ、図上の右ボタン操作または「編集」ボタンでソース編集ダイアログを開く。添付画像の幅は右下ハンドルで変更し、管理参照を変えずMarkdown本文に保存する。`npm --prefix frontend run test:mermaid`、`npm run frontend:typecheck`、`npm run frontend:lint`は成功した。実Wails画面での上下ドラッグ・右ボタン編集・かんたん編集の手動受け入れは未実施。
 
@@ -52,8 +60,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 - 2026-09-06に、保存場所移行のデータstage・分離バックアップstage・同一targetルートのバックアップstage・source読み取り拒否をWindowsの実共有ハンドルで検証した。共有中はowned marker・stage・保留マーカーを保持し、ハンドル解放後に再試行して完了すること、誤ったバックアップ残骸検査パスを修正したことを確認した。marker不一致、look-alike sibling、marker linkも変更なしで拒否する。
 - 2026-09-06に、同一／分離アーカイブルートのApp統合テストで、自動バックアップからの復元を再起動で適用し、復元されたノートのrevisionを基準にtrash後のrevisionで完全削除できること、他ノート・自動バックアップ・復元安全用バックアップ・保留マーカーが保持されることを確認した。Frontendの実Pinia Storeテストでは、trash後のstale lock応答がrevisionを巻き戻さず、最新のlock応答だけを反映することも確認した。
 - 2026-09-09に、構造化JSON／CSVの全件検証付き複数ノートインポート、JSON／CSV／TXTのcanonical snapshotエクスポート、CSV数式セル無害化を実装した。Windowsアンインストールでは、既定OFFの追加削除ページから、現在ユーザーの既知のWebViewデータとCredential Store参照だけを削除できる保守コマンドを追加し、通常起動・migration・ノート／バックアップ／保存場所管理情報の削除を行わないことをfixture／mockとNSISコンパイルで確認した。
-- MermaidコードフェンスのRich表示を実装した。既存の`codeBlock`とMarkdown serializerを維持し、`language: "mermaid"`だけをNodeViewで図のみ表示する。「編集」ダイアログからソースとプレビューを扱い、保存はソーステキストだけを通常のTiptap transaction・Undo・autosaveへ渡す。fenced/raw/HTML貼り付けと動的フェンスコピー、遅延読込・固定安全設定・入力上限・SVG専用サニタイズ・外部リソース拒否を適用し、生成物を保存しない。AI回答プレビューとHTML／PDFエクスポートの図化は対象外。詳細は`docs/development/mermaid.md`を正とする（2026-09-12、手動UI受け入れ未完了）
-- MermaidレビューのHigh 2件を修正した。SVG名前空間を外部URLと区別し、YAML／JSONメタデータ・sequence画像プロパティを描画前に拒否する。NodeViewの遅延応答／Blob破棄、実Chromiumのlight／dark画像読み込み、禁止入力54件のAPI・画像取得0件、関連保存回帰、Frontend typecheck／build、Wails buildを確認した。`@{...}`拡張メタデータ全体の拒否を含む制約・再現手順は`docs/development/mermaid.md`へ記録した。Wails実画面全体の手動受け入れは未完了（2026-09-10）。
+- Mermaid専用実装は`codex/mermaid-full`に保持（通常開発ブランチではソース表示のみ）。
 - Notebook階層の循環防止
 - migration境界、SQLite接続設定、Critical / High項目のCI検証
 - Richエディタ変換時のraw HTML無効化と危険な属性・URLの回帰テスト
@@ -189,7 +196,6 @@ npm --prefix frontend run test:tags
 npm --prefix frontend run test:notebook-hierarchy
 npm --prefix frontend run test:note-list-view
 npm --prefix frontend run test:serializer
-npm --prefix frontend run test:mermaid
 npm --prefix frontend run test:table-copy
 npm --prefix frontend run test:markdown-safety
 npm --prefix frontend run test:operation-logger
