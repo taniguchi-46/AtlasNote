@@ -1,12 +1,12 @@
 # Phase 2 実績・残課題
 
-> Phase 2の実装チェックリストはクローズアウト記録として保持します。現在の状況は `../status.md`、Phase 3の作業は `todo-phese3.md` を参照してください。
+> Phase 2の実装チェックリストはクローズアウト記録として保持します。現在の状況は `../../status.md`、Phase 3の完了記録は `../phase3/todo.md` を参照してください。
 
 ## TODOの目的
 
 Phase 2「整理・検索」を、安全な最小差分で段階的に実装した記録を保持する。
 
-機能要件は `docs/development/scopes/scope-phese2.md`、実装順序は `docs/development/implementation-plan.md` を正とする。
+機能要件は `docs/archive/phase2/scope.md`、実装順序は `docs/development/implementation-plan.md` を正とする。
 
 ## 現状・前提
 
@@ -30,7 +30,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 ## 0. Phase 2実装前チェック（完了記録）
 
 - [x] 現在のドキュメント整理差分をレビューし、削除・更新内容に問題がないことを確認する。
-- [x] `docs/development/scopes/scope-phese2.md`の対象機能と対象外機能を確認する。
+- [x] `docs/archive/phase2/scope.md`の対象機能と対象外機能を確認する。
 - [x] `docs/development/implementation-plan.md`の実装順序を確認し、最初に着手する機能を決める。
 - [x] 最初の実装対象をタイトル検索に限定するか判断する（タイトル・本文検索を実装済み）。
 - [x] 1機能ごとの変更範囲をRepository、Service、Wails API、Store、UIに分けて整理する。
@@ -118,7 +118,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 
 ## 2. タグ設計
 
-設計の正本: [`docs/development/tag-design.md`](../development/tag-design.md)
+設計の正本: [`docs/development/tag-design.md`](../../development/tag-design.md)
 
 - [x] タグ名の正規化、最大長、空文字、大文字小文字の扱いを決める。
 - [x] 同名タグのUNIQUE制約を決める。
@@ -242,7 +242,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 
 - [x] `docs/status.md`を実装状態へ更新する。
 - [x] `docs/rules/architecture.md`へ確定した検索・タグ設計を反映する。
-- [x] `docs/development/scopes/scope-phese2.md`と実装の差分を確認する。
+- [x] `docs/archive/phase2/scope.md`と実装の差分を確認する。
 - [x] API、DB、migration、テストの変更内容を記録する（`docs/status.md`、`docs/development/search-index.md`、`docs/development/performance.md`）。
 - [x] 不要なTODO、古い前提、リンク切れがないことを確認する。
 

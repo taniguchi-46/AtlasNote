@@ -19,6 +19,7 @@ Atlas Noteの仕様、設計、進捗、作業チェックの入口です。フ�
 | `docs/development/` | 機能設計、同期・データ契約、開発ガイド | [開発・設計資料](development/README.md) |
 | `docs/development/scopes/` | Phaseごとの要求範囲・対象外・完了条件 | [scope索引](development/scopes/README.md) |
 | `docs/todo/` | 実装・検証・受け入れのチェックリスト | [TODO索引](todo/README.md) |
+| `docs/archive/` | 完了済みPhaseのスコープ・TODO・受け入れ記録 | [アーカイブ](archive/README.md) |
 | `docs/rules/` | アーキテクチャ、実装規約、Git、用語 | [ルール一覧](rules/) |
 
 ## Phase 4 AIの正本

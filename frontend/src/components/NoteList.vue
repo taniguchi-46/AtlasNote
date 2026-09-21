@@ -1,6 +1,5 @@
 <template>
   <section class="note-list-pane" aria-label="ノート一覧">
-    <!-- Header -->
     <div class="note-list-header">
       <h2 class="note-list-title">{{ sectionTitle }}</h2>
       <span class="note-list-count">{{ displayedCount }}</span>
@@ -77,12 +76,10 @@
       </button>
     </div>
 
-    <!-- Loading -->
     <div v-if="(noteStore.isLoading || searchStore.isSearching) && displayedNotes.length === 0" class="note-list-empty">
       <div class="spinner" aria-label="読み込み中..." />
     </div>
 
-    <!-- Empty state -->
     <div v-else-if="displayedNotes.length === 0" class="note-list-empty">
       <FileTextIcon :size="32" class="empty-icon" />
       <p class="empty-label">{{ searchStore.isActive ? '検索結果がありません' : 'ノートはありません' }}</p>
@@ -101,7 +98,6 @@
       {{ searchStore.isSearching ? '読み込み中...' : '次の検索結果を読み込む' }}
     </button>
 
-    <!-- Note items -->
     <ul v-if="displayedNotes.length > 0" ref="noteListRef" class="note-list" role="list">
       <ContextMenuRoot
         v-for="note in displayedNotes"
@@ -124,7 +120,6 @@
                 type="button"
                 @click="handleNoteClick($event, note)"
               >
-                <!-- Icons row -->
                 <div class="note-item-meta">
                   <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
                   <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />

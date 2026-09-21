@@ -8,7 +8,7 @@ Phase 2の完了記録を維持しながら、Phase 3「同期」を設計承認
 
 機能要件は `docs/development/scopes/scope.md`、現在状況は `docs/status.md`、Phase 3の同期設計は `docs/development/webdav-sync.md` を正とします。
 
-本書は承認済み設計に従った実装順序の正本です。進捗チェックは `docs/todo/todo-phese3.md`、Phase 2の実績と残課題は `docs/todo/todo-phese2.md` を参照します。
+本書は承認済み設計に従った実装順序の記録です。Phase 3の進捗・受け入れ記録は `docs/archive/phase3/todo.md`、Phase 2の実績は `docs/archive/phase2/todo.md` を参照します。
 
 ## 現在のPhase
 
@@ -72,7 +72,7 @@ Phase 3はschema version 10、Joplin方式の同期設定、フェイルセー�
 
 ## Phase 2実装順序（完了記録・履歴）
 
-以下はPhase 2の実績を残すための履歴です。現在の実装状態と未確認事項は [`status.md`](../status.md) と [`todo-phese2.md`](../todo/todo-phese2.md) を参照します。
+以下はPhase 2の実績を残すための履歴です。現在の実装状態と未確認事項は [`status.md`](../status.md) と [Phase 2アーカイブ](../archive/phase2/todo.md) を参照します。
 
 ### 0. revision・競合・保存キュー
 

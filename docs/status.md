@@ -1,6 +1,10 @@
 # プロジェクト状況
 
-最終更新: 2026-09-20
+最終更新: 2026-09-21
+
+## ドキュメント整理（2026-09-21）
+
+完了済みPhase 2／3のスコープ・TODO・受け入れ記録を `docs/archive/` へ移動した。現行の設計契約（WebDAV同期、revision・CAS、検索、タグ）は `docs/development/` に維持し、各索引と参照先をアーカイブへ更新した。開発環境方針と技術スタックの重複は、セットアップ手順を`setup.md`、採用技術を`tech-stack.md`、判断基準・秘密情報を`environment.md`へ分離して整理した。
 
 ## ブランチ分離（2026-09-20）
 
@@ -34,7 +38,7 @@ MVP（v0.1）の移行前必須項目とPhase 2「整理・検索」の対象機
 
 Phase 3「同期」は、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な再アップロード/再ダウンロード復旧、ローカル自動検証、非本番の実WebDAV受け入れ、手動UI受け入れ、CI最終確認まで完了しています（2026-07-19）。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md`、Phase 3の実装順序は `docs/development/implementation-plan.md`、進捗・受け入れ記録は `docs/todo/todo-phese3.md` を正とします。Phase 4 v1〜v3の進捗・スコープは、各versionのscope／TODO（`scope-phese4*.md`、`todo-phese4*.md`）で管理します。v1〜v3の自動検証、最終CI、利用者による手動UI受け入れが完了したため、2026-08-24付でPhase 4完了とします。
+要求範囲は `docs/development/scopes/scope.md`、Phase 3の同期契約は `docs/development/webdav-sync.md` を正とします。Phase 2／3の進捗・受け入れ記録は `docs/archive/` に保管します。Phase 4 v1〜v3の進捗・スコープは、各versionのscope／TODO（`scope-phese4*.md`、`todo-phese4*.md`）で管理します。v1〜v3の自動検証、最終CI、利用者による手動UI受け入れが完了したため、2026-08-24付でPhase 4完了とします。
 
 ## 実装済み
 
@@ -154,7 +158,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 
 - WebDAV同期の設計レビューと未確定事項の決定は完了済みです。
 - Phase 2のCI受け入れ条件、Phase 3のCI、非本番の実WebDAV相互運用、手動UI受け入れを確認済みです。Phase 3受け入れは完了とします。
-- 実サーバーまたは同期実装の更新時は、`docs/todo/todo-phese3.md` の受け入れ記録に従って回帰確認します。
+- 実サーバーまたは同期実装の更新時は、`docs/archive/phase3/todo.md` の受け入れ記録に従って回帰確認します。
 - Phase 4 v1はD-01〜D-07の設計承認、実装、保存/同期境界テスト、CI、ローカル受け入れを完了しています（2026-07-27）。v1の初期プロバイダーはOpenRouterとGemini APIで、固定HTTPSの接続確認・モデル一覧・単発テキスト要約だけを提供します。Phase 4全体の完了条件はv2のAI司書・実行体験とv3のAIアシスタント・ライティング・ローカル履歴までを含み、2026-08-24のv3受け入れ完了をもってPhase 4完了としました。GitHub ActionsのD-07 CIは[run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)で成功しています。
 - Phase 4 v3の保存仕様（明示保存する会話・成果物、生成成功時に自動保存する要約履歴、SQLiteローカル管理データ、アプリケーション上の完全削除、参照元ノート削除後の保持、CI例外の扱い）は確定しています。schema version 12〜13の詳細は `docs/development/ai-integration.md` を正とします。
 - Phase 4 v3の実装・検証記録は `docs/todo/todo-phese4-v3.md` で管理しています。基本実装、制限付きAgentの本文差分提案・編集権限設定（明示適用／検証済み自動適用）、適用成功後のエディタ即時反映、Agent編集権限UI分岐、AI司書とAssistant／Agentの利用者cancel、timeout応答、空結果・候補なし・長文、v2の大量候補pool・候補採用・全保存境界、Wails API／SQLite／migration／rollback／Provider失敗後継続の自動テストを完了しました。実画面の手動UI受け入れも利用者が「現状OK」と確認しています（2026-08-24）。
@@ -172,7 +176,7 @@ Phase 3「同期」は、schema version 10、WebDAVクライアント、Credenti
 
 - デスクトップアプリの対応OSと配布方式
 - 保護された保存空間の暗号化WebDAV同期形式（現行WebDAVでは保護本文・保護添付の同期を拒否）
-- Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、実装順序を `docs/development/implementation-plan.md`、進捗・受け入れ記録を `docs/todo/todo-phese3.md` で管理する。受け入れは完了済みで、更新時の回帰確認のみ継続する。
+- Phase 3のWebDAV同期の確定設計は `docs/development/webdav-sync.md` を正とし、完了済みの進捗・受け入れ記録は `docs/archive/phase3/todo.md` に保管する。更新時の回帰確認のみ継続する。
 - Phase 4 v1〜v3は承認・実装・自動検証・利用者による手動UI受け入れを完了し、2026-08-24付でPhase 4完了とする。今後はAI関連実装またはUI変更時の回帰確認として管理する。チャット履歴の永続化はv3の確定保存仕様に従う。正本は [`scope-phese4.md`](development/scopes/scope-phese4.md)、[`scope-phese4-v2.md`](development/scopes/scope-phese4-v2.md)、[`scope-phese4-v3.md`](development/scopes/scope-phese4-v3.md)、各TODO、`docs/development/ai-integration.md` とする。
 
 ## 主要コマンド
@@ -216,7 +220,7 @@ wails build
 | `docs/README.md` | ドキュメント入口と正本の役割 |
 | `README.md` | プロジェクト概要 |
 | `docs/development/scopes/scope.md` | Phaseごとの機能要件と対象範囲 |
-| `docs/development/scopes/scope-phese2.md` | Phase 2の詳細スコープ |
+| `docs/archive/phase2/scope.md` | Phase 2の詳細スコープ（アーカイブ） |
 | `docs/development/scopes/scope-phese4.md` | Phase 4 v1の実装前詳細スコープ |
 | `docs/development/scopes/scope-phese4-v2.md` | Phase 4 v2のAI司書・実行体験スコープ |
 | `docs/development/scopes/scope-phese4-v3.md` | Phase 4 v3のAIアシスタント・ライティング・履歴スコープ |
@@ -227,7 +231,7 @@ wails build
 | `docs/development/backup-restore.md` | 自動バックアップ、完全性検証、再起動時の復元・rollback |
 | `docs/development/note-export.md` | 単一ノートのHTML・PDF出力、snapshot再検証、ロック、原子的保存 |
 | `docs/development/note-import.md` | md・txt・HTML・JSON・CSVの安全な変換、全件検証、保存契約 |
-| `docs/todo/todo-phese3.md` | Phase 3の同期設計・実装TODO |
+| `docs/archive/phase3/todo.md` | Phase 3の同期設計・実装TODO（アーカイブ） |
 | `docs/todo/todo-phese4.md` | Phase 4 v1の実装前課題・受け入れTODO |
 | `docs/todo/todo-phese4-v2.md` | Phase 4 v2の実装・検証TODO |
 | `docs/todo/todo-phese4-v3.md` | Phase 4 v3の実装・検証TODOと完了条件 |
@@ -235,7 +239,7 @@ wails build
 | `docs/development/search-index.md` | Markdown全文検索の索引方式、更新、再構築設計 |
 | `docs/development/search-api.md` | 検索API、ページング、入力検証、エラー契約 |
 | `docs/development/tag-design.md` | タグの制約、migration、API、実装・検証状況 |
-| `docs/todo/todo-phese2.md` | Phase 2の実績・残課題 |
+| `docs/archive/phase2/todo.md` | Phase 2の実績・残課題（アーカイブ） |
 | `docs/development/beginner-guide.md` | 初学者向け開発ガイド |
 | `docs/development/setup.md` | 開発環境セットアップ |
 | `docs/development/tech-stack.md` | 採用技術 |

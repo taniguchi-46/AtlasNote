@@ -88,7 +88,7 @@ dev → Phaseブランチ → 1機能実装ブランチ
 
 # Phase 2：整理・検索
 
-詳細: `docs/development/scopes/scope-phese2.md`
+履歴: `docs/archive/phase2/scope.md`
 
 ## 目的
 
@@ -108,7 +108,7 @@ MVPで構築したローカル保存基盤と3ペインUIを維持しながら�
 - 検索・並び替えを組み合わせたAPIと画面状態は実装・検証済み。
 - DB変更時の既存データへの影響、migration、rollback方法はschema version 3〜7の変更で確認済み。
 
-Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残課題は `docs/status.md` と `docs/todo/todo-phese2.md` に記録する。
+Phase 2の詳細な要求・実装・検証記録は `docs/archive/phase2/` に保管する。現在の状況と継続課題は `docs/status.md` を確認する。
 
 ## 設定
 
@@ -157,7 +157,7 @@ Phase 2の詳細な要求と完了条件は `scope-phese2.md` に、実績と残
 
 実装順序: `docs/development/implementation-plan.md`
 
-作業チェック: `docs/todo/todo-phese3.md`
+受け入れ記録: `docs/archive/phase3/todo.md`
 
 現状: Phase 3受け入れ完了（2026-07-19、非本番の実WebDAVで動作OKを確認）。実サーバーまたは同期実装の更新時は回帰確認を継続する。
 

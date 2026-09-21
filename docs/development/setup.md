@@ -46,15 +46,15 @@ npm --prefix frontend install
 go mod tidy
 ```
 
-## 環境変数
+## 環境変数と認証情報
 
-ローカル設定が必要な場合は `.env.example` を `.env` にコピーし、実値は `.env` にだけ記載する。
+認証情報は `.env` に保存しない。WebDAV の認証情報と AI API キーは設定画面から入力し、OS の Credential Store に保存する。現行の実装が環境変数から読むのは、保存領域を固定する `ATLAS_NOTE_DATA_DIR` だけである。
 
 ```powershell
-Copy-Item .env.example .env
+$env:ATLAS_NOTE_DATA_DIR = 'C:\AtlasNoteData'
 ```
 
-`.env` には API キー、パスワード、トークンなどの秘密情報を入れる可能性があるため、Git 管理しない。
+この環境変数を設定した場合は、アプリ内の保存場所変更が無効になる。通常は設定不要で、初回起動時にアプリから保存場所を選択する。
 
 ## 開発サーバーの起動
 

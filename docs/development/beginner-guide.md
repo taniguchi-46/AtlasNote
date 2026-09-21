@@ -163,4 +163,4 @@ npm --prefix frontend run test:markdown-safety      # Markdown安全性テスト
 - **Phase 3同期**
   - [webdav-sync.md](webdav-sync.md): 同期対象、競合、認証、outboxの確定設計。
   - [implementation-plan.md](implementation-plan.md): Phase 3の実装順序。
-  - [todo-phese3.md](../todo/todo-phese3.md): Phase 3の進捗チェックリスト。
+  - [Phase 3アーカイブ](../archive/phase3/todo.md): Phase 3の完了済み進捗・受け入れ記録。

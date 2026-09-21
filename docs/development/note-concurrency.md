@@ -245,4 +245,4 @@ WHERE id = ? AND revision = ?;
 6. `isSaving`をqueue状態または要求数から算出済み。
 7. 最小の競合表示とdraft保持・破棄導線を追加済み。
 8. 正常系、競合、補償、復旧、並行保存テストを追加済み。
-9. 実装状態を `docs/status.md` と `docs/todo/todo-phese2.md` へ反映済み。
+9. 実装状態を `docs/status.md` と `docs/archive/phase2/todo.md` へ反映済み。

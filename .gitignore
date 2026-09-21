@@ -4,6 +4,9 @@ frontend/node_modules/
 
 # Build outputs
 build/
+/atlasnote.exe
+/test.exe
+/frontend/package.json.md5
 !build/
 build/*
 !build/appicon.png

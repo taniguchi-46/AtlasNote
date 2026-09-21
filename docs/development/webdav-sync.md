@@ -6,7 +6,7 @@
 
 Phase 3の設計レビューを基に、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な復旧操作の実装と自動検証まで完了しました。非本番の実WebDAVサーバー受け入れ、手動UI受け入れ、CI最終確認も2026-07-19に完了しています。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-本書はPhase 3同期契約の正本です。実装順序は [`implementation-plan.md`](implementation-plan.md)、進捗は [`todo-phese3.md`](../todo/todo-phese3.md) を参照します。
+本書はPhase 3同期契約の正本です。実装順序は [`implementation-plan.md`](implementation-plan.md)、完了済みの進捗・受け入れ記録は [Phase 3アーカイブ](../archive/phase3/todo.md) を参照します。
 
 ## 1. 目的と前提
 

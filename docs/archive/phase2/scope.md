@@ -1,6 +1,6 @@
 # Phase 2 詳細スコープ
 
-> Phase 2の要求・実装・検証記録です。現在の作業状況と残課題は `../../status.md`、Phase 3の作業は `../../todo/todo-phese3.md` を参照してください。
+> Phase 2の要求・実装・検証記録です。現在の作業状況と残課題は `../../status.md`、Phase 3の完了記録は `../phase3/todo.md` を参照してください。
 
 ## 目的
 
@@ -52,10 +52,10 @@ MVPで構築したローカル保存基盤と3ペインUIを維持しながら�
 
 ### 検索基盤（確定・実装済み）
 
-- SQLite FTS5 contentful索引とtrigram tokenizerを採用した。詳細は [`search-index.md`](../search-index.md) を正とする。
+- SQLite FTS5 contentful索引とtrigram tokenizerを採用した。詳細は [`search-index.md`](../../development/search-index.md) を正とする。
 - タイトル検索と本文全文検索の責務を分離した。
 - Markdown外部変更時はhashでreconciliationし、索引を再構築可能にした。
-- 検索結果のページング、最大件数、並び順、入力検証を [`search-api.md`](../search-api.md) に確定した。
+- 検索結果のページング、最大件数、並び順、入力検証を [`search-api.md`](../../development/search-api.md) に確定した。
 
 ### タグ設計（完了）
 

@@ -1,6 +1,6 @@
 # 技術スタック
 
-Atlas Note で現在採用している技術をまとめます。バージョンの詳細は `package.json`、`frontend/package.json`、`go.mod` を正とします。
+Atlas Note で現在採用している技術と、その責務をまとめます。バージョン、セットアップ、確認コマンドは [セットアップ](setup.md) を正とします。
 
 | カテゴリ | 採用 |
 | --- | --- |
@@ -16,24 +16,7 @@ Atlas Note で現在採用している技術をまとめます。バージョン
 | Editor | Markdown textarea + Tiptap |
 | Storage | Markdown |
 | Data Access | Repository + Squirrel |
-| Sync | WebDAV（Phase 3コア実装・自動検証済み、実サーバー受け入れ確認中） |
-| AI | ユーザー自身の API Key を利用する方針 |
+| Sync | WebDAV（同期契約は [webdav-sync.md](webdav-sync.md)） |
+| AI | ユーザー自身の API Key をOS Credential Store経由で利用 |
 
-## 未確定事項
-
-- デスクトップアプリの配布対象 OS とビルド手順。
-- AI 機能の詳細設計。
-
-WebDAVの同期契約は [`webdav-sync.md`](webdav-sync.md) で確定しており、実装順序は [`implementation-plan.md`](implementation-plan.md) で管理する。
-
-## 開発コマンド
-
-```bash
-npm run dev
-npm run build
-npm run frontend:typecheck
-npm run frontend:lint
-go test ./...
-```
-
-環境構築と個別テストは `docs/development/setup.md` を参照してください。
+設計上の判断、Docker／Wasmの利用方針、秘密情報の扱いは [開発環境方針](environment.md) を参照してください。

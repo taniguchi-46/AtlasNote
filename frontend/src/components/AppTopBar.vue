@@ -1,12 +1,10 @@
 <template>
   <header class="app-topbar">
     <div class="topbar-left">
-      <!-- メモ同期 -->
       <button class="icon-btn" title="メモ同期" type="button" @click="$emit('sync')">
         <RefreshCwIcon :size="18" />
       </button>
       
-      <!-- メモ検索 -->
       <div class="search-container">
         <SearchIcon :size="16" class="search-icon" />
         <input 
@@ -20,17 +18,14 @@
     </div>
 
     <div class="topbar-right">
-      <!-- ノートをインポート -->
       <button class="icon-btn" title="ノートをインポート" type="button" @click="$emit('import-notes')">
         <UploadIcon :size="18" />
       </button>
 
-      <!-- 新しいノート -->
       <button class="icon-btn" title="新しいノート" type="button" @click="$emit('new-note')">
         <FilePlusIcon :size="18" />
       </button>
       
-      <!-- 常に最前面 -->
       <button 
         class="icon-btn" 
         :class="{ active: isAlwaysOnTop }" 
@@ -41,7 +36,6 @@
         <AppWindowIcon :size="18" />
       </button>
 
-      <!-- 設定 -->
       <button class="icon-btn" title="設定" type="button" @click="$emit('open-settings')">
         <SettingsIcon :size="18" />
       </button>

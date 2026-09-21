@@ -4,8 +4,8 @@ TODOは、実装・自動テスト・手動受け入れの進捗を記録する�
 
 | Phase | TODO | 現在の扱い |
 | --- | --- | --- |
-| Phase 2：整理・検索 | [todo-phese2.md](todo-phese2.md) | 完了記録と継続課題 |
-| Phase 3：同期 | [todo-phese3.md](todo-phese3.md) | 受け入れ完了、更新時の回帰確認 |
+| Phase 2：整理・検索 | [アーカイブ](../archive/phase2/todo.md) | 完了記録 |
+| Phase 3：同期 | [アーカイブ](../archive/phase3/todo.md) | 受け入れ完了の記録 |
 | Phase 4 v1：AI設定・単発要約 | [todo-phese4.md](todo-phese4.md) | 完了記録 |
 | Phase 4 v2：AI司書・実行体験 | [todo-phese4-v2.md](todo-phese4-v2.md) | 手動・統合受け入れが残る |
 | Phase 4 v3：AIアシスタント・ライティング・履歴 | [todo-phese4-v3.md](todo-phese4-v3.md) | 制限付きAgentの変更提案・差分確認を含む残作業を管理 |

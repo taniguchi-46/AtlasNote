@@ -55,7 +55,7 @@
 | 用語集 | `docs/rules/glossary.md` | プロジェクト内の用語 |
 | Phase 3同期設計 | `docs/development/webdav-sync.md` | WebDAV同期の確定契約 |
 | Phase 3実装計画 | `docs/development/implementation-plan.md` | Phase 3の実装順序 |
-| Phase 3 TODO | `docs/todo/todo-phese3.md` | Phase 3の進捗と受け入れ確認 |
+| Phase 3 TODO | `docs/archive/phase3/todo.md` | Phase 3の完了済み受け入れ記録 |
 | Phase 4詳細スコープ | `docs/development/scopes/scope-phese4.md` | Phase 4の実装前要求範囲と境界 |
 | Phase 4 AI決定記録 | `docs/development/ai-integration.md` | D-01〜D-07の承認内容と開始ゲート |
 | AIチャット契約 | `docs/development/ai-chat.md` | 単一チャット、context、Ask／Agent、Web検索、変更提案の実装状態と境界 |

@@ -37,6 +37,7 @@
 | [技術スタック](tech-stack.md) | 採用技術と役割 |
 | [初心者向けガイド](beginner-guide.md) | 開発の基本手順 |
 | [実装計画](implementation-plan.md) | Phase 3の実装順序・回帰確認 |
+| [完了Phaseアーカイブ](../archive/README.md) | Phase 2／3のスコープ・TODO・受け入れ記録 |
 
 ## 文書の役割分担
 

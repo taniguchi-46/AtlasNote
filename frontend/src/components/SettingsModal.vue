@@ -66,7 +66,6 @@
         </TabsList>
 
         <main class="settings-panel">
-          <!-- テーマ設定 -->
           <TabsContent value="theme" as-child>
             <section data-settings-anchor="theme" tabindex="-1">
             <h3>テーマ</h3>
@@ -80,7 +79,6 @@
             </section>
           </TabsContent>
 
-          <!-- 一般設定 -->
           <TabsContent value="general" as-child>
             <section data-settings-anchor="general" tabindex="-1">
             <h3>一般</h3>
@@ -107,7 +105,6 @@
             </section>
           </TabsContent>
 
-          <!-- エディター設定 -->
           <TabsContent value="editor" as-child>
             <section data-settings-anchor="editor" tabindex="-1">
             <h3>エディター</h3>

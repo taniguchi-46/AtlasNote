@@ -4,9 +4,9 @@
 
 Phase 3「同期」で、ローカルのMarkdown正本とSQLiteメタデータの整合性を維持したWebDAV同期を設計・実装する。
 
-機能要件は `../development/scopes/scope.md`、ローカル保存と競合検出の既存契約は `../development/note-concurrency.md`、Phase 3の同期設計は `../development/webdav-sync.md` を正とする。
+機能要件は `../../development/scopes/scope.md`、ローカル保存と競合検出の既存契約は `../../development/note-concurrency.md`、Phase 3の同期設計は `../../development/webdav-sync.md` を正とする。
 
-このファイルはPhase 3の進捗チェックリストです。同期契約の変更は [`webdav-sync.md`](../development/webdav-sync.md)、実装順序の変更は [`implementation-plan.md`](../development/implementation-plan.md) に反映します。
+このファイルはPhase 3の進捗チェックリストです。同期契約の変更は [`webdav-sync.md`](../../development/webdav-sync.md)、実装順序の変更は [`implementation-plan.md`](../../development/implementation-plan.md) に反映します。
 
 ## 現状・前提
 
@@ -42,7 +42,7 @@ Phase 3「同期」で、ローカルのMarkdown正本とSQLiteメタデータ�
 
 ### 2. 実装前の受け入れ条件を確認する（完了）
 
-- [x] `../development/webdav-sync.md` をレビューし、設計、DB変更、migration、rollback方法、既存データへの影響を確定する。
+- [x] `../../development/webdav-sync.md` をレビューし、設計、DB変更、migration、rollback方法、既存データへの影響を確定する。
 - [x] Repository / Service / Wails API / フロントAPI / Store / UIの変更範囲を整理する。
 - [x] WebDAVサーバー障害、認証失敗、secure store unavailable、競合、復旧、秘密情報非露出のテストケースを整理する。
 - [x] 同期開始前に、Phase 2の対象テストを含むCI受け入れ条件を確認する（ローカルでCI相当の全テスト・Wails buildを実行済み）。
