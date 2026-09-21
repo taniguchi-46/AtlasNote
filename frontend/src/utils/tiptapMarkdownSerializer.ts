@@ -1,29 +1,14 @@
 import type { JSONContent } from '@tiptap/core'
 import { createImageWidthTitle, parseImageWidth } from './imageResize'
 
-export const EMPTY_PARAGRAPH_MARKDOWN = '&nbsp;'
-
 export function serializeTiptapJsonToMarkdown(node?: JSONContent): string {
   const content = node?.type === 'doc' ? (node.content ?? []) : []
   const isEmptyDocument = content.length === 0
     || (content.length === 1 && isEmptyParagraph(content[0]))
 
-  return (isEmptyDocument ? '' : serializeNode(node)).trimEnd()
-}
+  if (isEmptyDocument) return ''
 
-export function restoreSerializedEmptyParagraphs(container: HTMLElement) {
-  const emptyParagraphCharacter = '\u00a0'
-
-  container.querySelectorAll('p').forEach((paragraph) => {
-    if (paragraph.childNodes.length !== 1) return
-
-    const child = paragraph.firstChild
-    if (child?.nodeType !== Node.TEXT_NODE || child.textContent !== emptyParagraphCharacter) {
-      return
-    }
-
-    paragraph.textContent = ''
-  })
+  return serializeNode(node)
 }
 
 type SerializeContext = {
@@ -75,10 +60,16 @@ function serializeNode(node?: JSONContent, context: SerializeContext = {}): stri
 }
 
 function serializeBlockChildren(content?: JSONContent[], context: SerializeContext = {}) {
-  return (content ?? [])
-    .map((child) => serializeNode(child, context))
-    .filter((text) => text.length > 0)
-    .join('\n\n')
+  const parts = (content ?? []).map((child) => serializeNode(child, context))
+  if (context.tableCell) return parts.filter((text) => text.length > 0).join('\n\n')
+
+  return parts.reduce((markdown, part, index) => {
+    if (index === 0) return part
+
+    const previousPart = parts[index - 1]
+    const separator = previousPart.length === 0 || part.length === 0 ? '\n' : '\n\n'
+    return `${markdown}${separator}${part}`
+  }, '')
 }
 
 function serializeInlineChildren(content?: JSONContent[], context: SerializeContext = {}) {
@@ -148,9 +139,7 @@ function serializeCodeBlock(node: JSONContent, context: SerializeContext = {}) {
 
 function serializeParagraph(node: JSONContent, context: SerializeContext = {}) {
   const text = serializeInlineChildren(node.content, context)
-  if (text.length > 0 || context.tableCell) return text
-
-  return EMPTY_PARAGRAPH_MARKDOWN
+  return text
 }
 
 function isEmptyParagraph(node?: JSONContent) {

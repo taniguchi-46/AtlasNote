@@ -105,7 +105,7 @@ const cases = [
       codeBlock('', 'line one\nline two'),
       paragraph([]),
     ]),
-    expected: '&nbsp;\n\n```\nline one\nline two\n```\n\n&nbsp;',
+    expected: '\n```\nline one\nline two\n```\n',
   },
   {
     name: 'only empty paragraph remains an empty document',
@@ -120,7 +120,7 @@ const cases = [
       paragraph([]),
       paragraph([text('after')]),
     ]),
-    expected: 'before\n\n&nbsp;\n\n&nbsp;\n\nafter',
+    expected: 'before\n\n\nafter',
   },
   {
     name: 'url with query and fragment',
@@ -136,6 +136,11 @@ const cases = [
       paragraph([text('first'), { type: 'hardBreak' }, text('second')]),
     ]),
     expected: '---\n\nfirst\nsecond',
+  },
+  {
+    name: 'trailing hard break',
+    input: doc(paragraph([text('first'), { type: 'hardBreak' }])),
+    expected: 'first\n',
   },
   {
     name: 'table',

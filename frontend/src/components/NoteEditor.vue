@@ -610,7 +610,7 @@ import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
 import NoteBacklinks from './NoteBacklinks.vue'
-import { RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
+import { preserveMarkdownBlankLines, RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
 import { createPdfBase64FromHtml, createPlainTextFromHtml } from '../utils/noteExportDocument'
 import type { NoteExportFormat, NoteExportInput } from '../api/noteExport'
 import {
@@ -638,7 +638,6 @@ import {
   writeTableClipboard,
 } from '../utils/tableClipboard'
 import {
-  restoreSerializedEmptyParagraphs,
   serializeTiptapJsonToMarkdown,
 } from '../utils/tiptapMarkdownSerializer'
 import {
@@ -2392,13 +2391,14 @@ function applyRichEditorToMarkdown() {
 }
 
 function parseMarkdownToRichHtml(markdown: string): string {
-  return (editor.storage as any).markdown.parser.parse(markdown)
+  const parser = (editor.storage as any).markdown.parser
+  const html = parser.parse(markdown)
+  return preserveMarkdownBlankLines(markdown, html, parser)
 }
 
 function parseRichHtmlToJson(html: string) {
   const container = document.createElement('div')
   container.innerHTML = html
-  restoreSerializedEmptyParagraphs(container)
   preserveSoftBreaks(container)
   normalizeTableCells(container)
   return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container).toJSON()
