@@ -120,6 +120,7 @@
                 type="button"
                 @click="handleNoteClick($event, note)"
               >
+                <p class="note-item-title">{{ note.title || '(無題)' }}</p>
                 <div class="note-item-meta">
                   <PinIcon v-if="note.isPinned" :size="12" class="meta-icon pinned" />
                   <StarIcon v-if="note.isFavorite" :size="12" class="meta-icon favorite" />
@@ -127,7 +128,6 @@
                   <LockIcon v-else-if="isNoteProtected(note)" :size="12" class="meta-icon protected" />
                   <span class="note-item-date">{{ formatDate(note.updatedAt) }}</span>
                 </div>
-                <p class="note-item-title">{{ note.title || '(無題)' }}</p>
                 <p v-if="searchSnippet(note.id)" class="note-item-snippet">
                   {{ searchSnippet(note.id) }}
                 </p>
@@ -1005,27 +1005,23 @@ function formatDate(iso: string): string {
 }
 
 .note-item-layout {
-  position: relative;
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .note-item-layout .note-item-btn {
   min-width: 0;
   flex: 1 1 auto;
-  padding-right: 76px;
 }
 
 .note-item-actions {
-  position: absolute;
-  top: 27px;
-  right: 7px;
+  position: static;
   transform: none;
   display: flex;
   align-items: center;
   flex: 0 0 auto;
   gap: 2px;
-  margin: 5px 0;
+  margin: 11px 7px 0 0;
 }
 
 .note-item-edit-button,

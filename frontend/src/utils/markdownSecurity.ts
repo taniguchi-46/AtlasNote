@@ -55,6 +55,55 @@ export function preserveMarkdownBlankLines(
   return container.innerHTML
 }
 
+// markdown-it emits a formatting newline between a list item's text and its
+// nested list. It is not an authored soft break and must not become <br> in
+// the Rich document, or nested items gain an empty line during conversion.
+export function preserveMarkdownSoftBreaks(container: HTMLElement) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    if (!node.textContent?.includes('\n')) continue
+    if (node.textContent.trim().length === 0) continue
+    if (hasAncestor(node, ['pre', 'code']) || isNestedListSeparator(node)) continue
+
+    textNodes.push(node)
+  }
+
+  textNodes.forEach((node) => {
+    const parts = node.textContent?.split('\n') ?? []
+    const fragment = document.createDocumentFragment()
+
+    parts.forEach((part, index) => {
+      if (index > 0) fragment.appendChild(document.createElement('br'))
+      if (part.length > 0) fragment.appendChild(document.createTextNode(part))
+    })
+
+    node.replaceWith(fragment)
+  })
+}
+
+function isNestedListSeparator(node: Text) {
+  const parent = node.parentElement
+  const nextSibling = node.nextSibling
+  return parent?.tagName.toLowerCase() === 'li'
+    && nextSibling instanceof Element
+    && ['ul', 'ol'].includes(nextSibling.tagName.toLowerCase())
+    && node.textContent?.endsWith('\n')
+}
+
+function hasAncestor(node: Node, tagNames: string[]) {
+  let current = node.parentElement
+
+  while (current) {
+    if (tagNames.includes(current.tagName.toLowerCase())) return true
+    current = current.parentElement
+  }
+
+  return false
+}
+
 function getTopLevelMarkdownBlocks(markdown: string, parser: MarkdownParserWithTokens) {
   const tokens = parser.md?.parse(markdown, {}) ?? []
 

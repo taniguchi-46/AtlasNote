@@ -7,7 +7,7 @@ import ts from 'typescript'
 
 const outDir = path.join(process.cwd(), '.tmp', 'code-block-test')
 const dom = new JSDOM('<!doctype html><html><body></body></html>')
-for (const key of ['window', 'document', 'Element', 'HTMLElement', 'Node', 'Text', 'DOMParser', 'MutationObserver']) {
+for (const key of ['window', 'document', 'Element', 'HTMLElement', 'Node', 'NodeFilter', 'Text', 'DOMParser', 'MutationObserver']) {
   globalThis[key] = dom.window[key]
 }
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator })
@@ -27,7 +27,7 @@ try {
   const { serializeTiptapJsonToMarkdown } = await import(
     pathToFileURL(path.join(outDir, 'tiptapMarkdownSerializer.mjs'))
   )
-  const { RICH_MARKDOWN_OPTIONS, preserveMarkdownBlankLines } = await import(
+  const { RICH_MARKDOWN_OPTIONS, preserveMarkdownBlankLines, preserveMarkdownSoftBreaks } = await import(
     pathToFileURL(path.join(outDir, 'markdownSecurity.mjs'))
   )
   const { Editor } = await import('@tiptap/core')
@@ -54,6 +54,7 @@ try {
       parser.parse(markdown),
       parser,
     )
+    preserveMarkdownSoftBreaks(container)
     editor.commands.setContent(DOMParser.fromSchema(editor.schema).parse(container).toJSON(), { emitUpdate: false })
   }
   const sources = [
@@ -79,6 +80,14 @@ try {
     'a trailing Markdown line break becomes an editable empty Rich paragraph')
   assert.equal(editor.state.doc.lastChild.content.size, 0,
     'the trailing empty Rich paragraph contains no marker text')
+  load('## aa\n- a\n  - a')
+  assert.equal(serializeTiptapJsonToMarkdown(editor.getJSON()), '## aa\n\n- a\n  - a\n',
+    'a nested list keeps its structure without an extra Rich hard break')
+  const parentListItem = editor.state.doc.child(1).child(0)
+  assert.equal(parentListItem.childCount, 2,
+    'the parent list item contains its paragraph and one nested list')
+  assert.equal(parentListItem.child(0).content.childCount, 1,
+    'the parent list text has no spurious Rich hard break')
   load(sources[0])
   assert.equal(editor.state.doc.firstChild.attrs.language, 'mermaid')
   assert.equal(editor.view.dom.querySelector('pre code').textContent, 'graph TD\n  A[開始] --> B[終了]')

@@ -29,7 +29,9 @@ try {
   const aiResults = settingsSearch.searchSettings('AI オフ')
   assert.equal(aiResults.some((item) => item.id === 'ai.enabled'), true)
   assert.match(aiResults.find((item) => item.id === 'ai.enabled').matchedText, /AI機能を有効にする|AIワークスペース|AI操作/)
-  assert.equal(settingsSearch.searchSettings('問い合わせ').some((item) => item.id === 'help.contact'), true)
+  assert.equal(settingsSearch.searchSettings('問い合わせ').some((item) => item.id === 'help.contact'), false)
+  assert.equal(settingsSearch.searchSettings('診断情報').some((item) => item.id === 'storage-locations.diagnostics'), false)
+  assert.equal(settingsSearch.searchSettings('診断情報').length, 0)
   assert.equal(settingsSearch.searchSettings('Windows 削除').some((item) => item.id === 'general.uninstall'), true)
   assert.equal(settingsSearch.searchSettings('存在しない設定').length, 0)
 
@@ -43,8 +45,8 @@ try {
   assert.match(settingsSource, /<HelpSettingsPanel \/>/)
   assert.match(settingsSource, /<small v-if="item\.matchedText">一致: \{\{ item\.matchedText \}\}<\/small>/)
   assert.match(settingsSource, /closest\('details'\)/)
-  assert.match(helpSource, /問い合わせ窓口は未設定・未公開です。/)
-  assert.match(helpSource, /data-settings-anchor="help.contact"/)
+  assert.match(helpSource, /ヘルプ本文は一時的に非表示/)
+  assert.match(helpSource, /<section class="help-settings" data-settings-anchor="help" tabindex="-1">\s*<!--/)
 
   console.log('settings search tests passed')
 } finally {

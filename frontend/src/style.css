@@ -493,7 +493,7 @@ body.is-pane-resizing * {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-bottom: 4px;
+  margin-top: 4px;
 }
 
 .meta-icon {
@@ -506,7 +506,6 @@ body.is-pane-resizing * {
 .note-item-date {
   font-size: 11px;
   color: var(--text-muted);
-  margin-left: auto;
 }
 
 .note-item-title {

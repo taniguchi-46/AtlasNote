@@ -270,7 +270,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
     synonyms: ['保管庫', '保存先', '移動'],
     displayText: ['保存場所', '保存領域', 'バックアップ保存領域', 'フォルダを選択', '変更は次回起動時に適用'],
   },
-  {
+  /* {
     id: 'storage-locations.diagnostics',
     label: '診断情報',
     category: '保存場所',
@@ -278,7 +278,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
     anchor: 'storage-locations.diagnostics',
     synonyms: ['ログ', 'コピー', '保存', '調査'],
     displayText: ['診断情報', '安全な情報だけを表示', '診断情報をコピー'],
-  },
+  }, */
   {
     id: 'storage-spaces',
     label: '保存空間',
@@ -312,10 +312,10 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
     category: '案内',
     tab: 'help',
     anchor: 'help',
-    synonyms: ['使い方', '操作', 'FAQ', 'トラブルシューティング'],
-    displayText: ['ヘルプ', 'よくある質問', '一般的な問題の切り分け', '診断ログ'],
+    synonyms: [],
+    displayText: ['ヘルプ'],
   },
-  {
+  /* {
     id: 'help.faq',
     label: 'よくある質問',
     category: 'ヘルプ',
@@ -350,8 +350,8 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
     anchor: 'help.contact',
     synonyms: ['連絡', 'サポート', '窓口', '診断情報'],
     displayText: ['問い合わせ', '問い合わせ窓口', '診断情報をコピー', 'APIキー', '本文', 'プロンプト'],
-  },
-  {
+  }, */
+  /* {
     id: 'help.diagnostics',
     label: '診断ログ',
     category: 'ヘルプ',
@@ -359,7 +359,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
     anchor: 'help.diagnostics',
     synonyms: ['診断情報', 'ログ', 'コピー', '保存', '安全'],
     displayText: ['診断ログ', '診断ログを更新', 'コピー', 'ファイルに保存', '本文', 'APIキー', 'プロンプト', 'ファイルパス'],
-  },
+  }, */
 ]
 
 function normalizeSearchText(value: string) {

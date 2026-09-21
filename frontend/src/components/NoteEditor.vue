@@ -586,6 +586,7 @@ import {
   redo as redoRichHistory,
   undo as undoRichHistory,
 } from '@tiptap/pm/history'
+import { sinkListItem } from '@tiptap/pm/schema-list'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
@@ -610,7 +611,11 @@ import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
 import NoteBacklinks from './NoteBacklinks.vue'
-import { preserveMarkdownBlankLines, RICH_MARKDOWN_OPTIONS } from '../utils/markdownSecurity'
+import {
+  preserveMarkdownBlankLines,
+  preserveMarkdownSoftBreaks,
+  RICH_MARKDOWN_OPTIONS,
+} from '../utils/markdownSecurity'
 import { createPdfBase64FromHtml, createPlainTextFromHtml } from '../utils/noteExportDocument'
 import type { NoteExportFormat, NoteExportInput } from '../api/noteExport'
 import {
@@ -662,6 +667,7 @@ import {
 import {
   continueMarkdownList,
   createMarkdownLineBreakTracker,
+  indentMarkdownList,
 } from '../utils/markdownListContinuation'
 
 const CustomTableCell = TableCell.extend({
@@ -1050,6 +1056,21 @@ const editor: Editor = new Editor({
       return true
     },
     handleKeyDown(view, event) {
+      if (
+        event.key === 'Tab'
+        && !event.shiftKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !event.metaKey
+        && !event.isComposing
+        && ((view.state.schema.nodes.listItem
+          && sinkListItem(view.state.schema.nodes.listItem)(view.state, view.dispatch))
+          || (view.state.schema.nodes.taskItem
+            && sinkListItem(view.state.schema.nodes.taskItem)(view.state, view.dispatch)))
+      ) {
+        event.preventDefault()
+        return true
+      }
       const actionId = findMatchingShortcutAction(
         event,
         settingsStore.shortcutBindings,
@@ -2399,46 +2420,9 @@ function parseMarkdownToRichHtml(markdown: string): string {
 function parseRichHtmlToJson(html: string) {
   const container = document.createElement('div')
   container.innerHTML = html
-  preserveSoftBreaks(container)
+  preserveMarkdownSoftBreaks(container)
   normalizeTableCells(container)
   return ProseMirrorDOMParser.fromSchema(editor.schema).parse(container).toJSON()
-}
-
-function preserveSoftBreaks(container: HTMLElement) {
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-  const textNodes: Text[] = []
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text
-    if (!node.textContent?.includes('\n')) continue
-    if (node.textContent.trim().length === 0) continue
-    if (hasAncestor(node, ['pre', 'code'])) continue
-
-    textNodes.push(node)
-  }
-
-  textNodes.forEach((node) => {
-    const parts = node.textContent?.split('\n') ?? []
-    const fragment = document.createDocumentFragment()
-
-    parts.forEach((part, index) => {
-      if (index > 0) fragment.appendChild(document.createElement('br'))
-      if (part.length > 0) fragment.appendChild(document.createTextNode(part))
-    })
-
-    node.replaceWith(fragment)
-  })
-}
-
-function hasAncestor(node: Node, tagNames: string[]) {
-  let current = node.parentElement
-
-  while (current) {
-    if (tagNames.includes(current.tagName.toLowerCase())) return true
-    current = current.parentElement
-  }
-
-  return false
 }
 
 function normalizeTableCells(container: HTMLElement) {
@@ -2806,6 +2790,25 @@ function handleMarkdownBeforeInput(event: InputEvent) {
 
 function handleMarkdownKeydown(event: KeyboardEvent) {
   markdownLineBreakTracker.handleKeydown(event)
+  if (
+    event.key === 'Tab'
+    && !event.shiftKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.metaKey
+    && !isMarkdownComposing
+    && !event.isComposing
+  ) {
+    const textarea = event.currentTarget as HTMLTextAreaElement
+    const before = createMarkdownSnapshot(textarea.value, textarea)
+    const after = indentMarkdownList(before)
+    if (after) {
+      event.preventDefault()
+      event.stopPropagation()
+      applyMarkdownSnapshot(before, after)
+      return
+    }
+  }
   if (
     event.key === 'Enter'
     && !event.shiftKey

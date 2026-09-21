@@ -29,7 +29,7 @@ try {
   await writeFile(outFile, compiled.outputText, 'utf8')
   await writeFile(continuationOutFile, continuationCompiled.outputText, 'utf8')
   const { createMarkdownEditHistory } = await import(pathToFileURL(outFile).href)
-  const { continueMarkdownList, createMarkdownLineBreakTracker } = await import(pathToFileURL(continuationOutFile).href)
+  const { continueMarkdownList, createMarkdownLineBreakTracker, indentMarkdownList } = await import(pathToFileURL(continuationOutFile).href)
 
   let time = 0
   const initial = { content: '', selectionStart: 0, selectionEnd: 0 }
@@ -86,10 +86,39 @@ try {
   }), null)
   assert.equal(continueList('- item\r\nnext', '- item'.length)?.content, '- item\r\n- \r\nnext')
 
+  assert.deepEqual(
+    indentMarkdownList({ content: '- item', selectionStart: 6, selectionEnd: 6 }),
+    { content: '  - item', selectionStart: 8, selectionEnd: 8 },
+  )
+  assert.deepEqual(
+    indentMarkdownList({ content: '1. item', selectionStart: 7, selectionEnd: 7 }),
+    { content: '  1. item', selectionStart: 9, selectionEnd: 9 },
+  )
+  assert.deepEqual(
+    indentMarkdownList({ content: '- [ ] task', selectionStart: 10, selectionEnd: 10 }),
+    { content: '  - [ ] task', selectionStart: 12, selectionEnd: 12 },
+  )
+  assert.deepEqual(
+    indentMarkdownList({ content: '- one\n- two', selectionStart: 0, selectionEnd: 11 }),
+    { content: '  - one\n  - two', selectionStart: 2, selectionEnd: 15 },
+  )
+  assert.equal(indentMarkdownList({ content: 'paragraph', selectionStart: 2, selectionEnd: 2 }), null)
+  assert.equal(indentMarkdownList({ content: '```\n- item\n```', selectionStart: 9, selectionEnd: 9 }), null)
+
   assert.match(
     await readFile(path.join(rootDir, 'src', 'components', 'NoteEditor.vue'), 'utf8'),
     /markdownLineBreakTracker\.handleKeydown\(event\)/,
     'the component must route keydown through the line-break tracker',
+  )
+  assert.match(
+    await readFile(path.join(rootDir, 'src', 'components', 'NoteEditor.vue'), 'utf8'),
+    /indentMarkdownList\(before\)/,
+    'Markdown Tab must indent a list item through the shared helper',
+  )
+  assert.match(
+    await readFile(path.join(rootDir, 'src', 'components', 'NoteEditor.vue'), 'utf8'),
+    /nodes\.listItem[\s\S]*nodes\.taskItem/,
+    'Rich Tab must indent regular and task list items',
   )
   assert.match(
     await readFile(path.join(rootDir, 'src', 'components', 'NoteEditor.vue'), 'utf8'),

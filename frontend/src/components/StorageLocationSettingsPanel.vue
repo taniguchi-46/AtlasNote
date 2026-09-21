@@ -51,6 +51,7 @@
       </button>
     </div>
 
+    <!-- 診断情報UIは一時的に非表示。診断の取得・記録処理は維持する。
     <section class="location-diagnostics" data-settings-anchor="storage-locations.diagnostics" tabindex="-1" aria-labelledby="location-diagnostics-title">
       <div class="location-diagnostics-heading">
         <div>
@@ -71,16 +72,15 @@
       </ul>
       <p v-else class="setting-help">記録された診断情報はありません。</p>
     </section>
+    -->
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ClipboardSetText } from '../../wailsjs/runtime/runtime'
+import { computed, onMounted } from 'vue'
 import { useStorageLocationStore } from '../stores/useStorageLocationStore'
 
 const locationStore = useStorageLocationStore()
-const copyMessage = ref('')
 const hasPendingChange = computed(() => Boolean(
   locationStore.status?.pendingDataRoot || locationStore.status?.pendingBackupRoot,
 ))
@@ -95,6 +95,7 @@ async function apply() {
   void locationStore.loadDiagnostics()
 }
 
+/*
 async function copyDiagnostics() {
   copyMessage.value = ''
   if (!locationStore.diagnosticReport) await locationStore.loadDiagnostics()
@@ -109,6 +110,7 @@ async function copyDiagnostics() {
     copyMessage.value = 'クリップボードへのコピーに失敗しました。'
   }
 }
+*/
 
 onMounted(() => {
   void locationStore.initialize()

@@ -175,3 +175,43 @@ export function continueMarkdownList(snapshot: MarkdownEditSnapshot): MarkdownEd
     selectionEnd: nextSelection,
   }
 }
+
+/**
+ * Returns the Markdown snapshot produced by pressing Tab in one or more list
+ * items. Two spaces match the existing list continuation indentation and keep
+ * nested bullet, ordered, and task lists together.
+ */
+export function indentMarkdownList(snapshot: MarkdownEditSnapshot): MarkdownEditSnapshot | null {
+  const contentLength = snapshot.content.length
+  const selectionStart = Math.min(contentLength, Math.max(0, Math.round(snapshot.selectionStart)))
+  const selectionEnd = Math.min(contentLength, Math.max(selectionStart, Math.round(snapshot.selectionEnd)))
+  const lineStart = snapshot.content.lastIndexOf('\n', Math.max(selectionStart - 1, 0)) + 1
+  const finalPosition = selectionEnd > selectionStart && snapshot.content[selectionEnd - 1] === '\n'
+    ? selectionEnd - 1
+    : selectionEnd
+  const lineEnd = snapshot.content.indexOf('\n', finalPosition)
+  const selectionLineEnd = lineEnd === -1 ? contentLength : lineEnd
+  const selectedLines = snapshot.content.slice(lineStart, selectionLineEnd).split('\n')
+  const insertions: number[] = []
+  let offset = lineStart
+
+  for (const rawLine of selectedLines) {
+    const line = rawLine.replace(/\r$/, '')
+    if (isInsideFencedCode(snapshot.content, offset) || !parseListLine(line)) return null
+    insertions.push(offset)
+    offset += rawLine.length + 1
+  }
+
+  if (insertions.length === 0) return null
+
+  let nextContent = snapshot.content
+  for (const insertion of insertions.slice().reverse()) {
+    nextContent = `${nextContent.slice(0, insertion)}  ${nextContent.slice(insertion)}`
+  }
+  const shiftSelection = (position: number) => position + insertions.filter((insertion) => insertion <= position).length * 2
+  return {
+    content: nextContent,
+    selectionStart: shiftSelection(selectionStart),
+    selectionEnd: shiftSelection(selectionEnd),
+  }
+}

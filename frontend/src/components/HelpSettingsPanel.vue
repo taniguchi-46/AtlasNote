@@ -1,5 +1,12 @@
 <template>
   <section class="help-settings" data-settings-anchor="help" tabindex="-1">
+    <h2>連絡先</h2>
+    <p>
+      ですこへ
+      <!-- 一時的な文言 -->
+    </p>
+
+    <!-- ヘルプ本文は一時的に非表示。診断の取得・記録・保存処理は維持する。
     <h3>ヘルプ</h3>
     <p class="help-intro">
       基本操作は「Atlas Note 利用ガイド」にまとめています。ここでは、よくある問題の切り分け、問い合わせ、診断ログの保存を案内します。
@@ -45,10 +52,12 @@
       <pre v-if="diagnosticReport" class="help-diagnostics-report" aria-label="診断ログ">{{ diagnosticReport }}</pre>
       <p v-else class="help-diagnostics-empty">記録された診断ログはありません。</p>
     </section>
+    -->
   </section>
 </template>
 
 <script setup lang="ts">
+/*
 import { onMounted, ref } from 'vue'
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime'
 import { getDiagnostics, saveDiagnostics } from '../api/diagnostics'
@@ -143,6 +152,8 @@ async function saveDiagnosticsFile() {
 onMounted(() => {
   void loadDiagnostics()
 })
+*/
+
 </script>
 
 <style scoped>
