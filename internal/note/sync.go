@@ -86,6 +86,7 @@ type SyncAttachmentPayload struct {
 type syncApplyContextKey struct{}
 type syncExclusiveContextKey struct{}
 type mutationGateContextKey struct{}
+type organizationContentAccessContextKey struct{}
 
 // BeginSyncExclusive prevents local mutations from changing the vault while a
 // sync operation is comparing, applying, or committing one consistent state.

@@ -104,21 +104,6 @@
           </div>
 
           <button
-            v-if="settingsStore.aiEnabled"
-            ref="aiWorkspaceToggle"
-            class="icon-btn ai-workspace-toggle"
-            :class="{ 'is-active': isAIWorkspaceOpen }"
-            type="button"
-            :title="aiWorkspaceToggleLabel"
-            :aria-label="aiWorkspaceToggleLabel"
-            aria-controls="ai-workspace-panel"
-            :aria-pressed="isAIWorkspaceOpen"
-            @click="toggleAIWorkspace"
-          >
-            <component :is="aiWorkspaceToggleIcon" :size="17" />
-          </button>
-
-          <button
             class="mode-segment"
             :disabled="isEditorInputLocked"
             type="button"
@@ -445,10 +430,6 @@
         </fieldset>
       </div>
 
-      <AIWorkspace
-        v-model:open="isAIWorkspaceOpen"
-        @closed="focusAIWorkspaceToggle"
-      >
         <div class="editor-body">
           <div
             v-if="activeAgentEditorHighlight"
@@ -509,7 +490,6 @@
             />
           </div>
         </div>
-      </AIWorkspace>
 
       <div class="editor-statusbar">
         <div class="editor-statusbar-left">
@@ -548,10 +528,6 @@ import {
   ListIcon,
   ListOrderedIcon,
   MinusIcon,
-  PanelBottomCloseIcon,
-  PanelBottomOpenIcon,
-  PanelRightCloseIcon,
-  PanelRightOpenIcon,
   PinIcon,
   QuoteIcon,
   Rows3Icon,
@@ -606,7 +582,6 @@ import { useNoteExportStore } from '../stores/useNoteExportStore'
 import { useContentLockStore } from '../stores/useContentLockStore'
 import { useNotificationStore } from '../stores/useNotificationStore'
 import { useSettingsStore } from '../stores/useSettingsStore'
-import AIWorkspace from './AIWorkspace.vue'
 import NoteTags from './NoteTags.vue'
 import NoteTagAddPopover from './NoteTagAddPopover.vue'
 import NoteLinkPopover from './NoteLinkPopover.vue'
@@ -851,8 +826,6 @@ const localTitle = ref('')
 const savedMessage = ref(false)
 const isAttachmentExporting = ref(false)
 const imagePasteError = ref('')
-const isAIWorkspaceOpen = ref(true)
-const aiWorkspaceToggle = ref<HTMLButtonElement | null>(null)
 const saveConflicted = computed(() => noteStore.activeDraft?.status === 'conflicted')
 const conflictDetail = computed(() => {
   const conflict = noteStore.activeDraft?.conflict
@@ -869,16 +842,6 @@ const isContentLockPending = ref(false)
 const isEditorInputLocked = computed(() => (
   isActiveNoteDeletionPreparing.value || isContentLockPending.value
 ))
-const aiWorkspaceToggleLabel = computed(() => {
-  const placement = settingsStore.aiWorkspacePlacement === 'right' ? '右側' : '下側'
-  return `AIワークスペースを${isAIWorkspaceOpen.value ? '閉じる' : '開く'}（${placement}）`
-})
-const aiWorkspaceToggleIcon = computed(() => {
-  if (settingsStore.aiWorkspacePlacement === 'right') {
-    return isAIWorkspaceOpen.value ? PanelRightCloseIcon : PanelRightOpenIcon
-  }
-  return isAIWorkspaceOpen.value ? PanelBottomCloseIcon : PanelBottomOpenIcon
-})
 const editMode = ref<'wysiwyg' | 'markdown'>('markdown')
 const localMarkdown = ref('')
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null)
@@ -1338,15 +1301,6 @@ async function handleTrashActiveNote() {
 
   await nextTick()
   await noteStore.trashNote(note.id)
-}
-
-function toggleAIWorkspace() {
-  if (!settingsStore.aiEnabled) return
-  isAIWorkspaceOpen.value = !isAIWorkspaceOpen.value
-}
-
-function focusAIWorkspaceToggle() {
-  void nextTick(() => aiWorkspaceToggle.value?.focus())
 }
 
 async function handleExportNote(format: NoteExportFormat) {
@@ -2219,7 +2173,6 @@ async function saveCurrentNote(): Promise<boolean> {
 }
 
 defineExpose({
-  toggleAIWorkspace,
   toggleEditMode,
   flushEditorInput,
   saveCurrentNote,
@@ -3407,11 +3360,6 @@ function formatDate(iso: string): string {
 .mode-segment-option.is-active {
   background-color: var(--text-secondary);
   color: var(--bg-editor);
-}
-
-.ai-workspace-toggle.is-active {
-  background: var(--bg-active);
-  color: var(--brand-primary);
 }
 
 .attachment-paste-indicator {

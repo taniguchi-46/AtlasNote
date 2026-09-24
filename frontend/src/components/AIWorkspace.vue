@@ -1,57 +1,29 @@
 <template>
   <section
-    ref="workspaceRoot"
-    :class="['ai-workspace', `is-${placement}`]"
+    class="ai-workspace-panel"
     aria-label="AIワークスペース"
+    @keydown="handlePanelKeydown"
   >
-    <div class="ai-workspace-editor">
-      <slot />
-    </div>
-
-    <button
-      v-show="isOpen"
-      class="ai-workspace-resizer"
-      :class="{ 'is-resizing': activeResize !== null }"
-      type="button"
-      role="separator"
-      :aria-label="resizeAriaLabel"
-      :aria-orientation="placement === 'right' ? 'vertical' : 'horizontal'"
-      :aria-valuemin="resizeBounds.min"
-      :aria-valuemax="resizeBounds.max"
-      :aria-valuenow="effectivePanelSize"
-      @keydown="handleResizerKeydown"
-      @pointerdown="startResize"
-      @pointermove="handleResize"
-      @pointerup="finishResize"
-      @pointercancel="finishResize"
-    />
-
-    <aside
-      v-show="isOpen"
-      id="ai-workspace-panel"
-      class="ai-workspace-panel"
-      :style="workspacePanelStyle"
-      aria-label="AIワークスペース"
-      @keydown="handlePanelKeydown"
-    >
-      <header class="ai-workspace-header">
-        <div class="ai-workspace-header-title">
-          <span class="ai-workspace-logo" aria-hidden="true">
-            <SparklesIcon :size="15" />
-          </span>
-          <strong>Atlas AI</strong>
-        </div>
-        <div class="ai-workspace-header-actions">
+      <div class="ai-workspace-header-actions" aria-label="AI操作">
           <button
-            class="ai-workspace-new-chat-button"
+            class="ai-workspace-icon-button"
             type="button"
             title="New Chat（新しいチャット）"
             aria-label="New Chat（新しいチャット）"
             :disabled="isAnyBusy"
             @click="startNewChat"
           >
-            <PlusIcon :size="14" aria-hidden="true" />
-            <span>新しいチャット</span>
+            <PlusIcon :size="16" aria-hidden="true" />
+          </button>
+          <button
+            class="ai-workspace-icon-button"
+            type="button"
+            title="開いているノートの整理候補を確認"
+            aria-label="開いているノートの整理候補を確認"
+            :disabled="!organizationNoteId"
+            @click="openOrganizationNote"
+          >
+            <FolderTreeIcon :size="16" aria-hidden="true" />
           </button>
           <button
             class="ai-workspace-icon-button"
@@ -73,17 +45,7 @@
           >
             <ArchiveIcon :size="16" aria-hidden="true" />
           </button>
-          <button
-            class="ai-workspace-icon-button"
-            type="button"
-            title="AIワークスペースを閉じる"
-            aria-label="AIワークスペースを閉じる"
-            @click="closeWorkspace"
-          >
-            <XIcon :size="16" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
+      </div>
 
       <div
         v-show="!recordsOpen"
@@ -245,7 +207,7 @@
         />
       </div>
 
-      <div v-show="recordsOpen" class="ai-workspace-records">
+      <div v-show="recordsOpen" ref="recordsRoot" class="ai-workspace-records" tabindex="-1">
         <AIRecordsPanel
           @open-artifact="openArtifact"
           @open-history="openHistory"
@@ -576,12 +538,11 @@
           {{ submitBlockedMessage }}
         </p>
       </form>
-    </aside>
-  </section>
+    </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { Component, ComponentPublicInstance } from 'vue'
 import {
   AlertCircleIcon,
@@ -626,15 +587,7 @@ import {
   DropdownMenuTrigger,
 } from 'reka-ui'
 import type { AIChatMode, LibrarianOperation, WritingKind } from '../api/ai'
-import {
-  AI_WORKSPACE_BOTTOM_HEIGHT_MAX,
-  AI_WORKSPACE_BOTTOM_HEIGHT_MIN,
-  AI_WORKSPACE_RIGHT_WIDTH_MAX,
-  AI_WORKSPACE_RIGHT_WIDTH_MIN,
-  type AIAgentEditPermission,
-  type AIWorkspacePlacement,
-  useSettingsStore,
-} from '../stores/useSettingsStore'
+import { type AIAgentEditPermission, useSettingsStore } from '../stores/useSettingsStore'
 import {
   type AIChatTimelineEntry,
   type AIChatTool,
@@ -646,6 +599,8 @@ import { useAILibrarianStore } from '../stores/useAILibrarianStore'
 import { useAIWritingStore } from '../stores/useAIWritingStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useOrganizationStore } from '../stores/useOrganizationStore'
+import { useSupportWorkspaceStore } from '../stores/useSupportWorkspaceStore'
 import { runAgentProposalPermissionFlow } from '../utils/agentProposalPermission'
 import {
   cleanupInterruptedComposerSubmission,
@@ -672,12 +627,6 @@ type WritingPanelHandle = {
   openArtifact: (id: string) => Promise<boolean>
   submitPrompt: (prompt: string, kind?: WritingKind) => Promise<boolean>
 }
-type ResizeBounds = { min: number; max: number }
-
-const AI_WORKSPACE_EDITOR_WIDTH_MIN = 360
-const AI_WORKSPACE_EDITOR_HEIGHT_MIN = 240
-const AI_WORKSPACE_RIGHT_RESPONSIVE_RATIO = 0.6
-const AI_WORKSPACE_BOTTOM_RESPONSIVE_RATIO = 0.6
 
 const toolDefinitions: ReadonlyArray<{
   value: AIChatTool
@@ -742,12 +691,6 @@ const fixedScopeTools: ReadonlySet<AIChatTool> = new Set([
   'duplicate',
 ])
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{
-  'update:open': [open: boolean]
-  closed: []
-}>()
-
 const settingsStore = useSettingsStore()
 const aiStore = useAIStore()
 const chatStore = useAIChatStore()
@@ -756,8 +699,10 @@ const assistantStore = useAIAssistantStore()
 const writingStore = useAIWritingStore()
 const notebookStore = useNotebookStore()
 const noteStore = useNoteStore()
-const workspaceRoot = ref<HTMLElement | null>(null)
+const organizationStore = useOrganizationStore()
+const supportStore = useSupportWorkspaceStore()
 const timelineRoot = ref<HTMLElement | null>(null)
+const recordsRoot = ref<HTMLElement | null>(null)
 const composerTextarea = ref<HTMLTextAreaElement | null>(null)
 const contextSearchInput = ref<HTMLInputElement | null>(null)
 const contextOptions = ref<HTMLUListElement | null>(null)
@@ -771,9 +716,6 @@ const contextPickerOpen = ref<ContextPickerKind | null>(null)
 const contextQuery = ref('')
 const isComposing = ref(false)
 const isSubmitting = ref(false)
-const workspaceWidth = ref(0)
-const workspaceHeight = ref(0)
-const activeResize = ref<AIWorkspacePlacement | null>(null)
 const activeLibrarianTraceID = ref<string | null>(null)
 const visibleSummaryTraceID = ref<string | null>(null)
 const visibleLibrarianTraceID = ref<string | null>(null)
@@ -813,21 +755,7 @@ function setWritingPanelRef(value: TemplateRefValue) {
   }
 }
 
-const placement = computed(() => settingsStore.aiWorkspacePlacement)
-const isOpen = computed(() => props.open && settingsStore.aiEnabled)
-const effectivePanelSize = computed(() => getEffectivePanelSize(placement.value))
-const resizeBounds = computed<ResizeBounds>(() => getResizeBounds(placement.value))
-const resizeAriaLabel = computed(() => (
-  placement.value === 'right'
-    ? 'AIワークスペースの幅を調整'
-    : 'AIワークスペースの高さを調整'
-))
-const workspacePanelStyle = computed(() => {
-  const size = `${effectivePanelSize.value}px`
-  return placement.value === 'right'
-    ? { width: size, flexBasis: size }
-    : { height: size, flexBasis: size }
-})
+const organizationNoteId = computed(() => noteStore.activeNote?.id ?? '')
 const isApplyingAgentProposal = computed(() => chatStore.timeline.some((entry) => (
   entry.kind === 'agent-proposal' && entry.proposalState === 'applying'
 )))
@@ -844,6 +772,11 @@ const isAnyBusy = computed(() => isAIActivityBusy({
   isApplyingAgentProposal: isApplyingAgentProposal.value,
   isSettingsBusy: aiStore.isSettingsBusy,
 }))
+
+function openOrganizationNote() {
+  if (!organizationNoteId.value) return
+  organizationStore.openNote(organizationNoteId.value)
+}
 const hasUsableNote = computed(() => Boolean(
   noteStore.activeNote && !noteStore.activeNote.isTrashed,
 ))
@@ -1034,59 +967,10 @@ const filteredCatalogNotes = computed(() => {
     .slice(0, 100)
 })
 
-function getResizeBounds(targetPlacement: AIWorkspacePlacement): ResizeBounds {
-  const isRight = targetPlacement === 'right'
-  const min = isRight ? AI_WORKSPACE_RIGHT_WIDTH_MIN : AI_WORKSPACE_BOTTOM_HEIGHT_MIN
-  const configuredMax = isRight ? AI_WORKSPACE_RIGHT_WIDTH_MAX : AI_WORKSPACE_BOTTOM_HEIGHT_MAX
-  const availableSize = isRight ? workspaceWidth.value : workspaceHeight.value
-  const editorMinimum = isRight ? AI_WORKSPACE_EDITOR_WIDTH_MIN : AI_WORKSPACE_EDITOR_HEIGHT_MIN
-  const max = availableSize > 0
-    ? Math.max(min, Math.min(configuredMax, availableSize - editorMinimum))
-    : configuredMax
-  return { min, max }
-}
-
-function getEffectivePanelSize(targetPlacement: AIWorkspacePlacement) {
-  const isRight = targetPlacement === 'right'
-  const preferredSize = isRight
-    ? settingsStore.aiWorkspaceRightWidth
-    : settingsStore.aiWorkspaceBottomHeight
-  const availableSize = isRight ? workspaceWidth.value : workspaceHeight.value
-  if (availableSize <= 0) return preferredSize
-
-  const min = isRight ? AI_WORKSPACE_RIGHT_WIDTH_MIN : AI_WORKSPACE_BOTTOM_HEIGHT_MIN
-  const configuredMax = isRight ? AI_WORKSPACE_RIGHT_WIDTH_MAX : AI_WORKSPACE_BOTTOM_HEIGHT_MAX
-  const editorMinimum = isRight ? AI_WORKSPACE_EDITOR_WIDTH_MIN : AI_WORKSPACE_EDITOR_HEIGHT_MIN
-  const responsiveRatio = isRight
-    ? AI_WORKSPACE_RIGHT_RESPONSIVE_RATIO
-    : AI_WORKSPACE_BOTTOM_RESPONSIVE_RATIO
-  const max = Math.max(
-    min,
-    Math.min(
-      configuredMax,
-      Math.floor(availableSize * responsiveRatio),
-      availableSize - editorMinimum,
-    ),
-  )
-  return clamp(preferredSize, min, max)
-}
-
-let resizeObserver: ResizeObserver | null = null
-let resizePointerTarget: HTMLElement | null = null
-let resizePointerID: number | null = null
-let resizeStartPosition = 0
-let resizeStartSize = 0
-
-function closeWorkspace() {
-  if (!isOpen.value) return
-  finishResize()
-  closeContextPicker()
-  emit('update:open', false)
-  emit('closed')
-}
-
 function focusComposer() {
-  composerTextarea.value?.focus()
+  if (!supportStore.isOpen || supportStore.isMinimized || supportStore.activeTab !== 'ai' || !settingsStore.aiEnabled) return
+  if (recordsOpen.value) recordsRoot.value?.focus()
+  else composerTextarea.value?.focus()
 }
 
 function openAISettings() {
@@ -1146,7 +1030,7 @@ function timelineRoleLabel(entry: AIChatTimelineEntry) {
     ? toolDefinitions.find((item) => item.value === entry.tool)?.label ?? 'ツール'
     : 'ツール'
   if (entry.kind === 'error') return 'エラー'
-  return 'Atlas AI'
+  return 'AI'
 }
 
 function timelineStatusLabel(status: NonNullable<AIChatTimelineEntry['status']>) {
@@ -1313,6 +1197,7 @@ async function openContextPicker(kind: ContextPickerKind) {
     await notebookStore.fetchNotebooks()
   }
   await nextTick()
+  if (!supportStore.isOpen || supportStore.isMinimized || supportStore.activeTab !== 'ai') return
   if (kind === 'note' && catalogLoaded) {
     contextSearchInput.value?.focus()
     return
@@ -1334,7 +1219,9 @@ function closeContextPicker(restoreTriggerFocus = false) {
 
 function addNoteContext(noteID: string, title: string) {
   chatStore.addNoteContext(noteID, title)
-  void nextTick(() => contextSearchInput.value?.focus())
+  void nextTick(() => {
+    if (supportStore.isOpen && !supportStore.isMinimized && supportStore.activeTab === 'ai') contextSearchInput.value?.focus()
+  })
 }
 
 function addNotebookContext(notebookID: string, name: string) {
@@ -1381,7 +1268,7 @@ function handlePanelKeydown(event: KeyboardEvent) {
   }
   if (event.target === composerTextarea.value) return
   if (event.target instanceof HTMLElement && event.target.closest('[role="menu"]')) return
-  closeWorkspace()
+  supportStore.minimize()
 }
 
 function userSubmissionLabel(prompt: string, tool: AIChatTool | null) {
@@ -1666,79 +1553,6 @@ async function openSummary(id: string) {
   clearResultForTrace(traceID)
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), Math.max(min, max))
-}
-
-function resizePanel(targetPlacement: AIWorkspacePlacement, requestedSize: number) {
-  const bounds = getResizeBounds(targetPlacement)
-  const size = clamp(requestedSize, bounds.min, bounds.max)
-  if (targetPlacement === 'right') {
-    settingsStore.setAIWorkspaceRightWidth(size)
-    return
-  }
-  settingsStore.setAIWorkspaceBottomHeight(size)
-}
-
-function updateWorkspaceSize() {
-  if (!workspaceRoot.value) return
-  workspaceWidth.value = workspaceRoot.value.clientWidth
-  workspaceHeight.value = workspaceRoot.value.clientHeight
-}
-
-function startResize(event: PointerEvent) {
-  if (!event.isPrimary || event.button !== 0) return
-  const target = event.currentTarget
-  if (!(target instanceof HTMLElement)) return
-
-  const currentPlacement = placement.value
-  activeResize.value = currentPlacement
-  resizePointerTarget = target
-  resizePointerID = event.pointerId
-  resizeStartPosition = currentPlacement === 'right' ? event.clientX : event.clientY
-  resizeStartSize = effectivePanelSize.value
-  target.setPointerCapture(event.pointerId)
-  document.body.classList.add(`is-ai-workspace-resizing-${currentPlacement}`)
-}
-
-function handleResize(event: PointerEvent) {
-  const currentPlacement = activeResize.value
-  if (!currentPlacement || resizePointerID !== event.pointerId) return
-  const position = currentPlacement === 'right' ? event.clientX : event.clientY
-  resizePanel(currentPlacement, resizeStartSize - (position - resizeStartPosition))
-}
-
-function finishResize(event?: PointerEvent) {
-  if (!activeResize.value) return
-  if (event && resizePointerID !== event.pointerId) return
-  if (
-    resizePointerTarget
-    && resizePointerID !== null
-    && resizePointerTarget.hasPointerCapture(resizePointerID)
-  ) {
-    resizePointerTarget.releasePointerCapture(resizePointerID)
-  }
-  activeResize.value = null
-  resizePointerTarget = null
-  resizePointerID = null
-  document.body.classList.remove('is-ai-workspace-resizing-right', 'is-ai-workspace-resizing-bottom')
-}
-
-function handleResizerKeydown(event: KeyboardEvent) {
-  const currentPlacement = placement.value
-  let delta = 0
-  if (currentPlacement === 'right') {
-    if (event.key === 'ArrowLeft') delta = 10
-    if (event.key === 'ArrowRight') delta = -10
-  } else {
-    if (event.key === 'ArrowUp') delta = 10
-    if (event.key === 'ArrowDown') delta = -10
-  }
-  if (!delta) return
-  event.preventDefault()
-  resizePanel(currentPlacement, effectivePanelSize.value + delta)
-}
-
 function scrollTimelineToEnd() {
   const timeline = timelineRoot.value
   if (!timeline) return
@@ -1787,124 +1601,40 @@ watch(
   },
 )
 
-watch(() => props.open, async (open) => {
-  if (!open) {
-    finishResize()
-    closeContextPicker()
-    return
-  }
+watch(() => supportStore.focusAIRequest, async () => {
   await nextTick()
   focusComposer()
 })
 
-watch(() => settingsStore.aiWorkspacePlacement, async () => {
-  finishResize()
-  await nextTick()
-  updateWorkspaceSize()
+watch(() => supportStore.lockVersion, () => {
+  clearResultAnchors()
+  recordsOpen.value = false
+  closeContextPicker()
 })
 
-onMounted(() => {
-  if (!workspaceRoot.value) return
-  updateWorkspaceSize()
-  resizeObserver = new ResizeObserver(updateWorkspaceSize)
-  resizeObserver.observe(workspaceRoot.value)
-})
-
-onBeforeUnmount(() => {
-  finishResize()
-  resizeObserver?.disconnect()
-})
 </script>
 
 <style scoped>
-.ai-workspace {
-  position: relative;
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.ai-workspace.is-right {
-  flex-direction: row;
-}
-
-.ai-workspace.is-bottom {
-  flex-direction: column;
-}
-
-.ai-workspace-editor {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-}
-
 .ai-workspace-panel {
   display: flex;
-  min-width: 300px;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
-  flex: 0 0 auto;
   flex-direction: column;
-  border-left: 1px solid var(--border);
+  overflow: hidden;
   background: var(--bg-sidebar);
   container-type: inline-size;
 }
-
-.ai-workspace.is-bottom .ai-workspace-panel {
-  width: 100%;
-  min-width: 0;
-  min-height: 180px;
-  border-top: 1px solid var(--border);
-  border-left: none;
-}
-
-.ai-workspace-header {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-sidebar) 94%, var(--brand-primary) 6%);
-}
-
-.ai-workspace-header-title,
-.ai-workspace-header-actions,
-.ai-chat-entry-heading,
-.ai-chat-composer-toolbar {
-  display: flex;
-  align-items: center;
-}
-
-.ai-workspace-header-title {
-  min-width: 0;
-  gap: 7px;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.ai-workspace-logo,
-.ai-chat-empty-icon {
-  display: inline-grid;
-  place-items: center;
-  color: var(--brand-primary);
-}
-
-.ai-workspace-logo {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--brand-primary) 13%, transparent);
-}
-
 .ai-workspace-header-actions {
-  flex-shrink: 0;
-  gap: 4px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 4px 7px;
+  border-bottom: 1px solid var(--border);
 }
+.ai-chat-entry-heading,.ai-chat-composer-toolbar{display:flex;align-items:center}
+.ai-chat-empty-icon{display:inline-grid;place-items:center;color:var(--brand-primary)}
+
 
 .ai-workspace-icon-button {
   display: inline-grid;
@@ -1931,95 +1661,6 @@ onBeforeUnmount(() => {
 .ai-workspace-icon-button:disabled {
   cursor: not-allowed;
   opacity: .45;
-}
-
-.ai-workspace-new-chat-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.ai-workspace-new-chat-button:hover,
-.ai-workspace-new-chat-button:focus-visible {
-  background: var(--bg-hover);
-  color: var(--brand-primary);
-}
-
-.ai-workspace-new-chat-button:disabled {
-  cursor: not-allowed;
-  opacity: .45;
-}
-
-.ai-workspace-resizer {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 8px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  touch-action: none;
-}
-
-.ai-workspace.is-right .ai-workspace-resizer {
-  width: 8px;
-  cursor: col-resize;
-}
-
-.ai-workspace.is-bottom .ai-workspace-resizer {
-  height: 8px;
-  cursor: row-resize;
-}
-
-.ai-workspace-resizer::after {
-  content: '';
-  position: absolute;
-  background: transparent;
-  transition: background-color .12s;
-}
-
-.ai-workspace.is-right .ai-workspace-resizer::after {
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 2px;
-}
-
-.ai-workspace.is-bottom .ai-workspace-resizer::after {
-  top: 3px;
-  right: 0;
-  left: 0;
-  height: 2px;
-}
-
-.ai-workspace-resizer:hover::after,
-.ai-workspace-resizer:focus-visible::after,
-.ai-workspace-resizer.is-resizing::after {
-  background: var(--brand-primary);
-}
-
-.ai-workspace-resizer:focus-visible {
-  outline: none;
-}
-
-:global(body.is-ai-workspace-resizing-right),
-:global(body.is-ai-workspace-resizing-right *) {
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-
-:global(body.is-ai-workspace-resizing-bottom),
-:global(body.is-ai-workspace-resizing-bottom *) {
-  cursor: row-resize !important;
-  user-select: none !important;
 }
 
 .ai-chat-timeline,
@@ -2653,6 +2294,17 @@ onBeforeUnmount(() => {
   .ai-chat-context-picker {
     right: 8px;
     left: 8px;
+  }
+}
+
+@container (max-width: 360px) {
+  .ai-workspace-header {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .ai-workspace-header-actions {
+    gap: 1px;
   }
 }
 </style>

@@ -1,6 +1,16 @@
 # プロジェクト状況
 
-最終更新: 2026-09-21
+最終更新: 2026-09-24
+
+## 整理とAIの共通サポートパネル（2026-09-24）
+
+`SupportWorkspace`で整理／AIを1つの枠へ統合した。共通ヘッダーのタブとドック／浮動切替、×最小化、アイコン再開を追加し、エディターの兄弟要素に配置した。ノート未選択またはAI無効でも整理を開ける。タブ切替では両機能をアンマウントせず、整理scopeごとの解析・選択・結果とAIの下書き・timeline・処理を保持する。AIとバックリンクの整理導線は対象ノートscopeを共通パネルに開き、既存sessionでは不要な再解析をしない。ロック時は整理sessionとAIの表示内容・進行中の応答を無効化する。右／下ドック寸法の希望値は既存設定を使い、狭い領域では表示だけ下側へ移す。Frontend typecheck／lint／production build、整理・AI Workspace・AIチャット・コンテンツロック・ショートカットの回帰テスト、bindings生成付きWails Windows/amd64 build、`git diff --check`が成功。Wails実画面での手動受け入れは未確認。
+
+## 整理センター第一段階（2026-09-23）
+
+共通の整理パネルに加え、AIWorkspace／バックリンクへ独立した通常・フローティングパネルを追加。保存空間scopeとノートscopeごとに候補・選択・結果・適用状態を保持し、scope間の古い応答をsession単位で破棄する。ロック時は全scopeを無効化し、遅延応答で候補を復元しない。小型パネルにも対象・変更前・変更案・理由を表示してから候補単件／一括適用する。全保存空間、Notebook直下、子孫Notebook、対象ノートと直接の関連先を解析できる。候補はタイトル、Notebook分類・移動、未分類検出、タグ付与、重複／空ノートのゴミ箱移動、相互リンクと、リンク切れ・孤立・関連・重複タグの情報提示。同一ノートの候補をバッチ適用し、Note Serviceのrevision/CAS・journal・ノート単位queue、タグCASを通して保護・ロック・ゴミ箱・関連先・stale状態を再確認する。失敗は再試行可能、競合は再解析を案内する。データベースschema変更なし。
+
+設計は [`development/organization-center.md`](development/organization-center.md)、Pre-Phase 5 scopeは [`development/scopes/scope-pre-phase5.md`](development/scopes/scope-pre-phase5.md)、TODOは [`todo/todo-pre-phase5-organization.md`](todo/todo-pre-phase5-organization.md) を正とする。自動検証とWails v2.10.1 Windows/amd64 buildの実行結果はこのTODOへ記録する。Computer Useはブラウザー面しか公開せずWindowsアプリ画面を操作できなかったため、実画面手動受け入れと実測性能評価は未確認。
 
 ## ドキュメント整理（2026-09-21）
 

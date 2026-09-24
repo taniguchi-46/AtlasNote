@@ -22,6 +22,10 @@
         <UploadIcon :size="18" />
       </button>
 
+      <button class="icon-btn" title="整理センターを開く" aria-label="整理センターを開く" type="button" @click="$emit('open-organization')">
+        <PanelRightCloseIcon :size="18" aria-hidden="true" />
+      </button>
+
       <button class="icon-btn" title="新しいノート" type="button" @click="$emit('new-note')">
         <FilePlusIcon :size="18" />
       </button>
@@ -49,6 +53,7 @@ import {
   RefreshCwIcon, 
   SearchIcon, 
   FilePlusIcon, 
+  PanelRightCloseIcon,
   UploadIcon,
   AppWindowIcon, 
   SettingsIcon 
@@ -63,6 +68,7 @@ defineEmits<{
   (e: 'search', query: string): void
   (e: 'new-note'): void
   (e: 'import-notes'): void
+  (e: 'open-organization'): void
   (e: 'toggle-always-on-top'): void
   (e: 'open-settings'): void
 }>()

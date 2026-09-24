@@ -39,25 +39,20 @@
       @search="handleSearch"
       @new-note="handleNewNote"
       @import-notes="handleOpenNoteImport"
+      @open-organization="organizationStore.open('tasks')"
       @toggle-always-on-top="handleToggleAlwaysOnTop"
       @open-settings="handleOpenSettings"
     />
 
-    <!-- Startup error banner -->
-    <div
-      v-if="startupStatus && !startupStatus.ready"
-      class="startup-banner"
-      role="alert"
-    >
-      <span>⚠ 起動エラー: {{ startupStatus.message }}</span>
-      <span class="startup-datadir">{{ startupStatus.dataDir }}</span>
-    </div>
+    <div class="main-workspace">
+      <div class="main-workspace-primary">
+        <!-- Startup error banner -->
+        <div v-if="startupStatus && !startupStatus.ready" class="startup-banner" role="alert">
+          <span>⚠ 起動エラー: {{ startupStatus.message }}</span>
+          <span class="startup-datadir">{{ startupStatus.dataDir }}</span>
+        </div>
 
-    <section
-      v-else-if="startupStatus?.degraded"
-      class="recovery-banner"
-      aria-labelledby="recovery-title"
-    >
+        <section v-else-if="startupStatus?.degraded" class="recovery-banner" aria-labelledby="recovery-title">
       <div class="recovery-header">
         <div>
           <strong id="recovery-title">一部のノート本文が見つかりません</strong>
@@ -79,19 +74,22 @@
           </button>
         </li>
       </ul>
-    </section>
+        </section>
 
-    <!-- 3-pane shell -->
-    <div
-      ref="appShellRef"
-      class="app-shell"
-      :style="{
-        gridTemplateColumns: `${settingsStore.sidebarWidth}px ${settingsStore.noteListWidth}px minmax(0, 1fr)`,
-      }"
-    >
+        <!-- 3-pane shell -->
+        <div
+          ref="appShellRef"
+          class="app-shell"
+          :style="{
+            gridTemplateColumns: `${settingsStore.sidebarWidth}px ${settingsStore.noteListWidth}px minmax(0, 1fr)`,
+          }"
+        >
       <AppSidebar />
       <NoteList />
-      <NoteEditor ref="noteEditorRef" />
+      <div ref="editorWorkspaceRef" class="editor-workspace" :class="{ 'is-bottom': settingsStore.aiWorkspacePlacement === 'bottom' || workspaceNarrow }">
+        <NoteEditor ref="noteEditorRef" />
+        <SupportWorkspace />
+      </div>
 
       <button
         class="pane-resizer"
@@ -127,6 +125,8 @@
         @pointerup="finishResize"
         @pointercancel="finishResize"
       />
+        </div>
+      </div>
     </div>
 
     <!-- Modals -->
@@ -151,6 +151,8 @@ import NoteEditor from './components/NoteEditor.vue'
 import NoteImportModal from './components/NoteImportModal.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
+import SupportWorkspace from './components/SupportWorkspace.vue'
+import { useSupportWorkspaceStore } from './stores/useSupportWorkspaceStore'
 import StorageSpaceUnlockScreen from './components/StorageSpaceUnlockScreen.vue'
 import StorageLocationSetupScreen from './components/StorageLocationSetupScreen.vue'
 import ContentUnlockDialog from './components/ContentUnlockDialog.vue'
@@ -171,6 +173,7 @@ import { useTagStore } from './stores/useTagStore'
 import { useSyncStore } from './stores/useSyncStore'
 import { useAIStore } from './stores/useAIStore'
 import { useAIAssistantStore } from './stores/useAIAssistantStore'
+import { useAIChatStore } from './stores/useAIChatStore'
 import { useAILibrarianStore } from './stores/useAILibrarianStore'
 import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
@@ -178,6 +181,7 @@ import { useStorageLocationStore } from './stores/useStorageLocationStore'
 import { useBackupStore } from './stores/useBackupStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
+import { useOrganizationStore } from './stores/useOrganizationStore'
 import { useNoteExportStore } from './stores/useNoteExportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
@@ -204,7 +208,6 @@ import {
 type ResizablePane = 'sidebar' | 'noteList'
 type AppTopBarExpose = { focusSearch: () => void }
 type NoteEditorExpose = {
-  toggleAIWorkspace: () => void
   toggleEditMode: () => void
   flushEditorInput: () => boolean
   saveCurrentNote: () => Promise<boolean>
@@ -228,6 +231,7 @@ const tagStore = useTagStore()
 const syncStore = useSyncStore()
 const aiStore = useAIStore()
 const aiAssistantStore = useAIAssistantStore()
+const aiChatStore = useAIChatStore()
 const aiLibrarianStore = useAILibrarianStore()
 const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
@@ -235,6 +239,19 @@ const storageLocationStore = useStorageLocationStore()
 const backupStore = useBackupStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
+const organizationStore = useOrganizationStore()
+const supportStore = useSupportWorkspaceStore()
+const editorWorkspaceRef = ref<HTMLElement | null>(null)
+const workspaceNarrow = ref(false)
+let workspaceObserver: ResizeObserver | null = null
+watch(editorWorkspaceRef, (element) => {
+  workspaceObserver?.disconnect()
+  if (!element) return
+  const update = () => { workspaceNarrow.value = element.clientWidth < 660 }
+  workspaceObserver = new ResizeObserver(update)
+  workspaceObserver.observe(element)
+  update()
+}, { flush: 'post' })
 const noteExportStore = useNoteExportStore()
 const notificationStore = useNotificationStore()
 const settingsStore = useSettingsStore()
@@ -466,8 +483,8 @@ function executeGlobalShortcut(actionId: ShortcutActionId) {
       noteEditorRef.value.toggleEditMode()
       return true
     case 'ai.toggleWorkspace':
-      if (!settingsStore.aiEnabled || !noteStore.activeNote || !noteEditorRef.value) return false
-      noteEditorRef.value.toggleAIWorkspace()
+      if (!settingsStore.aiEnabled) return false
+      supportStore.toggleAI()
       return true
     case 'editor.undo':
     case 'editor.redo':
@@ -533,6 +550,14 @@ watch(() => contentLockStore.lastChangedTarget, async (target) => {
 
 async function handleLockedTargets(targets: { type: 'space' | 'notebook' | 'note'; id: string }[]) {
   if (targets.length === 0) return
+  aiAssistantStore.discardConversation()
+  aiLibrarianStore.discard()
+  aiWritingStore.clear()
+  aiStore.discardSummary()
+  aiStore.discardDraft()
+  aiChatStore.clearConversation()
+  supportStore.invalidateForLock()
+  await organizationStore.clearForLock()
   try {
     if (targets.some((target) => target.type === 'space')) {
       contentLockStore.cancelAccessRequest()
@@ -868,6 +893,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   cancelBeforeCloseListener?.()
   resizeObserver?.disconnect()
+  workspaceObserver?.disconnect()
   syncStore.dispose()
   backupStore.dispose()
   storageSpaceStore.clearSwitchLifecycle()

@@ -25,6 +25,7 @@ import (
 	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
+	"atlasnote/internal/organize"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
 
@@ -41,6 +42,7 @@ type App struct {
 	notes                       *note.Service
 	noteExporter                *noteexport.Service
 	noteImporter                *noteimport.Service
+	organizer                   *organize.Service
 	attachments                 *attachmentstore.Store
 	syncService                 *syncservice.Service
 	aiService                   *aiservice.Service
@@ -1333,6 +1335,9 @@ func (a *App) LockContentNow(target contentlock.Target) contentlock.MutationResu
 	if !a.isActiveContentLockTarget(target) {
 		return contentlock.MutationResult{Error: contentlock.APIErrorFrom(contentlock.ErrValidation)}
 	}
+	if a.organizer != nil {
+		a.organizer.InvalidateSessions()
+	}
 	var lock contentlock.Lock
 	err := a.withContentLockManager(a.operationContext(), target, func(manager *contentlock.Manager) error {
 		var lockErr error
@@ -1359,6 +1364,9 @@ func (a *App) LockContentTargetsNow(targets []contentlock.Target) contentlock.Li
 		if !a.isActiveContentLockTarget(target) {
 			return contentlock.ListResult{Locks: []contentlock.Lock{}, Error: contentlock.APIErrorFrom(contentlock.ErrValidation)}
 		}
+	}
+	if a.organizer != nil {
+		a.organizer.InvalidateSessions()
 	}
 
 	var locks []contentlock.Lock
@@ -1975,6 +1983,7 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 		return err
 	}
 	a.notes = service
+	a.organizer = organize.NewService(service)
 	a.noteImporter = noteimport.NewService(service)
 	a.noteExporter = noteexport.NewService(service, a.contentLocks)
 	a.syncService = syncService

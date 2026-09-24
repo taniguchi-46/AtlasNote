@@ -17,6 +17,7 @@ import { deleteNotesSequentially, NoteDeleteError } from '../utils/deleteNotesSe
 import { updateNotesSequentially } from '../utils/updateNotesSequentially'
 import { applyAgentEditHunk } from '../utils/agentEditProposal'
 import type { AgentEditProposal } from '../api/ai'
+import type { OrganizationApplyResult } from '../api/organization'
 import { useSettingsStore, type EditorFirstLineStyle } from './useSettingsStore'
 import { useNotificationStore, type NotificationAction } from './useNotificationStore'
 import { parseNoteSortOption, useAppStore } from './useAppStore'
@@ -821,6 +822,58 @@ export const useNoteStore = defineStore('notes', () => {
     })
   }
 
+  async function runOrganizationOperation(
+    noteId: string,
+    operation: () => Promise<OrganizationApplyResult[]>,
+  ): Promise<OrganizationApplyResult[] | null> {
+    if (!await flushAllDirtyNotes({ mode: 'explicit' })) return null
+    return noteOperations.enqueue(noteId, async () => {
+      if (isNoteDeletionPreparing(noteId) || getDraft(noteId)) {
+        return [{
+          candidateId: '',
+          status: 'conflict',
+          message: '未保存の変更または削除処理があるため、候補を適用しませんでした。',
+        }]
+      }
+      const result = await operation()
+      if (!result.some((item) => item.status === 'applied')) return result
+
+      let updated: note.Note
+      try {
+        updated = await getNote(noteId)
+      } catch {
+        for (const item of result) {
+          if (item.status === 'applied') item.message = '候補は適用されました。ノート一覧を再読み込みして状態を確認してください。'
+        }
+        return result
+      }
+      const pendingDraft = getDraft(noteId)
+      if (pendingDraft) {
+        autoSave.cancel(noteId)
+        replaceDraft(noteId, {
+          ...pendingDraft,
+          status: 'conflicted',
+          error: '整理候補の適用中に編集が行われたため、下書きを競合として保持しています',
+          conflict: {
+            code: 'NOTE_REVISION_CONFLICT',
+            noteId,
+            expectedRevision: getPersistedRevision(noteId) ?? updated.revision,
+            actualRevision: updated.revision,
+          },
+        })
+        for (const item of result) {
+          if (item.status === 'applied') {
+            item.status = 'applied-with-draft-conflict'
+            item.message = '候補は適用されました。適用中に作成された下書きは競合として保持しています。'
+          }
+        }
+      }
+      applyPersistedNote(updated)
+      if (updated.isTrashed && !pendingDraft) closeActiveNoteIfTarget(noteId)
+      return result
+    })
+  }
+
   async function applyAIWritingContent(
     noteId: string,
     generatedContent: string,
@@ -1209,6 +1262,7 @@ export const useNoteStore = defineStore('notes', () => {
     selectNote,
     newNote,
     persistNote,
+    runOrganizationOperation,
     applyAIWritingContent,
     applyAgentEditProposal,
     clearAgentEditorHighlight,

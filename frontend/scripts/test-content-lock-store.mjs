@@ -429,15 +429,23 @@ try {
       let refreshStarted = false
       const refreshGate = new Promise((resolve) => { releaseRefresh = resolve })
       const warnings = []
+      let organizationClearCount = 0
+      let aiClearCount = 0
       const raceEditor = {
         flushEditorInput: () => true,
         setContentLockPending: (pending) => { guarded = pending; return true },
       }
       const appRefresh = new Function(
-        'contentLockStore', 'noteStore', 'startupStatus', 'getStartupStatus',
+        'organizationStore', 'aiAssistantStore', 'aiLibrarianStore', 'aiWritingStore', 'aiStore', 'aiChatStore', 'supportStore', 'contentLockStore', 'noteStore', 'startupStatus', 'getStartupStatus',
         'appStore', 'searchStore', 'notificationStore',
         refreshJS + '\nreturn handleLockedTargets',
-      )(raceStore, {
+      )({ clearForLock: async () => { organizationClearCount += 1 } },
+      { discardConversation: () => { aiClearCount += 1 } },
+      { discard: () => { aiClearCount += 1 } },
+      { clear: () => { aiClearCount += 1 } },
+      { discardSummary: () => { aiClearCount += 1 }, discardDraft: () => { aiClearCount += 1 } },
+      { clearConversation: () => { aiClearCount += 1 } },
+      { invalidateForLock: () => { aiClearCount += 1 } }, raceStore, {
         refreshActiveNoteLockStatus: async () => {},
         fetchNotes: async () => {
           refreshStarted = true
@@ -468,6 +476,8 @@ try {
       }
       releaseRefresh()
       assert.equal((await first).error, undefined, 'view failure cannot undo successful key removal')
+      assert.equal(organizationClearCount, 1, 'locking clears in-memory organization analyses before refreshing views')
+      assert.equal(aiClearCount, 7, 'locking clears hidden AI content before refreshing views')
       assert.equal(warnings.length, refreshFails ? 1 : 0)
       assert.equal(guarded, false)
       assert.equal(raceStore.isBusy, false)

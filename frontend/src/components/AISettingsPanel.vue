@@ -2,7 +2,7 @@
   <section class="ai-settings" data-settings-anchor="ai" tabindex="-1">
     <h3>AI</h3>
     <div class="settings-section">
-      <h4>AIワークスペース</h4>
+      <h4>サポートパネル</h4>
       <div class="setting-group" data-settings-anchor="ai.workspace-placement" tabindex="-1">
         <label for="ai-workspace-placement">表示位置</label>
         <select id="ai-workspace-placement" v-model="settingsStore.aiWorkspacePlacement">
@@ -24,7 +24,7 @@
         </p>
       </div>
       <p class="field-help">
-        AIワークスペースの配置とAgent本文編集権限の変更はすぐに反映されます。「適用」は保存してこの画面を維持し、「OK」は保存して画面を閉じます。
+        サポートパネルの配置とAgent本文編集権限の変更はすぐに反映されます。「適用」は保存してこの画面を維持し、「OK」は保存して画面を閉じます。
       </p>
     </div>
     <div class="ai-availability-setting" data-settings-anchor="ai.enabled" tabindex="-1">
@@ -39,7 +39,7 @@
         <span>AI機能を有効にする</span>
       </label>
       <p class="field-help">
-        {{ settingsStore.aiEnabled ? 'AIワークスペースとAI操作を利用できます。' : 'AIワークスペースとAI操作を停止中です。保存済みの設定・履歴・認証情報は保持されます。' }}
+        {{ settingsStore.aiEnabled ? 'サポートパネルのAIタブを利用できます。' : 'AIタブの操作を停止中です。整理タブと保存済みのAI設定・履歴・認証情報は保持されます。' }}
       </p>
       <p v-if="settingsStore.aiEnabled && isAIProcessing" class="field-help" role="status">
         実行中のAI処理が完了するまでOFFにできません。

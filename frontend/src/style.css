@@ -134,12 +134,52 @@ ul {
   color: var(--text-primary);
 }
 
+.main-workspace {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.main-workspace-primary {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .app-shell {
   display: grid;
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.editor-workspace {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-workspace.is-bottom {
+  flex-direction: column;
+}
+
+.editor-workspace > .editor-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 700px) {
+  .editor-workspace {
+    flex-direction: column;
+  }
 }
 
 .pane-resizer {

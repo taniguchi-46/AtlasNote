@@ -12,6 +12,9 @@ const aiBusyPath = path.join(rootDir, 'src', 'utils', 'aiBusy.ts')
 
 const [
   workspaceSource,
+  supportSource,
+  supportStoreSource,
+  appSource,
   editorSource,
   settingsStoreSource,
   chatStoreSource,
@@ -29,6 +32,9 @@ const [
   aiBusySource,
 ] = await Promise.all([
   readFile(componentPath('AIWorkspace.vue'), 'utf8'),
+  readFile(componentPath('SupportWorkspace.vue'), 'utf8'),
+  readFile(path.join(rootDir, 'src', 'stores', 'useSupportWorkspaceStore.ts'), 'utf8'),
+  readFile(path.join(rootDir, 'src', 'App.vue'), 'utf8'),
   readFile(componentPath('NoteEditor.vue'), 'utf8'),
   readFile(path.join(rootDir, 'src', 'stores', 'useSettingsStore.ts'), 'utf8'),
   readFile(path.join(rootDir, 'src', 'stores', 'useAIChatStore.ts'), 'utf8'),
@@ -99,39 +105,26 @@ assert.match(editorSource, /function toggleHorizontalRule\(\)\s*\{[\s\S]*?setHor
 assert.match(editorSource, /insertMarkdownBlock\('\-\-\-'\)/)
 
 // Right/bottom placement and pointer/keyboard resizing remain available.
-assert.match(workspaceSource, /ResizeObserver/)
-assert.match(workspaceSource, /defineProps<\{ open: boolean \}>/)
-assert.match(workspaceSource, /computed\(\(\) => props\.open && settingsStore\.aiEnabled\)/)
+assert.match(supportSource, /ResizeObserver/)
+assert.match(supportSource, /role="separator"/)
+assert.match(supportSource, /@pointerdown="startDockResize"/)
+assert.match(supportSource, /@pointerdown.stop.prevent="startFloatingResize"/)
+assert.match(supportSource, /const effectiveSize = computed/)
+assert.match(supportSource, /settingsStore\.setAIWorkspaceRightWidth/)
+assert.match(supportSource, /settingsStore\.setAIWorkspaceBottomHeight/)
+assert.match(supportSource, /<OrganizationCenter v-show="store\.activeTab === 'organize'"/)
+assert.match(supportSource, /<AIWorkspace v-show="store\.activeTab === 'ai' && settingsStore\.aiEnabled"/)
+assert.match(supportSource, /サポートを再開/)
+assert.match(supportStoreSource, /function toggleAI\(\)/)
+assert.match(supportStoreSource, /function minimize\(\)/)
+assert.match(supportStoreSource, /function restore\(\)/)
+assert.match(appSource, /<NoteEditor ref="noteEditorRef" \/>[\s\S]*?<SupportWorkspace \/>/)
+assert.doesNotMatch(editorSource, /<AIWorkspace/)
 assert.match(workspaceSource, /isAIActivityBusy/)
 assert.match(workspaceSource, /withAIComposerSubmission\(\(\) => runComposerSubmission\(\)\)/)
 assert.match(workspaceSource, /cleanupInterruptedComposerSubmission/)
-assert.match(workspaceSource, /role="separator"/)
-assert.match(workspaceSource, /@pointerdown="startResize"/)
-assert.match(workspaceSource, /@pointermove="handleResize"/)
-assert.match(workspaceSource, /@pointerup="finishResize"/)
-assert.match(workspaceSource, /setPointerCapture/)
-assert.match(workspaceSource, /releasePointerCapture/)
-assert.match(workspaceSource, /clientX/)
-assert.match(workspaceSource, /clientY/)
-assert.match(workspaceSource, /ArrowUp/)
-assert.match(workspaceSource, /ArrowDown/)
-assert.match(workspaceSource, /emit\('update:open', false\)/)
-assert.match(workspaceSource, /v-show="isOpen"\s+class="ai-workspace-resizer"/)
-assert.match(workspaceSource, /v-show="isOpen"\s+id="ai-workspace-panel"/)
-assert.match(workspaceSource, /is-ai-workspace-resizing-right/)
-assert.match(workspaceSource, /is-ai-workspace-resizing-bottom/)
-assert.match(workspaceSource, /AI_WORKSPACE_RIGHT_RESPONSIVE_RATIO = 0\.6/)
-assert.match(workspaceSource, /AI_WORKSPACE_BOTTOM_RESPONSIVE_RATIO = 0\.6/)
-assert.match(workspaceSource, /const effectivePanelSize = computed\(\(\) => getEffectivePanelSize\(placement\.value\)\)/)
-assert.match(workspaceSource, /const size = `\$\{effectivePanelSize\.value\}px`/)
-assert.match(workspaceSource, /resizeStartSize = effectivePanelSize\.value/)
-assert.doesNotMatch(workspaceSource, /normalizeWorkspacePanelSize/)
 assert.match(workspaceSource, /container-type: inline-size/)
-assert.match(workspaceSource, /\.ai-workspace-panel\s*\{[^}]*min-width: 300px/s)
-assert.match(workspaceSource, /\.ai-workspace\.is-bottom \.ai-workspace-panel\s*\{[^}]*min-height: 180px/s)
-assert.doesNotMatch(workspaceSource, /MIN_WIDTH_FOR_RIGHT_WORKSPACE/)
-assert.doesNotMatch(workspaceSource, /effectivePlacement/)
-assert.doesNotMatch(workspaceSource, /ai-workspace-edge-tab/)
+
 
 // The main surface is one ordered chat timeline instead of feature switching.
 assert.equal(
@@ -472,18 +465,10 @@ assert.ok(
 
 assert.match(workspaceSource, /settingsStore\.openSettings\('ai'\)/)
 assert.match(workspaceTemplate, /title="保存済みの履歴と成果物を開く"/)
-assert.match(workspaceTemplate, /title="AIワークスペースを閉じる"/)
-assert.match(workspaceTemplate, /<XIcon :size="16" aria-hidden="true" \/>/)
+assert.match(supportSource, /title="サポートを最小化"/)
+assert.match(supportSource, /<XIcon :size="16" aria-hidden="true" \/>/)
 
-assert.match(editorSource, /v-model:open="isAIWorkspaceOpen"/)
-assert.match(editorSource, /class="icon-btn ai-workspace-toggle"/)
-assert.match(editorSource, /v-if="settingsStore\.aiEnabled"[\s\S]*class="icon-btn ai-workspace-toggle"/)
-assert.match(editorSource, /PanelRightOpenIcon/)
-assert.match(editorSource, /PanelBottomOpenIcon/)
-assert.ok(
-  editorSource.indexOf('class="icon-btn ai-workspace-toggle"') < editorSource.indexOf('class="mode-segment"'),
-  'AI workspace toggle must be placed to the left of the editor mode switcher',
-)
+assert.doesNotMatch(editorSource, /v-model:open="isAIWorkspaceOpen"/)
 assert.match(editorSource, /class="mode-segment"[\s\S]*?@click="toggleEditMode"/, 'the full mode control must be one native switch button')
 assert.match(
   editorSource,

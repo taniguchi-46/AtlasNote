@@ -102,6 +102,33 @@ export const useTagStore = defineStore('tags', () => {
 		}
 	}
 
+	async function refreshNoteTagsIfActive(noteId: string) {
+		if (activeNoteId.value !== noteId) return false
+		const requestVersion = ++noteTagsRequestVersion
+		isLoading.value = true
+		error.value = null
+		try {
+			const loadedTags = await listNoteTags(noteId)
+			if (requestVersion === noteTagsRequestVersion && activeNoteId.value === noteId) {
+				activeNoteTags.value = loadedTags
+				activeNoteTagsReady.value = true
+			}
+			return requestVersion === noteTagsRequestVersion && activeNoteId.value === noteId
+		} catch (cause) {
+			if (requestVersion === noteTagsRequestVersion && activeNoteId.value === noteId) {
+				publishError(cause, 'NOTE_TAG_LIST_FAILED', 'ノートのタグ読み込みに失敗しました。', {
+					label: '再試行',
+					run: () => refreshNoteTagsIfActive(noteId),
+				})
+			}
+			return false
+		} finally {
+			if (requestVersion === noteTagsRequestVersion && activeNoteId.value === noteId) {
+				isLoading.value = false
+			}
+		}
+	}
+
 	function clearActiveNoteTags() {
 		noteTagsRequestVersion += 1
 		activeNoteId.value = null
@@ -243,6 +270,7 @@ export const useTagStore = defineStore('tags', () => {
 		error,
 		fetchTags,
 		loadNoteTags,
+		refreshNoteTagsIfActive,
 		clearActiveNoteTags,
 		createTag,
 		renameTag,

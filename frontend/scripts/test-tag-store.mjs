@@ -115,6 +115,23 @@ try {
   assert.equal(store.activeNoteId, 'second-note')
   assert.deepEqual(store.activeNoteTags.map((tag) => tag.id), ['beta'])
 
+  let resolveRefresh
+  let deferRefresh = false
+  configure({
+    listNoteTags: (noteId) => noteId === 'note-a' && deferRefresh
+      ? new Promise((resolve) => { resolveRefresh = resolve })
+      : Promise.resolve([beta]),
+  })
+  assert.equal(await store.refreshNoteTagsIfActive('note-a'), false, 'refreshing a non-visible note must not change active tag state')
+  await store.loadNoteTags('note-a')
+  deferRefresh = true
+  const refreshA = store.refreshNoteTagsIfActive('note-a')
+  await store.loadNoteTags('note-b')
+  resolveRefresh([alpha])
+  await refreshA
+  assert.equal(store.activeNoteId, 'note-b')
+  assert.deepEqual(store.activeNoteTags.map((tag) => tag.id), ['beta'], 'late refresh must not replace a newly selected note tag list')
+
   console.log('tag store tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })

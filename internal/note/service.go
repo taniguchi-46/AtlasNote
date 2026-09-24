@@ -102,10 +102,45 @@ func (s *Service) SetAttachmentStore(store attachmentStore) {
 }
 
 func (s *Service) beginContentAccess(ctx context.Context) func() {
+	if owner, _ := ctx.Value(organizationContentAccessContextKey{}).(*Service); owner == s {
+		return func() {}
+	}
 	if s.contentLocks == nil {
 		return func() {}
 	}
 	return s.contentLocks.BeginContentAccess(ctx)
+}
+
+// BeginOrganizationRead holds content-lock conversion off while an analysis
+// reads note bodies. The returned context lets nested service calls reuse the
+// held access gate without reacquiring its RWMutex.
+func (s *Service) BeginOrganizationRead(ctx context.Context) (context.Context, func()) {
+	var releaseContent func()
+	if s.contentLocks != nil {
+		releaseContent = s.contentLocks.BeginContentAccess(ctx)
+	} else {
+		releaseContent = func() {}
+	}
+	return context.WithValue(ctx, organizationContentAccessContextKey{}, s), releaseContent
+}
+
+// BeginOrganizationExclusive serializes a candidate batch against every note
+// mutation and content-lock conversion until all candidate preconditions and
+// writes have completed.
+func (s *Service) BeginOrganizationExclusive(ctx context.Context) (context.Context, func()) {
+	s.syncGate.Lock()
+	var releaseContent func()
+	if s.contentLocks != nil {
+		releaseContent = s.contentLocks.BeginContentAccess(ctx)
+	} else {
+		releaseContent = func() {}
+	}
+	ctx = context.WithValue(ctx, syncExclusiveContextKey{}, s)
+	ctx = context.WithValue(ctx, organizationContentAccessContextKey{}, s)
+	return ctx, func() {
+		releaseContent()
+		s.syncGate.Unlock()
+	}
 }
 
 func (s *Service) noteProtected(ctx context.Context, noteID string) bool {
