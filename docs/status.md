@@ -1,6 +1,16 @@
 # プロジェクト状況
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
+
+## CLI・MCP・統合ターミナル再編 Stage 0（2026-09-26）
+
+`codex/support` を `codex/pre-phase5-future-features` へfast-forward統合し、統合HEADから `codex/cli-mcp-terminal-rearchitecture` を作成した。Go全テスト、Frontend全34テスト、型チェック、別一時出力先へのbuildは成功。既存 `frontend/dist` への通常buildは使用中ファイルの `EBUSY` で未完了。現行コードと仕様案の差分は [再編仕様書](development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md#stage-0-実コード照合2026-09-26) に記録した。CLI/MCP/IPCと統合ターミナルは未実装で、旧AI・整理GUIと保存済みAIデータは維持する。
+
+## CLI・MCP・統合ターミナル再編 Stage A（2026-09-26）
+
+既存Note Service、検索、バックリンク、Local Intelligenceを再利用する共通読み取り境界と、アクティブ保存空間へ束縛した認証済みローカルIPCを実装した。`AtlasNote.exe` の読み取りCLIとstdio MCPから `notes.list/get/search/backlinks/related`、`notebooks.list`、`tags.list` を利用できる。監査後、MCPをinitialize時の保存空間・接続先・明示公開note／Notebookへ固定する短命セッションへ分離し、既定公開0件、未公開メタデータ／本文／検索結果の除外、アプリ再起動・保存空間切替後の自動再接続禁止、実装済みMCP `2025-06-18`だけの版表明へ修正した。IPC単独の起動失敗ではGUIを維持し、外部応答中は既存mutation gateで本文・タグ・revision・ゴミ箱状態を固定する。保護・ロック・ゴミ箱、別保存空間scope、権限、revision、検索／リンク索引整合性は本体側でfail-closedに検証する。書き込み、整理候補、保存空間切替、ロック解除、統合ターミナルは未実装で、Stage B以降へは進んでいない。監査修正後、隔離したテスト用APPDATA／LOCALAPPDATAでの `go test ./... -count=1`、`go vet ./...`、MCP公開scope・版交渉・再接続禁止、IPC失敗時GUI維持、本文／タグ／revision／ゴミ箱状態の並行整合性回帰、Frontend全 `test:*`、typecheck、lint、別一時出力先へのproduction build、bindings生成付きWails Windows/amd64 clean build、`git diff --check` は成功した。先行実装時の実行ファイル経由CLI／MCP smokeも成功している。Wails GUIの手動操作は未確認で、Claude Code CLIが環境に存在しないため実Claude Code接続も未確認。入出力と接続設定は [再編仕様書のStage A実装契約](development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md#stage-a-実装契約2026-09-26) を正とする。
+
+再監査後、MCPセッションをstdio正常終了時に即時失効し、30分の有効期限、発行時の期限切れ回収、認証時の期限切れ拒否を追加した。セッション権限は親接続と公開scopeの共通部分へ限定し、親がR0だけなら公開scopeがあってもR1を付与しない。正常な起動・終了を65回繰り返す回帰、期限切れ・失効・R0親接続を確認した。Windows descriptorは継承を禁止した保護DACLに現ユーザーだけの単一ACEを持ち、他ユーザー向け読取ACEがないことを実生成ファイルで確認した。5,000ノートの`notes.list --limit 1`とGUI保存の並行計測では保存待ち約755msを再現したため、必要件数とnext cursor判定用1件が集まった時点で一覧走査を止める最小修正を行い、同条件を約22msへ短縮した。全Goテスト、`go vet ./...`、Frontend typecheck／lint、Wails Windows/amd64 clean build、標準入出力を明示したWindows実行ファイル同士のMCP initialize smokeは成功した。Claude Code CLIは環境に存在しないため実クライアント接続は未確認で、Stage B以降へは進んでいない。
 
 ## Local Intelligence 初期版（2026-09-25）
 

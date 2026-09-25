@@ -656,7 +656,7 @@ async function testAgentSaveRetainsConcurrentDraft() {
   })
 
   assert.equal(await applyPromise, 'applied-with-draft-conflict')
-  assert.equal(await draftFlush, true)
+  assert.equal(await draftFlush, false, 'a draft conflicted by the Agent save must remain unsaved')
   assert.equal(mockNotes.calls.updateNote.length, 1, 'the canceled draft must not reach the note API')
   assert.equal(noteStore.activeNote.content, '前文\nAgent変更後\n後文')
   assert.equal(noteStore.activeNote.revision, 4)

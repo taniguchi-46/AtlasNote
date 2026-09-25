@@ -54,6 +54,7 @@ Go Backend
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、完了済み会話、明示保存した成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 | Organization Center | ノート／Notebook／タグの整理候補を読み取り解析し、利用者が明示承認した候補だけ既存Note Serviceと保存laneへ適用する。解析sessionとレビュー状態はscopeごとにメモリ保持し、scope切替では相互に無効化せず、ロック時は全sessionを無効化する。詳細は`docs/development/organization-center.md`を正とする |
+| External Read API | `internal/readapi`が既存Note Serviceを再利用し、CLI／MCP共通の読み取り契約、保存空間scope、R0／R1権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
 
 ## データ / 状態管理
 
@@ -67,6 +68,7 @@ Go Backend
 - 共通パネルの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、API Keyは`localStorage`へ保持しない。完了済みのuser／assistant会話はアクティブ保存空間のSQLiteへ既定で履歴保存し、一覧・再開・同じ履歴IDの更新を行う。tool trace、認証情報、WebDAV同期は履歴保存対象外とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
+- ローカルCLIとstdio MCPは`internal/externalcmd`から同じ認証済みIPCへ接続するが、Principalとセッショントークンは分離する。MCPは起動時に明示された公開scopeと初回接続先を保持し、descriptorを呼び出しごとに再読込しない。MCP権限は親接続と公開scopeの共通部分に限定し、正常終了または30分の有効期限でセッションを失効する。外部プロセスへRepository、SQLiteパス、Markdownパス、セッショントークンをAPI結果として公開せず、本体終了・保存空間全体のロック時はIPCを停止する。
 - 整理候補はGo側のorganization Serviceで解析・サーバー側sessionへ束縛する。UIから渡す候補IDだけで提案内容を決めず、適用直前に保存空間・保護状態・revisionを再検証し、既存CAS／Note Serviceを通す。詳細は`docs/development/organization-center.md`を正とする。
 - 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
 

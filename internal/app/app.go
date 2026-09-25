@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	aiservice "atlasnote/internal/ai"
 	attachmentstore "atlasnote/internal/attachment"
@@ -21,11 +22,13 @@ import (
 	"atlasnote/internal/datalock"
 	"atlasnote/internal/diagnostics"
 	"atlasnote/internal/fileatomic"
+	"atlasnote/internal/localipc"
 	"atlasnote/internal/note"
 	"atlasnote/internal/noteexport"
 	"atlasnote/internal/noteimport"
 	"atlasnote/internal/notespace"
 	"atlasnote/internal/organize"
+	"atlasnote/internal/readapi"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
 
@@ -47,6 +50,7 @@ type App struct {
 	syncService                 *syncservice.Service
 	aiService                   *aiservice.Service
 	backupService               *backupservice.Service
+	readIPC                     *localipc.Server
 	spaceRegistry               *notespace.Registry
 	activeSpace                 notespace.Space
 	managementRoot              string
@@ -206,6 +210,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.shutdownErr = errors.Join(a.shutdownErr, a.stopReadIPC(ctx))
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
@@ -1507,6 +1512,7 @@ func (a *App) refreshContentLockRecovery() {
 }
 
 func (a *App) quiesceLockedSpace() {
+	_ = a.stopReadIPC(a.operationContext())
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
@@ -1524,6 +1530,17 @@ func (a *App) quiesceLockedSpace() {
 	a.recoveryReport = note.RecoveryReport{}
 	a.startupLocked = true
 	a.statusMu.Unlock()
+}
+
+func (a *App) stopReadIPC(ctx context.Context) error {
+	if a.readIPC == nil {
+		return nil
+	}
+	stopContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	err := a.readIPC.Stop(stopContext)
+	cancel()
+	a.readIPC = nil
+	return err
 }
 
 func (a *App) operationContext() context.Context {
@@ -2015,6 +2032,19 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 			return fmt.Errorf("create first-run user guide: %w", err)
 		}
 		a.newStorageArea = false
+	}
+	readService := readapi.New(service, a.contentLocks, a.activeSpace.ID)
+	readIPC, err := localipc.Start(localipc.ServerConfig{
+		ManagementRoot: a.managementRoot,
+		StorageSpaceID: a.activeSpace.ID,
+		Handler:        readService,
+	})
+	if err == nil {
+		a.readIPC = readIPC
+	} else {
+		// The external read bridge is optional. A failure to publish its local
+		// descriptor must not tear down the already recovered GUI services.
+		a.readIPC = nil
 	}
 	a.startupLocked = false
 	return nil

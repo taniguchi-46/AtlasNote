@@ -29,6 +29,7 @@
 - Vue では表示部品、状態管理、Wails API 呼び出しを混ぜすぎない。
 - Wails 経由の呼び出しは Composables や API クライアント層にまとめる。
 - Go 側はユースケース、Repository、Storage の責務を分ける。
+- CLI／MCPへ公開するノート操作は共通読み取り境界と認証済みIPCを通し、外部プロセスからSQLite／Markdownを直接開かない。CLIとMCPのPrincipalを分離し、MCPはinitialize時の保存空間・接続セッション・利用者が明示したnote／Notebook scopeへ固定する。MCP権限は親接続と公開scopeの共通部分に限定し、正常終了または有効期限で失効させる。既定scopeは0件とし、公開範囲外のメタデータ・本文・検索結果を返さない。新しい公開操作は権限、保存空間scope、入力上限、型付きエラーを定義し、Stageごとの公開許可リストへ追加する。
 - SQLite 操作は Repository に閉じ込め、UI やサービス層に SQL 詳細を漏らさない。
 - Markdown Storage は本文保存の責務を持ち、メタデータ管理は SQLite 側に寄せる。
 - AI API Key は平文ログや例外メッセージに出さない。

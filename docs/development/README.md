@@ -4,6 +4,8 @@
 
 ## AI（Phase 4）
 
+CLI・MCP・統合ターミナル再編の段階的な設計案、Stage 0の実コード照合、Stage AのCLI／MCP／認証済みIPC契約は [再編仕様書](AtlasNote_CLI_MCP_Rearchitecture_Spec.md) を参照する。
+
 | 文書 | 役割 |
 | --- | --- |
 | [AIチャット](ai-chat.md) | 単一チャット、context、Ask／Agent、Provider管理Web検索、変更提案のUI・実装状態 |

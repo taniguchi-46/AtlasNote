@@ -31,7 +31,7 @@ func (s *Service) RelatedNotes(ctx context.Context, input RelatedNoteInput) (Rel
 		return empty, err
 	}
 	if s.searchIndexFailed || s.noteLinkIndexFailed {
-		return empty, fmt.Errorf("related index update failed")
+		return empty, ErrIndexInconsistent
 	}
 
 	source, err := s.repository.Get(ctx, input.NoteID)
@@ -201,21 +201,21 @@ func (s *Service) relatedIndexCurrent(ctx context.Context, id string, revision i
 		return err
 	}
 	if !found || searchState.IndexedRevision != revision {
-		return fmt.Errorf("related search index is inconsistent")
+		return ErrIndexInconsistent
 	}
 	matches, err := s.store.ContentMatches(ctx, id, searchState.ContentHash)
 	if err != nil {
 		return err
 	}
 	if !matches {
-		return fmt.Errorf("related search index is inconsistent")
+		return ErrIndexInconsistent
 	}
 	linkState, found, err := s.repository.GetNoteLinkIndexState(ctx, id)
 	if err != nil {
 		return err
 	}
 	if !found || linkState.IndexedRevision != revision || linkState.ContentHash != searchState.ContentHash {
-		return fmt.Errorf("related link index is inconsistent")
+		return ErrIndexInconsistent
 	}
 	return nil
 }

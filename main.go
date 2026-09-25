@@ -8,6 +8,7 @@ import (
 
 	backendapp "atlasnote/internal/app"
 	"atlasnote/internal/appcleanup"
+	"atlasnote/internal/externalcmd"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -37,6 +38,12 @@ func applicationProductVersion() string {
 }
 
 func main() {
+	if handled, exitCode := externalcmd.Run(os.Args[1:], os.Stdout, os.Stderr); handled {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return
+	}
 	if handled, exitCode := runMaintenanceCommand(os.Args[1:]); handled {
 		if exitCode != 0 {
 			os.Exit(exitCode)

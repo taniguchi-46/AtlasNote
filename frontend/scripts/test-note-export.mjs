@@ -120,7 +120,7 @@ try {
   assert.match(editorSource, /TXTとしてエクスポート/, 'the editor must expose TXT export')
   assert.match(editorSource, /runPrepared/, 'lock, flush, rendering, and Wails export must share one busy lifecycle')
   assert.match(editorSource, /requestAccess\(/, 'export must use the common content-lock access gate')
-  assert.match(editorSource, /flushPendingDraft\(\)/, 'dirty content must be flushed before export')
+  assert.match(editorSource, /flushPendingDraft\(\{ mode: 'required' \}\)/, 'dirty content must be flushed before export')
   assert.match(editorSource, /createPdfBase64FromHtml/, 'PDF export must generate a direct PDF payload')
   assert.match(editorSource, /allowPlaintextProtected/, 'protected plaintext export must require confirmation')
   assert.match(editorSource, /expectedRevision: current\.revision/, 'the persisted revision must be sent to the backend')

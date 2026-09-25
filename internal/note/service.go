@@ -19,10 +19,11 @@ const (
 )
 
 var (
-	ErrNotFound         = errors.New("note not found")
-	ErrValidation       = errors.New("note validation failed")
-	ErrContentAvailable = errors.New("markdown content is available")
-	ErrRevisionConflict = errors.New("note revision conflict")
+	ErrNotFound          = errors.New("note not found")
+	ErrValidation        = errors.New("note validation failed")
+	ErrContentAvailable  = errors.New("markdown content is available")
+	ErrRevisionConflict  = errors.New("note revision conflict")
+	ErrIndexInconsistent = errors.New("note derived index is inconsistent")
 )
 
 var ErrNotebookKeepNotesLocked = errors.New("keeping notes is blocked while content locks are configured")
@@ -122,6 +123,18 @@ func (s *Service) BeginOrganizationRead(ctx context.Context) (context.Context, f
 		releaseContent = func() {}
 	}
 	return context.WithValue(ctx, organizationContentAccessContextKey{}, s), releaseContent
+}
+
+// BeginExternalRead keeps content-lock conversion from changing protection
+// state and blocks note/tag mutations while a CLI or MCP request composes one
+// response from multiple existing service calls.
+func (s *Service) BeginExternalRead(ctx context.Context) (context.Context, func()) {
+	s.syncGate.Lock()
+	ctx, releaseContent := s.BeginOrganizationRead(ctx)
+	return ctx, func() {
+		releaseContent()
+		s.syncGate.Unlock()
+	}
 }
 
 // BeginOrganizationExclusive serializes a candidate batch against every note

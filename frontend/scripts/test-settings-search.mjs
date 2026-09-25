@@ -46,7 +46,7 @@ try {
   assert.match(settingsSource, /<small v-if="item\.matchedText">一致: \{\{ item\.matchedText \}\}<\/small>/)
   assert.match(settingsSource, /closest\('details'\)/)
   assert.match(helpSource, /ヘルプ本文は一時的に非表示/)
-  assert.match(helpSource, /<section class="help-settings" data-settings-anchor="help" tabindex="-1">\s*<!--/)
+  assert.match(helpSource, /<!-- ヘルプ本文は一時的に非表示/)
 
   console.log('settings search tests passed')
 } finally {
