@@ -437,7 +437,7 @@ try {
       }
       const appRefresh = new Function(
         'organizationStore', 'aiAssistantStore', 'aiLibrarianStore', 'aiWritingStore', 'aiStore', 'aiChatStore', 'supportStore', 'contentLockStore', 'noteStore', 'startupStatus', 'getStartupStatus',
-        'appStore', 'searchStore', 'notificationStore',
+        'appStore', 'searchStore', 'notificationStore', 'noteLinkStore',
         refreshJS + '\nreturn handleLockedTargets',
       )({ clearForLock: async () => { organizationClearCount += 1 } },
       { discardConversation: () => { aiClearCount += 1 } },
@@ -453,7 +453,7 @@ try {
           if (refreshFails) throw new Error('view unavailable')
         },
       }, { value: null }, async () => ({ ready: true }),
-      { sidebarSection: 'notes' }, { isActive: false }, { notify: (...args) => warnings.push(args) })
+      { sidebarSection: 'notes' }, { isActive: false }, { notify: (...args) => warnings.push(args) }, { clearRelated() {} })
       raceStore.setBeforeLock(createContentLockBeforeLock(() => raceEditor, async () => {
         saveCount += 1
         return true

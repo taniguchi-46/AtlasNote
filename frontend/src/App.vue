@@ -182,6 +182,7 @@ import { useBackupStore } from './stores/useBackupStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
 import { useOrganizationStore } from './stores/useOrganizationStore'
+import { useNoteLinkStore } from './stores/useNoteLinkStore'
 import { useNoteExportStore } from './stores/useNoteExportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
 import type { NoteImportResult } from './api/noteImport'
@@ -240,7 +241,12 @@ const backupStore = useBackupStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
 const organizationStore = useOrganizationStore()
+const noteLinkStore = useNoteLinkStore()
 const supportStore = useSupportWorkspaceStore()
+watch(() => storageSpaceStore.activeSpaceId, () => {
+  noteLinkStore.clearRelated()
+  noteLinkStore.setRelatedScope(null, false)
+})
 const editorWorkspaceRef = ref<HTMLElement | null>(null)
 const workspaceNarrow = ref(false)
 let workspaceObserver: ResizeObserver | null = null
@@ -520,6 +526,7 @@ watch(
 
 watch(() => noteStore.saveFeedbackVersion, () => {
   if (searchStore.isActive) void searchStore.refresh()
+  if (noteStore.activeNote?.id) void noteLinkStore.refreshRelatedIfVisible(noteStore.activeNote.id)
   if (!noteStore.hasDirtyNotes) syncStore.scheduleAutoSync()
 })
 
@@ -536,6 +543,7 @@ watch(
 
 watch(() => contentLockStore.lastChangedTarget, async (target) => {
   if (!target) return
+  noteLinkStore.clearRelated()
   try {
     await Promise.all([
       notebookStore.fetchNotebooks(),
@@ -543,6 +551,7 @@ watch(() => contentLockStore.lastChangedTarget, async (target) => {
     ])
     await noteStore.refreshActiveNoteLockStatus()
     if (searchStore.isActive) await searchStore.refresh()
+    if (noteStore.activeNote?.id) await noteLinkStore.refreshRelatedIfVisible(noteStore.activeNote.id)
   } finally {
     contentLockStore.clearLastChangedTarget()
   }
@@ -550,6 +559,7 @@ watch(() => contentLockStore.lastChangedTarget, async (target) => {
 
 async function handleLockedTargets(targets: { type: 'space' | 'notebook' | 'note'; id: string }[]) {
   if (targets.length === 0) return
+  noteLinkStore.clearRelated()
   aiAssistantStore.discardConversation()
   aiLibrarianStore.discard()
   aiWritingStore.clear()

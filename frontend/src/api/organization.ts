@@ -4,6 +4,7 @@ import {
   DiscardOrganizationAnalysis,
   InvalidateOrganizationAnalyses,
 } from '../../wailsjs/go/app/App'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export type OrganizationCandidate = {
   id: string
@@ -46,11 +47,16 @@ export type OrganizationApplyResult = {
 }
 
 export type OrganizationScope = 'space' | 'notebook' | 'descendants' | 'note'
-export type OrganizationAnalysisInput = { scope: OrganizationScope; notebookId?: string; noteId?: string }
+export type OrganizationAnalysisInput = { scope: OrganizationScope; notebookId?: string; noteId?: string; requestId?: string }
+export type OrganizationProgress = { requestId: string; phase: 'reading' | 'proposing'; processedNotes: number; totalNotes: number }
 export type OrganizationApplyInput = { sessionId: string; candidateIds: string[] }
 
 export function analyzeOrganization(input: OrganizationAnalysisInput): Promise<OrganizationAnalysis> {
   return AnalyzeOrganization(input) as Promise<OrganizationAnalysis>
+}
+
+export function onOrganizationProgress(listener: (event: OrganizationProgress) => void): () => void {
+  return EventsOn('organization:progress', (event: OrganizationProgress) => listener(event))
 }
 
 export function applyOrganizationCandidates(input: OrganizationApplyInput): Promise<OrganizationApplyResult[]> {

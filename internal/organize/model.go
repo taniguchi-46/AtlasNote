@@ -53,6 +53,13 @@ type AnalysisInput struct {
 	Scope      string `json:"scope"`
 	NotebookID string `json:"notebookId,omitempty"`
 	NoteID     string `json:"noteId,omitempty"`
+	RequestID  string `json:"requestId,omitempty"`
+}
+
+type AnalysisProgress struct {
+	Phase          string `json:"phase"`
+	ProcessedNotes int    `json:"processedNotes"`
+	TotalNotes     int    `json:"totalNotes"`
 }
 
 type ApplyInput struct {

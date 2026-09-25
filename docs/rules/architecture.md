@@ -167,6 +167,10 @@ Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した
 - HTMLはTiptapが生成した断片をGo側でallowlistにより再サニタイズし、CSPと固定CSSを含む自己完結UTF-8文書へ変換する。PDFは`pdfmake` 0.3.11と同梱Noto Sans JPを使い、選択可能な日本語を含むA4縦の文書として直接生成する。外部リソースや画像データは出力しない。
 - 保護済み・解除済みノートは暗号化領域外へ平文を作ることを明示警告し、確認済みrequestだけを許可する。本文、形式別payload、保存先フルパスはログへ出さない。詳細は `docs/development/note-export.md` を正とする。
 
+## Local Intelligence
+
+初期版の関連候補は`note.Service.RelatedNotes`から`note.Repository`のリンク・タグ索引と既存FTS検索を読み取る。Wails APIは現在の保存空間だけを対象とし、Markdown正本やDB schemaを変更しない。UIは既存バックリンク内へ表示し、AI参照はIDのみを既存チャットStoreへ渡す。詳細は[`../development/local-intelligence.md`](../development/local-intelligence.md)。
+
 ## 未確定事項
 
 - 関連メモ（Phase 4）に必要なデータ構造と更新境界。

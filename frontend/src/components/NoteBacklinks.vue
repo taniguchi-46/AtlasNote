@@ -70,21 +70,35 @@ import { AppWindowIcon, Link2Icon, MinusIcon, XIcon } from '@lucide/vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { useNoteLinkStore } from '../stores/useNoteLinkStore'
 import { useNoteStore } from '../stores/useNoteStore'
+import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
 import BacklinkPanelContent from './BacklinkPanelContent.vue'
 
 const props = defineProps<{ noteId: string }>()
 const linkStore = useNoteLinkStore()
 const noteStore = useNoteStore()
+const storageSpaceStore = useStorageSpaceStore()
 const isOpen = ref(false)
 const isFloating = ref(false)
 const isMinimized = ref(false)
+const relatedVisible = computed(() => !storageSpaceStore.isSwitching && ((isFloating.value && !isMinimized.value) || (!isFloating.value && isOpen.value)))
 const floating = ref({ left: 160, top: 120, width: 340, height: 420 })
 const floatingStyle = computed(() => ({
   left: `${floating.value.left}px`, top: `${floating.value.top}px`,
   width: `${floating.value.width}px`, height: `${floating.value.height}px`,
 }))
 
-watch(() => props.noteId, (noteId) => { void linkStore.loadBacklinks(noteId) }, { immediate: true })
+watch(() => props.noteId, (noteId) => {
+  void linkStore.loadBacklinks(noteId)
+}, { immediate: true })
+
+watch(
+  [relatedVisible, () => props.noteId, () => linkStore.relatedNotebookId, () => linkStore.relatedDescendants],
+  ([visible, noteId]) => {
+    linkStore.setRelatedVisible(visible)
+    if (visible) void linkStore.loadRelated(noteId)
+  },
+  { immediate: true },
+)
 
 async function openNote(noteId: string) {
   await noteStore.selectNote(noteId)
@@ -143,7 +157,7 @@ function finishGesture() {
   window.removeEventListener('pointerup', finishGesture)
   window.removeEventListener('pointercancel', finishGesture)
 }
-onBeforeUnmount(finishGesture)
+onBeforeUnmount(() => { finishGesture(); linkStore.setRelatedVisible(false) })
 </script>
 
 <style scoped>

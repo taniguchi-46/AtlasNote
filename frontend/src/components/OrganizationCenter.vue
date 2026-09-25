@@ -50,6 +50,18 @@
             {{ store.isAnalyzing ? '解析中…' : '読み取り解析' }}
           </button>
         </form>
+        <p v-if="store.isAnalyzing && store.progress" class="organization-progress" role="status">
+          {{ store.progress.phase === 'reading'
+            ? `ノートを確認中 ${store.progress.processedNotes} / ${store.progress.totalNotes}件`
+            : '候補をまとめています…' }}
+        </p>
+        <progress
+          v-if="store.isAnalyzing && store.progress?.phase === 'reading' && store.progress.totalNotes > 0"
+          class="organization-progress-bar"
+          :value="store.progress.processedNotes"
+          :max="store.progress.totalNotes"
+          aria-label="ノート解析の進捗"
+        />
         <p class="organization-policy organization-scope-description">
           Notebook直下のみ・子孫を含む範囲・保存空間全体から選べます。フローティング表示とドック表示はこのWails画面内で切り替わります。
         </p>
@@ -67,6 +79,9 @@
           <div class="organization-summary" role="status">
             保護対象を{{ store.analysis.skippedLocked }}件スキップ · ゴミ箱を{{ store.analysis.skippedTrash }}件スキップ
           </div>
+          <p v-if="filteredCandidates.length > visibleCandidates.length" class="organization-summary">
+            候補 {{ visibleCandidates.length }} / {{ filteredCandidates.length }}件を表示中
+          </p>
 
           <div v-if="visibleCandidates.length === 0" class="organization-empty">
             <strong>表示する候補はありません</strong>
@@ -110,6 +125,12 @@
               前提が変わっています。再解析して候補を確認してください。
             </p>
           </article>
+          <button
+            v-if="filteredCandidates.length > visibleCandidates.length"
+            type="button"
+            class="organization-more"
+            @click="visibleLimit += CANDIDATE_PAGE_SIZE"
+          >さらに{{ Math.min(CANDIDATE_PAGE_SIZE, filteredCandidates.length - visibleCandidates.length) }}件表示</button>
         </section>
         <div v-else class="organization-empty organization-empty-start">
           <strong>まだ解析していません</strong>
@@ -119,7 +140,7 @@
     </div>
 
     <footer v-if="store.activeView === 'organize' && store.analysis" class="organization-footer">
-      <span>表示中 {{ visibleSelectedCount }}件を選択中<span v-if="hiddenSelectedCount"> · 他の種類 {{ hiddenSelectedCount }}件を選択中</span></span>
+      <span>表示中 {{ visibleSelectedCount }}件を選択中<span v-if="hiddenSelectedCount"> · 表示外 {{ hiddenSelectedCount }}件を選択中</span></span>
       <button type="button" class="organization-primary" :disabled="!visibleSelectedCount || store.isApplying" @click="() => store.applySelected(undefined, visibleCandidateIds)">
         {{ store.isApplying ? '適用中…' : '選択した候補を承認して適用' }}
       </button>
@@ -141,7 +162,11 @@ const selectedNotebookId = computed(() => store.centerSessionKey.startsWith('not
   ? store.centerSessionKey.split(':')[1] ?? '' : '')
 const notebookScope = computed<'notebook' | 'descendants'>(() => store.centerSessionKey.endsWith(':descendants') ? 'descendants' : 'notebook')
 const selectedKind = ref('')
-watch(() => store.centerSessionKey, () => { selectedKind.value = '' })
+const CANDIDATE_PAGE_SIZE = 100
+const visibleLimit = ref(CANDIDATE_PAGE_SIZE)
+watch(() => store.centerSessionKey, () => { selectedKind.value = ''; visibleLimit.value = CANDIDATE_PAGE_SIZE })
+watch(() => store.analysis?.sessionId, () => { visibleLimit.value = CANDIDATE_PAGE_SIZE })
+watch(selectedKind, () => { visibleLimit.value = CANDIDATE_PAGE_SIZE })
 const targetNoteTitle = computed(() => {
   const noteId = store.centerSessionKey.startsWith('note:') ? store.centerSessionKey.slice(5) : ''
   if (!noteId) return ''
@@ -162,13 +187,20 @@ const kindLabels: Record<string, string> = {
   title: 'タイトル候補',
   'duplicate-tag': '重複タグ',
 }
-const kindCounts = computed(() => [...new Set(store.candidates.map((candidate) => candidate.kind))]
-  .map((kind) => ({ kind, label: kindLabels[kind] ?? kind, count: store.candidates.filter((candidate) => candidate.kind === kind).length })))
-const visibleCandidates = computed(() => selectedKind.value
+const kindCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const candidate of store.candidates) {
+    counts.set(candidate.kind, (counts.get(candidate.kind) ?? 0) + 1)
+  }
+  return [...counts].map(([kind, count]) => ({ kind, label: kindLabels[kind] ?? kind, count }))
+})
+const filteredCandidates = computed(() => selectedKind.value
   ? store.candidates.filter((candidate) => candidate.kind === selectedKind.value)
   : store.candidates)
+const visibleCandidates = computed(() => filteredCandidates.value.slice(0, visibleLimit.value))
 const visibleCandidateIds = computed(() => visibleCandidates.value.map((candidate) => candidate.id))
-const visibleSelectedCount = computed(() => visibleCandidates.value.filter((candidate) => store.selectedCandidateIds.includes(candidate.id)).length)
+const selectedCandidateIdSet = computed(() => new Set(store.selectedCandidateIds))
+const visibleSelectedCount = computed(() => visibleCandidates.value.filter((candidate) => selectedCandidateIdSet.value.has(candidate.id)).length)
 const hiddenSelectedCount = computed(() => store.selectedCandidateIds.length - visibleSelectedCount.value)
 function runAnalysis() {
   selectedKind.value = ''
@@ -257,6 +289,8 @@ function statusLabel(status: string) {
 .organization-body{min-height:0;flex:1;overflow:auto;padding:14px}.organization-overview{max-width:620px;margin:12px auto;padding:18px;border:1px solid var(--border);border-radius:8px}.organization-overview h3{margin:0 0 8px;font-size:14px}.organization-overview p{color:var(--text-secondary);font-size:12px;line-height:1.6}.organization-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin:14px 0}.organization-counts button{display:flex;align-items:center;gap:8px;padding:9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-primary);text-align:left;cursor:pointer}.organization-counts strong{font-size:16px}.organization-counts span{font-size:11px}.organization-primary{min-height:32px;padding:0 12px;border:0;border-radius:5px;background:var(--brand-primary);color:#fff;font-size:11px;font-weight:600;cursor:pointer}.organization-primary:disabled{opacity:.5;cursor:not-allowed}
 .organization-controls{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.organization-controls label{display:flex;min-width:0;flex:1;flex-direction:column;gap:5px;font-size:11px}.organization-controls select{height:32px;padding:0 8px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary)}.organization-policy{line-height:1.6}.organization-error{color:var(--color-danger);font-size:12px}
 .organization-scope-description{margin-top:18px}
+.organization-progress{margin:12px 0 0;color:var(--text-secondary);font-size:11px}
+.organization-progress-bar{display:block;width:100%;height:8px;margin:7px 0 0;accent-color:var(--brand-primary)}
 .organization-approve-one{margin-top:8px;padding:6px 9px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-size:10px;cursor:pointer}.organization-approve-one:hover:not(:disabled){border-color:var(--brand-primary)}.organization-approve-one:disabled{opacity:.5;cursor:not-allowed}
 .organization-reanalysis-hint{margin-top:5px;color:var(--color-warning);font-size:10px}
 .organization-review-heading,.organization-candidate-select,.organization-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -264,6 +298,7 @@ function statusLabel(status: string) {
 .organization-candidate{margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-editor);font-size:11px;overflow-wrap:anywhere}
 .organization-candidate h4{margin:8px 0 4px;font-size:12px}.organization-candidate p{margin:5px 0;line-height:1.5}
 .organization-candidate-select{justify-content:flex-start}.organization-kind{color:var(--brand-primary);font-weight:600}.organization-outcome{margin-left:auto}
+.organization-more{display:block;width:100%;min-height:34px;margin:12px 0;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-size:11px;cursor:pointer}
 .organization-diff{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}.organization-diff>div{min-width:0;padding:7px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input)}.organization-diff dt{color:var(--text-secondary)}.organization-diff dd{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .organization-footer{padding:8px 10px;border-top:1px solid var(--border);font-size:11px}.organization-empty{display:grid;gap:5px;padding:15px;color:var(--text-secondary);font-size:11px}.organization-empty strong{color:var(--text-primary)}
 

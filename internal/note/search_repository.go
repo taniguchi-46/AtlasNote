@@ -264,10 +264,13 @@ func (r *Repository) Search(ctx context.Context, input SearchInput) (SearchResul
 SELECT notes.id, notes.notebook_id, notes.title,
        notes.is_favorite, notes.is_pinned, notes.is_trashed,
        notes.revision, notes.created_at, notes.updated_at`
-	if useFTS {
-		selectColumns += ", snippet(note_search, -1, '<mark>', '</mark>', '…', 32)"
+	queryArgs := make([]any, 0, len(whereArgs)+5)
+	if normalized.Scope == SearchScopeTitle {
+		selectColumns += ", '', 1, 0"
 	} else {
-		selectColumns += ", ''"
+		evidenceSQL, evidenceArgs := searchEvidenceColumns(strings.Fields(normalized.Query), useFTS)
+		selectColumns += ", " + evidenceSQL
+		queryArgs = append(queryArgs, evidenceArgs...)
 	}
 	orderBy := " ORDER BY notes.updated_at DESC, notes.id ASC"
 	if useFTS {
@@ -281,7 +284,8 @@ SELECT notes.id, notes.notebook_id, notes.title,
 		orderBy = fmt.Sprintf(" ORDER BY notes.%s %s, notes.id ASC", sortSpec.Column, sortSpec.Direction)
 	}
 	query := selectColumns + fromSQL + whereSQL + orderBy + " LIMIT ? OFFSET ?"
-	args := append(append([]any(nil), whereArgs...), normalized.PageSize, (normalized.Page-1)*normalized.PageSize)
+	args := append(queryArgs, whereArgs...)
+	args = append(args, normalized.PageSize, (normalized.Page-1)*normalized.PageSize)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		if isSearchIndexUnavailable(err) {
@@ -297,6 +301,7 @@ SELECT notes.id, notes.notebook_id, notes.title,
 		var createdAt string
 		var updatedAt string
 		var snippet sql.NullString
+		var titleMatch, bodyMatch bool
 		if err := rows.Scan(
 			&item.Note.ID,
 			&item.Note.NotebookID,
@@ -308,6 +313,8 @@ SELECT notes.id, notes.notebook_id, notes.title,
 			&createdAt,
 			&updatedAt,
 			&snippet,
+			&titleMatch,
+			&bodyMatch,
 		); err != nil {
 			return result, fmt.Errorf("scan note search result: %w", err)
 		}
@@ -321,10 +328,12 @@ SELECT notes.id, notes.notebook_id, notes.title,
 			return result, err
 		}
 		item.Snippet = truncateSearchSnippet(snippet.String)
-		if normalized.Scope == SearchScopeTitle {
+		if titleMatch && bodyMatch {
+			item.MatchScope = "both"
+		} else if titleMatch {
 			item.MatchScope = SearchScopeTitle
 		} else {
-			item.MatchScope = "both"
+			item.MatchScope = "body"
 		}
 		result.Items = append(result.Items, item)
 	}
@@ -436,6 +445,33 @@ func normalizeSearchInput(input SearchInput) (normalizedSearchInput, *SearchErro
 	}
 
 	return normalized, nil
+}
+
+// searchEvidenceColumns evaluates every query term, including terms that only
+// occur in the body after an earlier title match.
+func searchEvidenceColumns(terms []string, useFTS bool) (string, []any) {
+	if useFTS {
+		titleHit := "highlight(note_search, 1, '<mark>', '</mark>') <> note_search.title"
+		bodyHit := "highlight(note_search, 2, '<mark>', '</mark>') <> note_search.body"
+		return "CASE WHEN " + bodyHit + " THEN snippet(note_search, 2, '<mark>', '</mark>', '…', 32) ELSE '' END, " + titleHit + ", " + bodyHit, nil
+	}
+	args := make([]any, 0, len(terms)*4)
+	snippetCases := make([]string, 0, len(terms))
+	titleHits := make([]string, 0, len(terms))
+	bodyHits := make([]string, 0, len(terms))
+	for _, term := range terms {
+		snippetCases = append(snippetCases, "WHEN instr(lower(note_search.body), lower(?)) > 0 THEN substr(note_search.body, max(1, instr(lower(note_search.body), lower(?))-40), 160)")
+		args = append(args, term, term)
+	}
+	for _, term := range terms {
+		titleHits = append(titleHits, "note_search.title LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+escapeLikePattern(term)+"%")
+	}
+	for _, term := range terms {
+		bodyHits = append(bodyHits, "note_search.body LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+escapeLikePattern(term)+"%")
+	}
+	return "CASE " + strings.Join(snippetCases, " ") + " ELSE '' END, (" + strings.Join(titleHits, " OR ") + "), (" + strings.Join(bodyHits, " OR ") + ")", args
 }
 
 func buildSearchWhere(input normalizedSearchInput) (string, []any, bool) {

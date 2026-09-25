@@ -33,7 +33,7 @@ func TestRepositorySearchIndexesMarkdownAndPaginates(t *testing.T) {
 	if pageOne.Error != nil || pageOne.Total != 2 || len(pageOne.Items) != 1 || !pageOne.HasNext {
 		t.Fatalf("first search page = %#v", pageOne)
 	}
-	if pageOne.Items[0].MatchScope != "both" || !strings.Contains(pageOne.Items[0].Snippet, "<mark>") {
+	if pageOne.Items[0].MatchScope != "body" || !strings.Contains(pageOne.Items[0].Snippet, "<mark>") {
 		t.Fatalf("first search item = %#v", pageOne.Items[0])
 	}
 
@@ -82,6 +82,45 @@ func TestRepositorySearchIndexesMarkdownAndPaginates(t *testing.T) {
 	}
 	if sorted.Error != nil || len(sorted.Items) != 2 || sorted.Items[0].Note.ID != second.ID || sorted.Items[1].Note.ID != first.ID {
 		t.Fatalf("sorted search result = %#v", sorted)
+	}
+}
+
+func TestRepositorySearchEvidenceUsesAllTerms(t *testing.T) {
+	repository := newRepositoryTest(t)
+	for _, fixture := range []struct{ id, title, body string }{
+		{"split", "alpha", "前置き beta 後続"},
+		{"title", "alpha beta", "別の本文"},
+		{"body", "別題", "alpha beta 本文"},
+		{"short", "短", "長い前置き beta 後続"},
+	} {
+		record := createSearchTestNote(t, repository, fixture.id, fixture.title, time.Now().UTC(), false)
+		if err := repository.UpsertSearchIndex(t.Context(), note.SearchDocument{NoteID: record.ID, Title: fixture.title, Body: fixture.body, Revision: record.Revision}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, testCase := range []struct{ query, id, scope, snippet string }{
+		{"alpha beta", "split", "both", "前置き <mark>beta</mark> 後続"},
+		{"alpha beta", "title", "title", ""},
+		{"alpha beta", "body", "body", "<mark>alpha</mark> <mark>beta</mark> 本文"},
+		{"短 beta", "short", "both", "長い前置き beta 後続"},
+	} {
+		result, err := repository.Search(t.Context(), note.SearchInput{Query: testCase.query})
+		if err != nil || result.Error != nil {
+			t.Fatalf("query %q: %#v, %v", testCase.query, result, err)
+		}
+		found := false
+		for _, item := range result.Items {
+			if item.Note.ID != testCase.id {
+				continue
+			}
+			found = true
+			if item.MatchScope != testCase.scope || item.Snippet != testCase.snippet {
+				t.Fatalf("query %q item = %#v", testCase.query, item)
+			}
+		}
+		if !found {
+			t.Fatalf("query %q missing %s: %#v", testCase.query, testCase.id, result)
+		}
 	}
 }
 
@@ -156,6 +195,13 @@ func TestRepositorySearchValidationAndShortQueryFallback(t *testing.T) {
 	}
 	if shortQuery.Error != nil || shortQuery.Total != 1 || len(shortQuery.Items) != 1 {
 		t.Fatalf("short query fallback result = %#v", shortQuery)
+	}
+	if shortQuery.Items[0].MatchScope != "body" || !strings.Contains(shortQuery.Items[0].Snippet, "検索") {
+		t.Fatalf("short query evidence = %#v", shortQuery.Items[0])
+	}
+	oneCharacter, err := repository.Search(t.Context(), note.SearchInput{Query: "検"})
+	if err != nil || oneCharacter.Total != 1 || oneCharacter.Items[0].MatchScope != "body" || !strings.Contains(oneCharacter.Items[0].Snippet, "検") {
+		t.Fatalf("one-character search = %#v, %v", oneCharacter, err)
 	}
 
 	escapedLike, err := repository.Search(t.Context(), note.SearchInput{Query: "%"})

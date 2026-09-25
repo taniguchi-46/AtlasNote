@@ -3,6 +3,7 @@ package organize
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -157,6 +158,49 @@ func TestAnalyzeAndApplyUsesRevisionAndCurrentTagState(t *testing.T) {
 	}
 	if conflict := organizer.Apply(ctx, "space-a", ApplyInput{SessionID: initialSessionID, CandidateID: titleCandidate.ID}); conflict.Status != "conflict" {
 		t.Fatalf("stale revision apply = %#v", conflict)
+	}
+}
+
+func TestAnalyzeReportsScopedProgress(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(root, "atlasnote.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	markdown, err := storage.NewMarkdownStore(filepath.Join(root, "notes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := note.NewService(note.NewRepository(db), markdown)
+	notebook, err := notes.CreateNotebook(ctx, note.NotebookCreateInput{Name: "Scoped"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notes.Create(ctx, note.CreateInput{Title: "In scope", Content: "body", NotebookID: &notebook.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notes.Create(ctx, note.CreateInput{Title: "Outside", Content: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	var events []AnalysisProgress
+	analysis, err := NewService(notes).Analyze(ctx, "space", AnalysisInput{Scope: "notebook", NotebookID: notebook.ID}, func(event AnalysisProgress) {
+		events = append(events, event)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.AnalyzedNotes != 1 {
+		t.Fatalf("analyzed notes = %d", analysis.AnalyzedNotes)
+	}
+	want := []AnalysisProgress{
+		{Phase: "reading", ProcessedNotes: 0, TotalNotes: 1},
+		{Phase: "reading", ProcessedNotes: 1, TotalNotes: 1},
+		{Phase: "proposing", ProcessedNotes: 1, TotalNotes: 1},
+	}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("progress = %#v, want %#v", events, want)
 	}
 }
 

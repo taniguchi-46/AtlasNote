@@ -5,10 +5,12 @@ import {
   applyOrganizationCandidates,
   discardOrganizationAnalysis,
   invalidateOrganizationAnalyses,
+  onOrganizationProgress,
   type OrganizationAnalysis,
   type OrganizationAnalysisInput,
   type OrganizationApplyResult,
   type OrganizationCandidate,
+  type OrganizationProgress,
 } from '../api/organization'
 import { useNoteStore } from './useNoteStore'
 import { useTagStore } from './useTagStore'
@@ -22,6 +24,7 @@ export type OrganizationSessionState = {
   selectedCandidateIds: string[]
   outcomes: Record<string, OrganizationApplyResult>
   isAnalyzing: boolean
+  progress: OrganizationProgress | null
   error: string
 }
 
@@ -41,6 +44,7 @@ function emptySession(): OrganizationSessionState {
     selectedCandidateIds: [],
     outcomes: {},
     isAnalyzing: false,
+    progress: null,
     error: '',
   }
 }
@@ -62,6 +66,7 @@ export const useOrganizationStore = defineStore('organization', () => {
   const selectedCandidateIds = computed(() => centerSession.value?.selectedCandidateIds ?? [])
   const outcomes = computed(() => centerSession.value?.outcomes ?? {})
   const isAnalyzing = computed(() => centerSession.value?.isAnalyzing ?? false)
+  const progress = computed(() => centerSession.value?.progress ?? null)
   const error = computed(() => centerSession.value?.error ?? '')
   const pendingCount = computed(() => candidates.value.filter((candidate) => {
     const outcome = outcomes.value[candidate.id]
@@ -147,10 +152,16 @@ export const useOrganizationStore = defineStore('organization', () => {
     const requestVersion = (requestVersions.get(key) ?? 0) + 1
     requestVersions.set(key, requestVersion)
     const requestLockGeneration = lockGeneration
+    const requestId = crypto.randomUUID()
     session.isAnalyzing = true
+    session.progress = null
     session.error = ''
+    const stopProgress = onOrganizationProgress((event) => {
+      if (event.requestId !== requestId || requestLockGeneration !== lockGeneration || requestVersions.get(key) !== requestVersion) return
+      session.progress = event
+    })
     try {
-      const next = await analyzeOrganization(input)
+      const next = await analyzeOrganization({ ...input, requestId })
       if (
         requestLockGeneration !== lockGeneration
         || requestVersions.get(key) !== requestVersion
@@ -168,8 +179,10 @@ export const useOrganizationStore = defineStore('organization', () => {
       }
       return false
     } finally {
+      stopProgress()
       if (requestLockGeneration === lockGeneration && requestVersions.get(key) === requestVersion) {
         session.isAnalyzing = false
+        session.progress = null
       }
     }
   }
@@ -322,6 +335,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     selectedCandidateIds,
     outcomes,
     isAnalyzing,
+    progress,
     isApplying,
     miniOpen,
     miniSessionKey,

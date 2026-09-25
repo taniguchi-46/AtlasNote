@@ -71,6 +71,26 @@ type BacklinkListResult struct {
 	HasNext  bool      `json:"hasNext"`
 }
 
+// RelatedNoteInput restricts a local, read-only candidate lookup.
+type RelatedNoteInput struct {
+	NoteID      string  `json:"noteId"`
+	NotebookID  *string `json:"notebookId,omitempty"`
+	Descendants bool    `json:"descendants"`
+	Limit       int     `json:"limit"`
+}
+
+type RelatedNoteItem struct {
+	NoteID   string   `json:"noteId"`
+	Title    string   `json:"title"`
+	Revision int64    `json:"revision"`
+	Snippet  string   `json:"snippet"`
+	Reasons  []string `json:"reasons"`
+}
+
+type RelatedNoteResult struct {
+	Items []RelatedNoteItem `json:"items"`
+}
+
 type Note struct {
 	ID         string    `json:"id"`
 	NotebookID *string   `json:"notebookId"`

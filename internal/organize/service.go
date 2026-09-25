@@ -53,7 +53,7 @@ func (s *Service) DiscardSession(sessionID string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInput) (Analysis, error) {
+func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInput, onProgress ...func(AnalysisProgress)) (Analysis, error) {
 	if s == nil || s.notes == nil {
 		return Analysis{}, fmt.Errorf("organization service is not initialized")
 	}
@@ -145,34 +145,32 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 			}
 		}
 	}
-	active := make([]analyzedNote, 0, len(summaries))
+	selected := make([]note.Summary, 0, len(summaries))
 	for _, summary := range summaries {
+		if summaryInScope(summary, input, inScope, scopedNoteIDs) {
+			selected = append(selected, summary)
+		}
+	}
+	active := make([]analyzedNote, 0, len(selected))
+	reportReading := func(processed int) {
+		if len(onProgress) > 0 && onProgress[0] != nil && (processed == 0 || processed == len(selected) || processed%100 == 0) {
+			onProgress[0](AnalysisProgress{Phase: "reading", ProcessedNotes: processed, TotalNotes: len(selected)})
+		}
+	}
+	reportReading(0)
+	for index, summary := range selected {
 		if err := ctx.Err(); err != nil {
 			return Analysis{}, err
 		}
-		switch input.Scope {
-		case "notebook":
-			if summary.NotebookID == nil || *summary.NotebookID != input.NotebookID {
-				continue
-			}
-		case "descendants":
-			if summary.NotebookID == nil {
-				continue
-			}
-			if _, ok := inScope[*summary.NotebookID]; !ok {
-				continue
-			}
-		case "note":
-			if _, ok := scopedNoteIDs[summary.ID]; !ok {
-				continue
-			}
-		}
+		processed := index + 1
 		if summary.IsTrashed {
 			result.SkippedTrash++
+			reportReading(processed)
 			continue
 		}
 		if summary.Protected || summary.Locked {
 			result.SkippedLocked++
+			reportReading(processed)
 			continue
 		}
 		item, getErr := s.notes.Get(ctx, summary.ID)
@@ -180,27 +178,35 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 			// A lock can be enabled between List and Get. Fail closed and report it
 			// as skipped instead of returning protected content to the analyzer.
 			result.SkippedLocked++
+			reportReading(processed)
 			continue
 		}
 		if item.Protected || item.Locked {
 			result.SkippedLocked++
+			reportReading(processed)
 			continue
 		}
-		noteTags, tagErr := s.notes.ListNoteTags(ctx, summary.ID)
-		if tagErr != nil {
-			return Analysis{}, tagErr
+		tagIDs := make(map[string]struct{})
+		if len(tags) > 0 {
+			noteTags, tagErr := s.notes.ListNoteTags(ctx, summary.ID)
+			if tagErr != nil {
+				return Analysis{}, tagErr
+			}
+			for _, tag := range noteTags.Tags {
+				tagIDs[tag.ID] = struct{}{}
+			}
 		}
 		summary.Revision = item.Revision
 		summary.Title = item.Title
 		summary.NotebookID = item.NotebookID
 		summary.IsTrashed = item.IsTrashed
-		tagIDs := make(map[string]struct{}, len(noteTags.Tags))
-		for _, tag := range noteTags.Tags {
-			tagIDs[tag.ID] = struct{}{}
-		}
 		active = append(active, analyzedNote{summary: summary, note: item, tagIDs: tagIDs})
+		reportReading(processed)
 	}
 	result.AnalyzedNotes = len(active)
+	if len(onProgress) > 0 && onProgress[0] != nil {
+		onProgress[0](AnalysisProgress{Phase: "proposing", ProcessedNotes: len(selected), TotalNotes: len(selected)})
+	}
 
 	result.Candidates = append(result.Candidates, titleCandidates(spaceID, active)...)
 	result.Candidates = append(result.Candidates, notebookCandidates(spaceID, active, notebooks)...)
@@ -253,6 +259,24 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 	}
 	s.mu.Unlock()
 	return result, nil
+}
+
+func summaryInScope(summary note.Summary, input AnalysisInput, notebookIDs, noteIDs map[string]struct{}) bool {
+	switch input.Scope {
+	case "notebook":
+		return summary.NotebookID != nil && *summary.NotebookID == input.NotebookID
+	case "descendants":
+		if summary.NotebookID == nil {
+			return false
+		}
+		_, ok := notebookIDs[*summary.NotebookID]
+		return ok
+	case "note":
+		_, ok := noteIDs[summary.ID]
+		return ok
+	default:
+		return true
+	}
 }
 
 func newSessionID() (string, error) {

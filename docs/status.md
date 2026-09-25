@@ -1,10 +1,22 @@
 # プロジェクト状況
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
+
+## Local Intelligence 初期版（2026-09-25）
+
+コードレビュー指摘の候補上限とNotebook範囲、検索の複数語根拠、非表示時の不要な関連候補要求を修正。80件超の範囲外候補を含む合成fixture、表示切替とscope切替のFrontend回帰を追加した。
+
+既存FTS検索の一致範囲と短語抜粋を補正し、リンク・共通タグ・語句一致による件数制限付き関連候補APIとバックリンク内の表示／AI参照追加を実装。索引revision・正本ハッシュ・保護・ロック・ゴミ箱を再確認し、読み取り専用とした。テスト用APPDATA/LOCALAPPDATAに隔離した`go test ./...`、Frontend関連Store・AIチャット・コンテンツロックテスト、Frontend build／lint、bindings生成付きWails Windows/amd64 buildは成功。今回の修正前に行った5,000ノート・2KB本文の合成ベンチマークは一回の計測で約107.7ms、約2.05MB、30,803 allocs。今回の候補SQL修正後は未計測。Computer Useによる実Wails画面では既存ノートの関連候補・抜粋・根拠表示、「参照に追加」の成功表示、「ノートを開く」の遷移を確認した。ロック時の表示消去、大量データでの実画面応答性、候補品質の広い評価と、整理センター前タスクの手動受け入れは未確認。詳細は[`development/local-intelligence.md`](development/local-intelligence.md)。
 
 ## 整理とAIの共通サポートパネル（2026-09-24）
 
 `SupportWorkspace`で整理／AIを1つの枠へ統合した。共通ヘッダーのタブとドック／浮動切替、×最小化、アイコン再開を追加し、エディターの兄弟要素に配置した。ノート未選択またはAI無効でも整理を開ける。タブ切替では両機能をアンマウントせず、整理scopeごとの解析・選択・結果とAIの下書き・timeline・処理を保持する。AIとバックリンクの整理導線は対象ノートscopeを共通パネルに開き、既存sessionでは不要な再解析をしない。ロック時は整理sessionとAIの表示内容・進行中の応答を無効化する。右／下ドック寸法の希望値は既存設定を使い、狭い領域では表示だけ下側へ移す。Frontend typecheck／lint／production build、整理・AI Workspace・AIチャット・コンテンツロック・ショートカットの回帰テスト、bindings生成付きWails Windows/amd64 build、`git diff --check`が成功。Wails実画面での手動受け入れは未確認。
+
+整理候補の大量表示を避けるため、一覧は100件ずつ追加表示し、一括選択・適用を表示中の候補に限定した。タグ0件の保存空間ではノートごとのタグ取得を省いた。`test:organization`、Frontend typecheck／lint／production build、Go整理テストは成功。合成データのGo解析では2KB本文の5,000ノートで変更前約21.5秒・割当量403.7MB、変更後約20.5秒・341.0MB、候補はいずれも31,250件だった（一回ずつの測定）。候補生成と返却は依然として全件で、Wails転送・描画を含む実画面応答性とデータ分布を変えた計測は未確認。詳細は整理TODOの計測記録を参照する。
+
+続く応答性対応では、解析中のノート確認件数・進捗バーと候補生成段階を件数のみのWailsイベントで通知・表示する。要求IDとscope／ロック世代で古い通知を無視する。Go／Frontendの進捗回帰、Frontend typecheck、bindings生成付きWails Windows/amd64 buildが成功。解析結果は引き続き全件生成後に返すため、実Wails画面での進捗表示・操作応答と候補生成段階の待ち時間は未確認。
+
+候補一覧の種類別件数を全候補の単一走査で集計し、表示中の選択件数を`Set`で照合するよう変更した。`test:organization`とFrontend typecheckが成功。実Wails画面での効果測定は未確認。
 
 ## 整理センター第一段階（2026-09-23）
 

@@ -564,6 +564,13 @@ func (a *App) ListBacklinks(input note.BacklinkListInput) (note.BacklinkListResu
 	return a.notes.ListBacklinks(a.ctx, input)
 }
 
+func (a *App) RelatedNotes(input note.RelatedNoteInput) (note.RelatedNoteResult, error) {
+	if a.notes == nil {
+		return note.RelatedNoteResult{Items: make([]note.RelatedNoteItem, 0)}, errors.New("note service is not initialized")
+	}
+	return a.notes.RelatedNotes(a.ctx, input)
+}
+
 func (a *App) GetNote(id string) (note.Note, error) {
 	if a.notes == nil {
 		return note.Note{}, errors.New("note service is not initialized")

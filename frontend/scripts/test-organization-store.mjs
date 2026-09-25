@@ -43,6 +43,11 @@ let sessionNumber = 0
 let applyStatuses = {}
 const deferredInputs = new Set()
 const pendingAnalyses = new Map()
+const progressListeners = new Set()
+export function onOrganizationProgress(listener) { progressListeners.add(listener); return () => progressListeners.delete(listener) }
+export function emitOrganizationProgress(requestId, phase, processedNotes, totalNotes) {
+  for (const listener of progressListeners) listener({ requestId, phase, processedNotes, totalNotes })
+}
 function inputKey(input) { return input.scope === 'note' ? 'note:' + input.noteId : input.scope === 'space' ? 'space' : input.scope + ':' + input.notebookId }
 export function configureAnalysis(factory) { analysisFactory = factory }
 export function failAnalysis() { failure = true }
@@ -252,8 +257,11 @@ try {
   mockAPI.deferAnalysisFor('note:note-d')
   const delayedLockedAnalysis = store.openMini('note-d', 'related')
   await Promise.resolve()
+  const lockedRequestID = mockAPI.calls.filter(([kind]) => kind === 'analyze').at(-1)[1].requestId
   const beforeLockInvalidation = mockAPI.invalidationCount
   await store.clearForLock()
+  mockAPI.emitOrganizationProgress(lockedRequestID, 'reading', 100, 200)
+  assert.deepEqual(store.sessions, {}, 'progress arriving after lock cannot restore a session')
   const lockedResponse = makeAnalysis({ scope: 'note', noteId: 'note-d' })
   mockAPI.resolveAnalysis('note:note-d', lockedResponse)
   assert.equal(await delayedLockedAnalysis, false)
@@ -349,11 +357,16 @@ try {
     : makeAnalysis(input))
   await uiStore.openNote('note-filter')
   await nextTick()
-  uiStore.toggleCandidate('filter-title')
   await click('タスク支援')
+  assert.deepEqual(
+    [...rootElement.querySelectorAll('.organization-counts button')].map((button) => button.textContent.replace(/\s+/g, '')),
+    ['1重複ノート', '1タイトル候補'],
+    'candidate kind counts preserve first-seen order and totals',
+  )
+  uiStore.toggleCandidate('filter-title')
   await click('重複ノート')
   assert.equal(rootElement.querySelectorAll('.organization-candidate').length, 1)
-  assert.match(rootElement.querySelector('.organization-footer').textContent, /他の種類 1件を選択中/)
+  assert.match(rootElement.querySelector('.organization-footer').textContent, /表示外 1件を選択中/)
   await click('表示中の適用可能を選択')
   assert.deepEqual(uiStore.selectedCandidateIds, ['filter-title', 'filter-duplicate'], 'bulk selection adds visible candidates without discarding hidden selections')
   const beforeApply = mockAPI.calls.filter(([kind]) => kind === 'apply').length
@@ -371,6 +384,44 @@ try {
   assert.equal(rootElement.querySelectorAll('.organization-candidate').length, 1, 'the previous kind filter cannot hide another note')
   assert.match(rootElement.querySelector('.organization-candidate').textContent, /タイトル候補/)
   assert.doesNotMatch(rootElement.textContent, /この種類に該当する候補はありません/)
+
+  mockAPI.configureAnalysis((input) => input.noteId === 'note-large'
+    ? { ...makeAnalysis(input), candidates: Array.from({ length: 120 }, (_, index) => ({
+      ...base, id: `large-${index}`, noteId: 'note-large', kind: 'title', noteTitle: `Synthetic ${index}`,
+    })) }
+    : makeAnalysis(input))
+  await uiStore.openNote('note-large')
+  await nextTick()
+  assert.equal(rootElement.querySelectorAll('.organization-candidate').length, 100, 'large analyses render only the first page')
+  assert.match(rootElement.textContent, /候補 100 \/ 120件を表示中/)
+  uiStore.toggleCandidate('large-119')
+  await click('表示中の適用可能を選択')
+  assert.equal(uiStore.selectedCandidateIds.length, 101, 'bulk selection keeps an existing selection outside the rendered page')
+  const beforePageApply = mockAPI.calls.filter(([kind]) => kind === 'apply').length
+  await click('選択した候補を承認して適用')
+  assert.equal(mockAPI.calls.filter(([kind]) => kind === 'apply').slice(beforePageApply)[0][2].length, 100, 'bulk apply excludes candidates outside the rendered page')
+  assert.deepEqual(uiStore.selectedCandidateIds, ['large-119'])
+  await click('さらに20件表示')
+  assert.equal(rootElement.querySelectorAll('.organization-candidate').length, 120)
+
+  mockAPI.deferAnalysisFor('note:note-progress')
+  const pendingProgressAnalysis = uiStore.openNote('note-progress')
+  await Promise.resolve()
+  const progressRequestID = mockAPI.calls.filter(([kind]) => kind === 'analyze').at(-1)[1].requestId
+  mockAPI.emitOrganizationProgress('other-request', 'reading', 50, 200)
+  assert.equal(uiStore.progress, null, 'unrelated request progress is ignored')
+  mockAPI.emitOrganizationProgress(progressRequestID, 'reading', 100, 200)
+  await nextTick()
+  assert.match(rootElement.querySelector('.organization-progress').textContent, /ノートを確認中 100 \/ 200件/)
+  assert.equal(rootElement.querySelector('.organization-progress-bar').value, 100)
+  mockAPI.emitOrganizationProgress(progressRequestID, 'proposing', 200, 200)
+  await nextTick()
+  assert.match(rootElement.querySelector('.organization-progress').textContent, /候補をまとめています/)
+  assert.equal(rootElement.querySelector('.organization-progress-bar'), null)
+  mockAPI.resolveAnalysis('note:note-progress', makeAnalysis({ scope: 'note', noteId: 'note-progress' }))
+  await pendingProgressAnalysis
+  await nextTick()
+  assert.equal(rootElement.querySelector('.organization-progress'), null, 'progress is cleared on completion')
   app.unmount()
   console.log('organization store tests passed')
 } finally {

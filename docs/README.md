@@ -24,6 +24,8 @@ Atlas Noteの仕様、設計、進捗、作業チェックの入口です。フ�
 
 ## Phase 4 AIの正本
 
+端末内の関連候補APIとバックリンク導線は[Local Intelligence 初期版](development/local-intelligence.md)を参照する。
+
 | 目的 | 文書 |
 | --- | --- |
 | 単一チャット、context、Ask／Agent、Web検索、変更提案のUI契約 | [AIチャット](development/ai-chat.md) |
