@@ -255,6 +255,16 @@ AtlasNote本体を先に起動し、対象の保存空間をアクティブに�
 - `request_*`、提案、操作状態、GUI承認UI、dirty draftゲートを実装。CAS、ロック、保存空間、失敗/部分成功を検証。
 - **完了条件:** 無承認の書き込み不可、承認中のノート変更で競合を検出、保存失敗時に下書き/候補が残る。
 
+#### Stage C 実装契約（2026-09-27）
+
+- `internal/readapi.Service`をCLI/MCP共通のApplication Service境界として使う。Wは変更要求を`pending_approval`として登録する権限であり、保存・承認権限ではない。`notes.propose_edit`はP/R1を要求し、保存済み本文と`before`、`baseRevision`を一致検証する。変更本文は256 KiB、GUIレビューpayloadは1 MiB、操作は最大64件とする。
+- 操作は本体メモリで30分保持し、`operationId`、発行元`clientId`、保存空間、kind、対象ID、expected revision、サーバー側変更内容、生成・期限・状態を保持する。期限後は適用不可で、状態照会用に最大さらに30分保持する。上限到達時は最も古い終了済み操作（applied/rejected/conflict/expired）から回収し、pending操作だけで満杯なら新規要求を拒否する。アプリ終了・保存空間切替ではServiceごと失効する。DB schemaとMarkdown正本は操作登録では変更しない。
+- MCP child sessionは従来どおり正常終了・期限で失効し、以後そのsessionから`operations.get`はできない。GUIに届いたpending操作はsession終了だけでは破棄せず、操作自身の期限までレビュー可能にする。これはCLIのone-shot要求とGUI確認の時間差を許すためで、承認時にも保存空間、scope、保護・ロック・ゴミ箱、revision、整理sessionを再検証する。CLIの`clientId`はアプリ稼働中の認証済みIPC descriptorに束縛され、同じdescriptorを用いた後続のone-shot CLIから状態照会できる。MCP childには個別`clientId`を発行する。
+- 利用者のGUI操作は`ListExternalChangeReviews`、`ApproveExternalChange`、`RejectExternalChange`のWails bridgeだけに公開する。承認時に本体内で30秒の単回使用permitを生成し、操作ID・保存空間・現在の対象revision/本文hash/タグ状態に束縛して同一呼び出し内で消費する。token生成・受領・適用APIはローカルIPC、CLI、MCPには存在しない。`operations.get`は発行元の状態・項目結果・更新時刻のみ返し、review payloadを返さない。
+- GUIは既存SupportWorkspaceに変更確認タブを追加する。対象・変更前後・理由・影響件数・状態を確認後、明示承認する。承認前に`useNoteStore.flushAllDirtyNotes({ mode: 'explicit' })`と対象ノートqueueを通す。flush失敗ではバックエンドを呼ばず、draftとpending操作を保持する。保存失敗でも操作はpendingのまま保持する。revision変更は自動マージ・自動再試行せずconflictとして操作とreview内容を残す。
+- `organize.request_apply`はクライアントから候補内容を受け取らず、同じclient/space/scopeの解析sessionに保存されたcandidate IDだけを受ける。旧GUIの`ApplyCandidates`は外部sessionを引き続き拒否する。GUI承認後の専用呼び出しが同じ候補適用エンジンを使い、複数候補の項目別結果を維持する。
+- restricted MCPのWは親権限との共通部分に限定する。既存ノートは公開noteまたは公開Notebook内だけ、createとmoveの宛先は明示公開Notebookだけ許可する。note-only scopeからroot作成は不可。非restricted CLIのroot作成は`notebookId`省略時だけ許可する。タグ変更と整理のtag-assignmentは適用直前にも対象tagの公開scopeを確認する。作成・更新・移動・タグ・ゴミ箱移動は既存Note Service、タグCAS、保存journalを通す。外部プロセスからDB/Markdownを直接保存する経路は追加しない。
+
 ### Stage D: 統合ターミナル + 外部CLI連携
 - 右/下ドック、PTY、CLI起動/終了、MCP接続、表示状態/ショートカットの受け入れ。
 - **完了条件:** WindowsのWails実画面で実際の対話CLI、ノート取得、候補生成、承認・適用を一連で操作できる。

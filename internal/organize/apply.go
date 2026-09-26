@@ -5,11 +5,26 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"atlasnote/internal/note"
 )
 
 func (s *Service) ApplyCandidates(ctx context.Context, spaceID string, input ApplyCandidatesInput) []ApplyResult {
+	return s.applyCandidates(ctx, spaceID, "", input)
+}
+
+// ApplyExternalCandidates is called only after a trusted GUI approval. The
+// owner is checked against the server-side analysis session, never supplied
+// through the public IPC operation.
+func (s *Service) ApplyExternalCandidates(ctx context.Context, spaceID, ownerID string, input ApplyCandidatesInput) []ApplyResult {
+	if ownerID == "" {
+		return nil
+	}
+	return s.applyCandidates(ctx, spaceID, ownerID, input)
+}
+
+func (s *Service) applyCandidates(ctx context.Context, spaceID, ownerID string, input ApplyCandidatesInput) []ApplyResult {
 	results := make(map[string]ApplyResult, len(input.CandidateIDs))
 	if len(input.CandidateIDs) == 0 {
 		return []ApplyResult{}
@@ -21,9 +36,8 @@ func (s *Service) ApplyCandidates(ctx context.Context, spaceID string, input App
 	s.mu.Lock()
 	session, sessionOK := s.sessions[input.SessionID]
 	candidates := make(map[string]Candidate, len(input.CandidateIDs))
-	// External Stage B analyses are preview-only. They must never become
-	// applicable through the existing GUI mutation path.
-	if sessionOK && session.spaceID == spaceID && session.ownerID == "" {
+	if sessionOK && session.spaceID == spaceID && session.ownerID == ownerID &&
+		(ownerID == "" || session.created.Add(analysisSessionTTL).After(time.Now().UTC())) {
 		for _, id := range input.CandidateIDs {
 			if candidate, ok := session.candidate[id]; ok && candidate.SpaceID == spaceID {
 				candidates[id] = candidate
@@ -31,7 +45,8 @@ func (s *Service) ApplyCandidates(ctx context.Context, spaceID string, input App
 		}
 	}
 	s.mu.Unlock()
-	if !sessionOK || session.spaceID != spaceID || session.ownerID != "" {
+	if !sessionOK || session.spaceID != spaceID || session.ownerID != ownerID ||
+		(ownerID != "" && !session.created.Add(analysisSessionTTL).After(time.Now().UTC())) {
 		for _, id := range input.CandidateIDs {
 			results[id] = staleResult(id)
 		}

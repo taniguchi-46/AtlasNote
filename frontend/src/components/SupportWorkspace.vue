@@ -21,6 +21,7 @@
       <nav aria-label="サポート機能" @pointerdown.stop>
         <button type="button" :class="{ active: store.activeTab === 'organize' }" :aria-current="store.activeTab === 'organize' ? 'page' : undefined" @click="store.open('organize')">整理</button>
         <button type="button" :class="{ active: store.activeTab === 'ai' }" :aria-current="store.activeTab === 'ai' ? 'page' : undefined" @click="store.open('ai')">AI</button>
+        <button type="button" :class="{ active: store.activeTab === 'changes' }" :aria-current="store.activeTab === 'changes' ? 'page' : undefined" @click="store.open('changes')">変更確認</button>
       </nav>
       <div class="support-actions" @pointerdown.stop>
         <button type="button" :title="store.isFloating ? 'ドック表示' : 'フローティング表示'" :aria-label="store.isFloating ? 'ドック表示' : 'フローティング表示'" :aria-pressed="store.isFloating" @click="store.toggleFloating"><AppWindowIcon :size="16" aria-hidden="true" /></button>
@@ -29,6 +30,7 @@
     </header>
     <div class="support-content">
       <OrganizationCenter v-show="store.activeTab === 'organize'" />
+      <ExternalChangeReview v-show="store.activeTab === 'changes'" />
       <AIWorkspace v-show="store.activeTab === 'ai' && settingsStore.aiEnabled" />
       <div v-if="store.activeTab === 'ai' && !settingsStore.aiEnabled" class="support-ai-disabled">
         <p>AI機能は現在オフです。整理機能は引き続き利用できます。</p>
@@ -53,6 +55,7 @@ import { useSupportWorkspaceStore } from '../stores/useSupportWorkspaceStore'
 import { useNoteStore } from '../stores/useNoteStore'
 import AIWorkspace from './AIWorkspace.vue'
 import OrganizationCenter from './OrganizationCenter.vue'
+import ExternalChangeReview from './ExternalChangeReview.vue'
 
 const store = useSupportWorkspaceStore()
 const settingsStore = useSettingsStore()

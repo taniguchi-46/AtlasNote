@@ -30,6 +30,7 @@
     "test:ai-markup-safety": "node scripts/test-ai-markup-safety.mjs",
     "test:tags": "node scripts/test-tag-store.mjs",
     "test:organization": "node scripts/test-organization-store.mjs",
+    "test:external-changes": "node scripts/test-external-change-review.mjs",
     "test:operation-logger": "node scripts/test-operation-logger.mjs",
     "test:note-links": "node scripts/test-note-links.mjs",
     "test:related-notes": "node scripts/test-related-notes.mjs",

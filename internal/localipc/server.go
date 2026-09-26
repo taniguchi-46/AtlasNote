@@ -62,7 +62,7 @@ func Start(config ServerConfig) (*Server, error) {
 	}
 	permissions := append([]string(nil), config.Permissions...)
 	if len(permissions) == 0 {
-		permissions = []string{readapi.PermissionMetadata, readapi.PermissionContent, readapi.PermissionProposal}
+		permissions = []string{readapi.PermissionMetadata, readapi.PermissionContent, readapi.PermissionProposal, readapi.PermissionWriteRequest}
 	}
 	sessionTTL := config.MCPSessionTTL
 	if sessionTTL <= 0 {
@@ -230,9 +230,10 @@ func (s *Server) handleMCPSession(rootPrincipal readapi.Principal) http.HandlerF
 		if len(noteIDs)+len(notebookIDs) > 0 {
 			publishedPermissions[readapi.PermissionContent] = true
 			publishedPermissions[readapi.PermissionProposal] = true
+			publishedPermissions[readapi.PermissionWriteRequest] = true
 		}
-		permissions := make([]string, 0, 3)
-		for _, permission := range []string{readapi.PermissionMetadata, readapi.PermissionContent, readapi.PermissionProposal} {
+		permissions := make([]string, 0, 4)
+		for _, permission := range []string{readapi.PermissionMetadata, readapi.PermissionContent, readapi.PermissionProposal, readapi.PermissionWriteRequest} {
 			if rootPrincipal.Permissions[permission] && publishedPermissions[permission] {
 				permissions = append(permissions, permission)
 			}

@@ -9,15 +9,17 @@ const APIVersion = "1"
 
 const (
 	StatusOK       = "ok"
+	StatusPending  = "pending_approval"
 	StatusConflict = "conflict"
 	StatusRejected = "rejected"
 	StatusError    = "error"
 )
 
 const (
-	PermissionMetadata = "R0"
-	PermissionContent  = "R1"
-	PermissionProposal = "P"
+	PermissionMetadata     = "R0"
+	PermissionContent      = "R1"
+	PermissionProposal     = "P"
+	PermissionWriteRequest = "W"
 )
 
 const (
@@ -30,6 +32,14 @@ const (
 	OperationRelated               = "notes.related"
 	OperationOrganizeAnalyze       = "organize.analyze"
 	OperationOrganizeGetCandidates = "organize.get_candidates"
+	OperationOrganizeRequestApply  = "organize.request_apply"
+	OperationNotesProposeEdit      = "notes.propose_edit"
+	OperationNotesRequestCreate    = "notes.request_create"
+	OperationNotesRequestUpdate    = "notes.request_update"
+	OperationNotesRequestMove      = "notes.request_move"
+	OperationNotesRequestTags      = "notes.request_tags"
+	OperationNotesRequestTrash     = "notes.request_trash"
+	OperationOperationsGet         = "operations.get"
 )
 
 type Principal struct {

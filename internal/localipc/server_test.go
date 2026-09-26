@@ -111,12 +111,44 @@ func TestMCPSessionPermissionsAreLimitedByParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := <-principalReceived
-	if !principal.Permissions[readapi.PermissionMetadata] || principal.Permissions[readapi.PermissionContent] || principal.Permissions[readapi.PermissionProposal] {
+	if !principal.Permissions[readapi.PermissionMetadata] || principal.Permissions[readapi.PermissionContent] || principal.Permissions[readapi.PermissionProposal] || principal.Permissions[readapi.PermissionWriteRequest] {
 		t.Fatalf("MCP permissions were not intersected with parent: %+v", principal.Permissions)
 	}
 	if !principal.ScopeRestricted || !principal.AllowedNoteIDs[noteID] {
 		t.Fatalf("MCP publication scope was not preserved: %+v", principal)
 	}
+}
+
+func TestMCPSessionWriteRequestRequiresPublishedScope(t *testing.T) {
+	server := startTestServer(t, ServerConfig{ManagementRoot: t.TempDir(), StorageSpaceID: "test-space", Permissions: []string{readapi.PermissionMetadata, readapi.PermissionWriteRequest}})
+	root, err := Connect(filepath.Dir(server.descriptorPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := root.CreateMCPSession(t.Context(), MCPSessionScope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsPermission(empty.descriptor.Permissions, readapi.PermissionWriteRequest) {
+		t.Fatal("empty publication scope received W")
+	}
+	noteID := "0123456789abcdef0123456789abcdef"
+	bound, err := root.CreateMCPSession(t.Context(), MCPSessionScope{NoteIDs: []string{noteID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPermission(bound.descriptor.Permissions, readapi.PermissionWriteRequest) || containsPermission(bound.descriptor.Permissions, readapi.PermissionContent) {
+		t.Fatalf("W parent intersection failed: %+v", bound.descriptor.Permissions)
+	}
+}
+
+func containsPermission(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func startTestServer(t *testing.T, config ServerConfig) *Server {

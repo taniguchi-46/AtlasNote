@@ -874,6 +874,53 @@ export const useNoteStore = defineStore('notes', () => {
     })
   }
 
+  async function runExternalChangeOperation<T extends { state: string; items?: { status: string; candidateId?: string }[] }>(
+    noteIds: string[],
+    operation: () => Promise<T>,
+    candidateNoteIds: Record<string, string> = {},
+  ): Promise<T | null> {
+    if (!await flushAllDirtyNotes({ mode: 'explicit' })) return null
+    const ids = [...new Set(noteIds)].sort()
+    const queued = async (index: number): Promise<T | null> => {
+      if (index === ids.length) {
+        if (ids.some((id) => isNoteDeletionPreparing(id) || getDraft(id))) return null
+        return operation()
+      }
+      return noteOperations.enqueue(ids[index]!, () => queued(index + 1))
+    }
+    const result = await queued(0)
+    if (!result || (result.state !== 'applied' && !result.items?.some((item) => item.status === 'applied'))) return result
+    const appliedIds = result.items?.length
+      ? new Set(result.items.filter((item) => item.status === 'applied').map((item) => candidateNoteIds[item.candidateId ?? '']).filter(Boolean))
+      : new Set(ids)
+    for (const id of ids.filter((value) => appliedIds.has(value))) {
+      let updated: note.Note
+      try {
+        updated = await getNote(id)
+      } catch {
+        continue
+      }
+      const pendingDraft = getDraft(id)
+      if (pendingDraft) {
+        autoSave.cancel(id)
+        replaceDraft(id, {
+          ...pendingDraft,
+          status: 'conflicted',
+          error: '外部変更の適用中に編集が行われたため、下書きを競合として保持しています',
+          conflict: {
+            code: 'NOTE_REVISION_CONFLICT',
+            noteId: id,
+            expectedRevision: getPersistedRevision(id) ?? updated.revision,
+            actualRevision: updated.revision,
+          },
+        })
+      }
+      applyPersistedNote(updated)
+      if (updated.isTrashed && !pendingDraft) closeActiveNoteIfTarget(id)
+    }
+    return result
+  }
+
   async function applyAIWritingContent(
     noteId: string,
     generatedContent: string,
@@ -1263,6 +1310,7 @@ export const useNoteStore = defineStore('notes', () => {
     newNote,
     persistNote,
     runOrganizationOperation,
+    runExternalChangeOperation,
     applyAIWritingContent,
     applyAgentEditProposal,
     clearAgentEditorHighlight,

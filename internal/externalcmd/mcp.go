@@ -118,7 +118,7 @@ func RunMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				"protocolVersion": supportedMCPProtocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 				"serverInfo":      map[string]any{"name": "atlasnote", "version": "1"},
-				"instructions":    "Atlas Note本体が公開する、保存空間に限定された読み取り・非破壊整理解析ツールです。",
+				"instructions":    "変更要求はGUIの明示承認まで保存されません。MCPから承認・適用はできません。",
 			}
 		case "ping":
 			response.Result = map[string]any{}
@@ -235,7 +235,7 @@ func mcpResponseResult(response readapi.Response) map[string]any {
 		"content":           []map[string]any{{"type": "text", "text": string(encoded)}},
 		"structuredContent": response,
 	}
-	if response.Status != readapi.StatusOK {
+	if response.Status != readapi.StatusOK && response.Status != readapi.StatusPending {
 		result["isError"] = true
 	}
 	return result
@@ -256,7 +256,10 @@ func mcpOperation(name string) (string, bool) {
 	switch name {
 	case readapi.OperationNotesList, readapi.OperationNotesGet, readapi.OperationNotesSearch,
 		readapi.OperationNotebooksList, readapi.OperationTagsList, readapi.OperationBacklinks, readapi.OperationRelated,
-		readapi.OperationOrganizeAnalyze, readapi.OperationOrganizeGetCandidates:
+		readapi.OperationOrganizeAnalyze, readapi.OperationOrganizeGetCandidates,
+		readapi.OperationOrganizeRequestApply, readapi.OperationNotesProposeEdit, readapi.OperationNotesRequestCreate,
+		readapi.OperationNotesRequestUpdate, readapi.OperationNotesRequestMove, readapi.OperationNotesRequestTags,
+		readapi.OperationNotesRequestTrash, readapi.OperationOperationsGet:
 		return name, true
 	default:
 		return "", false
@@ -300,8 +303,18 @@ func mcpTools() []mcpTool {
 				"broken-link", "orphan-note", "related-note", "reciprocal-link", "title", "duplicate-tag"),
 			"limit": limitProperty(100), "cursor": stringProperty(),
 		}, []string{"analysisId"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationOrganizeRequestApply, Description: "保存済み整理候補のGUI承認を要求します。", InputSchema: schema(map[string]any{"analysisId": idProperty(), "candidateIds": map[string]any{"type": "array", "items": idProperty(), "minItems": 1, "maxItems": 100}, "expectedRevisions": map[string]any{"type": "object"}}, []string{"analysisId", "candidateIds"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesProposeEdit, Description: "保存済み本文と照合した編集案をGUIへ送ります。", InputSchema: schema(map[string]any{"noteId": idProperty(), "baseRevision": revisionProperty(), "before": stringProperty(), "after": stringProperty(), "reason": stringProperty()}, []string{"noteId", "baseRevision", "before", "after", "reason"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesRequestCreate, Description: "公開Notebookへのノート作成をGUIに要求します。", InputSchema: schema(map[string]any{"title": stringProperty(), "content": stringProperty(), "notebookId": idProperty()}, []string{"title", "content", "notebookId"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesRequestUpdate, Description: "タイトル・本文の変更をGUIに要求します。", InputSchema: schema(map[string]any{"noteId": idProperty(), "expectedRevision": revisionProperty(), "patch": schema(map[string]any{"title": stringProperty(), "content": stringProperty()}, nil)}, []string{"noteId", "expectedRevision", "patch"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesRequestMove, Description: "公開Notebookへの移動をGUIに要求します。", InputSchema: schema(map[string]any{"noteId": idProperty(), "expectedRevision": revisionProperty(), "targetNotebookId": idProperty()}, []string{"noteId", "expectedRevision", "targetNotebookId"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesRequestTags, Description: "タグ変更をGUIに要求します。", InputSchema: schema(map[string]any{"noteId": idProperty(), "expectedRevision": revisionProperty(), "addTagIds": map[string]any{"type": "array", "items": idProperty()}, "removeTagIds": map[string]any{"type": "array", "items": idProperty()}}, []string{"noteId", "expectedRevision"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationNotesRequestTrash, Description: "ゴミ箱への移動をGUIに要求します。", InputSchema: schema(map[string]any{"noteId": idProperty(), "expectedRevision": revisionProperty()}, []string{"noteId", "expectedRevision"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationOperationsGet, Description: "自分が発行した変更要求の状態を取得します。", InputSchema: schema(map[string]any{"operationId": idProperty()}, []string{"operationId"}), OutputSchema: objectOutput},
 	}
 }
+
+func revisionProperty() map[string]any { return map[string]any{"type": "integer", "minimum": 1} }
 
 func schema(properties map[string]any, required []string) map[string]any {
 	result := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}

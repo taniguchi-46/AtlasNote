@@ -1,6 +1,12 @@
 # プロジェクト状況
 
-最終更新: 2026-09-26
+最終更新: 2026-09-27
+
+## CLI・MCP・統合ターミナル再編 Stage C（2026-09-27）
+
+外部CLI/MCPの`organize.request_apply`、`notes.propose_edit`、`notes.request_create/update/move/tags/trash`、`operations.get`を共通Application Serviceへ追加した。W権限は承認待ち操作の作成に限定し、MCP childでは親権限と公開scopeの共通部分だけを与える。操作は保存空間・発行元・期限へ束縛した最大64件のメモリ管理とし、外部結果にはGUI用レビュー本文を返さない。GUIの変更確認タブで明示承認した場合だけ、dirty draft flush／対象note queueの後に本体が短命単回permitを内部生成・消費し、既存Note／Organize ServiceのCAS・journalを通して適用する。保存失敗は操作とdraftを保持し、revision競合は自動マージせず案を残す。MCP終了後のpending操作は自身の期限までGUIで確認できる。詳細は[再編仕様書](development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md#stage-c-実装契約2026-09-27)を正とする。実Wails画面と実MCPクライアントの手動統合確認は全Stage後に実施する。
+
+検証: Stage C/Stage A/B関連Goテスト、`go vet ./...`、Frontend型検査・lint・Stage Cとorganization/agent proposal/content lock/note save回帰テスト、Frontend本番ビルド、Wailsビルド、`git diff --check`は通過。`go test ./... -count=1`は`internal/appcleanup`の既知のWindows環境権限エラー（`pin C:\Users\mt252: Access is denied`など）のみ失敗。実データに影響し得る権限昇格は行わない。
 
 ## CLI・MCP・統合ターミナル再編 Stage B（2026-09-26）
 

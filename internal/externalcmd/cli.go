@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 	"strings"
 
 	"atlasnote/internal/config"
@@ -20,7 +21,7 @@ func Run(args []string, stdout, stderr io.Writer) (bool, int) {
 	if args[0] == "mcp" {
 		return true, RunMCP(args[1:], io.Reader(nil), stdout, stderr)
 	}
-	if args[0] != "notes" && args[0] != "notebooks" && args[0] != "tags" && args[0] != "organize" {
+	if args[0] != "notes" && args[0] != "notebooks" && args[0] != "tags" && args[0] != "organize" && args[0] != "operations" {
 		return false, 0
 	}
 	operation, params, parseErr := parseCommand(args, stderr)
@@ -58,6 +59,49 @@ func Run(args []string, stdout, stderr io.Writer) (bool, int) {
 }
 
 func parseCommand(args []string, stderr io.Writer) (string, any, error) {
+	if len(args) >= 2 {
+		changeOperations := map[string]string{
+			"notes propose-edit":     readapi.OperationNotesProposeEdit,
+			"notes request-create":   readapi.OperationNotesRequestCreate,
+			"notes request-update":   readapi.OperationNotesRequestUpdate,
+			"notes request-move":     readapi.OperationNotesRequestMove,
+			"notes request-tags":     readapi.OperationNotesRequestTags,
+			"notes request-trash":    readapi.OperationNotesRequestTrash,
+			"organize request-apply": readapi.OperationOrganizeRequestApply,
+		}
+		if operation, ok := changeOperations[args[0]+" "+args[1]]; ok {
+			flags := newFlags(args[0]+" "+args[1], stderr)
+			input := flags.String("input", "", "JSON request, or '-' to read standard input")
+			addJSONFlag(flags)
+			if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 || *input == "" {
+				return "", nil, errors.New("invalid change request")
+			}
+			value := *input
+			if value == "-" {
+				body, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20+1))
+				if err != nil || len(body) > 1<<20 {
+					return "", nil, errors.New("invalid change input")
+				}
+				value = string(body)
+			}
+			var params map[string]any
+			if len(value) > 1<<20 || json.Unmarshal([]byte(value), &params) != nil || params == nil {
+				return "", nil, errors.New("invalid change input")
+			}
+			return operation, params, nil
+		}
+		if args[0] == "operations" && args[1] == "get" {
+			if len(args) < 3 {
+				return "", nil, errors.New("operation ID is required")
+			}
+			flags := newFlags("operations get", stderr)
+			addJSONFlag(flags)
+			if err := flags.Parse(args[3:]); err != nil || flags.NArg() != 0 {
+				return "", nil, errors.New("invalid operations get arguments")
+			}
+			return readapi.OperationOperationsGet, map[string]string{"operationId": args[2]}, nil
+		}
+	}
 	switch args[0] {
 	case "notes":
 		if len(args) < 2 {
@@ -257,7 +301,7 @@ func writeJSON(writer io.Writer, value any) {
 }
 
 func exitCode(response readapi.Response) int {
-	if response.Status == readapi.StatusOK {
+	if response.Status == readapi.StatusOK || response.Status == readapi.StatusPending {
 		return 0
 	}
 	if response.Status == readapi.StatusConflict {

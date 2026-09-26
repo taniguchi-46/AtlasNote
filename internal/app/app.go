@@ -51,6 +51,7 @@ type App struct {
 	aiService                   *aiservice.Service
 	backupService               *backupservice.Service
 	readIPC                     *localipc.Server
+	changeService               *readapi.Service
 	spaceRegistry               *notespace.Registry
 	activeSpace                 notespace.Space
 	managementRoot              string
@@ -211,6 +212,7 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.shutdownErr = errors.Join(a.shutdownErr, a.stopReadIPC(ctx))
+	a.changeService = nil
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
@@ -1215,10 +1217,16 @@ func (a *App) SelectStorageSpace(input notespace.SelectInput) notespace.Mutation
 		space := a.activeSpace
 		return notespace.MutationResult{Space: &space, ActiveSpaceID: space.ID}
 	}
+	finishChanges := func(bool) {}
+	if a.changeService != nil {
+		finishChanges = a.changeService.BeginStorageSelection()
+	}
 	space, restartRequired, err := a.spaceRegistry.Select(a.operationContext(), input.ID, a.prepareStorageSpace)
 	if err != nil {
+		finishChanges(false)
 		return notespace.MutationResult{Error: notespace.APIErrorFrom(err)}
 	}
+	finishChanges(true)
 	return notespace.MutationResult{
 		Space: &space, ActiveSpaceID: space.ID,
 		RestartRequired: restartRequired || space.ID != a.activeSpace.ID,
@@ -1513,6 +1521,7 @@ func (a *App) refreshContentLockRecovery() {
 
 func (a *App) quiesceLockedSpace() {
 	_ = a.stopReadIPC(a.operationContext())
+	a.changeService = nil
 	if a.aiService != nil {
 		a.aiService.Shutdown()
 	}
@@ -2034,6 +2043,7 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 		a.newStorageArea = false
 	}
 	readService := readapi.New(service, a.contentLocks, a.activeSpace.ID, a.organizer)
+	a.changeService = readService
 	readIPC, err := localipc.Start(localipc.ServerConfig{
 		ManagementRoot: a.managementRoot,
 		StorageSpaceID: a.activeSpace.ID,

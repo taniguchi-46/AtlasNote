@@ -43,13 +43,16 @@ type accessGuard interface {
 
 type Service struct {
 	notes         noteReader
+	writes        noteWriter
 	locks         accessGuard
 	organizer     *organize.Service
 	activeSpaceID string
+	changes       *changeStore
 }
 
 func New(notes noteReader, locks accessGuard, activeSpaceID string, organizer ...*organize.Service) *Service {
-	service := &Service{notes: notes, locks: locks, activeSpaceID: strings.TrimSpace(activeSpaceID)}
+	service := &Service{notes: notes, locks: locks, activeSpaceID: strings.TrimSpace(activeSpaceID), changes: newChangeStore()}
+	service.writes, _ = notes.(noteWriter)
 	if len(organizer) > 0 {
 		service.organizer = organizer[0]
 	}
@@ -71,12 +74,15 @@ func (s *Service) Execute(ctx context.Context, principal Principal, request Requ
 	}
 	required, ok := operationPermissions(request.Operation)
 	if !ok {
-		return failure(request.RequestID, StatusRejected, "OPERATION_NOT_ALLOWED", "この読み取り操作は公開されていません。", false)
+		return failure(request.RequestID, StatusRejected, "OPERATION_NOT_ALLOWED", "この操作は公開されていません。", false)
 	}
 	for _, permission := range required {
 		if !principal.Permissions[permission] {
-			return failure(request.RequestID, StatusRejected, "PERMISSION_DENIED", "この読み取り権限は許可されていません。", false)
+			return failure(request.RequestID, StatusRejected, "PERMISSION_DENIED", "この操作の権限は許可されていません。", false)
 		}
+	}
+	if request.Operation == OperationOperationsGet {
+		return s.getOperation(principal, request)
 	}
 	ctx, releaseContent := s.notes.BeginExternalRead(ctx)
 	defer releaseContent()
@@ -101,6 +107,9 @@ func (s *Service) Execute(ctx context.Context, principal Principal, request Requ
 		response = s.analyzeOrganization(ctx, principal, request)
 	case OperationOrganizeGetCandidates:
 		response = s.getOrganizationCandidates(ctx, principal, request)
+	case OperationOrganizeRequestApply, OperationNotesProposeEdit, OperationNotesRequestCreate,
+		OperationNotesRequestUpdate, OperationNotesRequestMove, OperationNotesRequestTags, OperationNotesRequestTrash:
+		response = s.requestChange(ctx, principal, request)
 	}
 	return response
 }
@@ -113,6 +122,13 @@ func operationPermissions(operation string) ([]string, bool) {
 		return []string{PermissionContent}, true
 	case OperationOrganizeAnalyze, OperationOrganizeGetCandidates:
 		return []string{PermissionProposal, PermissionContent}, true
+	case OperationNotesProposeEdit:
+		return []string{PermissionProposal, PermissionContent}, true
+	case OperationOrganizeRequestApply, OperationNotesRequestCreate, OperationNotesRequestUpdate,
+		OperationNotesRequestMove, OperationNotesRequestTags, OperationNotesRequestTrash:
+		return []string{PermissionWriteRequest}, true
+	case OperationOperationsGet:
+		return []string{PermissionMetadata}, true
 	default:
 		return nil, false
 	}

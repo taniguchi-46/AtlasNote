@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type SupportTab = 'organize' | 'ai'
+export type SupportTab = 'organize' | 'ai' | 'changes'
 
 export const useSupportWorkspaceStore = defineStore('supportWorkspace', () => {
   const isOpen = ref(false)

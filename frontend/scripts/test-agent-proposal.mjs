@@ -287,10 +287,39 @@ try {
   await testAgentSaveRetainsConcurrentDraft()
   await testAgentSaveAfterNoteSwitchDoesNotPublishHighlight()
   await testAgentSaveFailureDoesNotPublishHighlight()
+  await testExternalChangeFlushFailureKeepsDraft()
 
   console.log('Agent proposal tests passed')
 } finally {
   await rm(outDir, { recursive: true, force: true })
+}
+
+async function testExternalChangeFlushFailureKeepsDraft() {
+  setActivePinia(createPinia())
+  const mockNotes = await import(pathToFileURL(mockNotesFile).href)
+  const { useNoteStore } = await import(pathToFileURL(noteStoreOutFile).href)
+  mockNotes.calls.updateNote.length = 0
+  const noteStore = useNoteStore()
+  const target = {
+    id: 'external-dirty-note', notebookId: null, title: '対象', content: '保存済み',
+    isFavorite: false, isPinned: false, isTrashed: false, revision: 2,
+    createdAt: '2026-08-23T00:00:00Z', updatedAt: '2026-08-23T00:00:00Z',
+  }
+  noteStore.activeNote = target
+  noteStore.summaries = [target]
+  noteStore.scheduleDraft(target.id, target.title, '未保存の入力')
+  const deferredUpdate = mockNotes.deferUpdate()
+  let applyCalls = 0
+  const approval = noteStore.runExternalChangeOperation([target.id], async () => {
+    applyCalls++
+    return { state: 'applied' }
+  })
+  await waitFor(() => mockNotes.calls.updateNote.length === 1)
+  deferredUpdate.reject(new Error('save failed'))
+  assert.equal(await approval, null)
+  assert.equal(applyCalls, 0, 'backend apply must wait for successful draft flush')
+  assert.equal(noteStore.getDraft(target.id)?.content, '未保存の入力')
+  assert.equal(noteStore.activeNote.content, '保存済み')
 }
 
 function testVisualDiff(createAgentEditVisualDiff) {
