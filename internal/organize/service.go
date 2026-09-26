@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,10 +25,24 @@ type Service struct {
 	sessions map[string]analysisSession
 }
 
+const (
+	analysisSessionTTL  = 30 * time.Minute
+	maxAnalysisSessions = 5
+)
+
+var ErrAnalysisUnavailable = errors.New("organization analysis is unavailable")
+
 type analysisSession struct {
-	spaceID   string
-	created   time.Time
-	candidate map[string]Candidate
+	spaceID           string
+	ownerID           string
+	created           time.Time
+	analysis          Analysis
+	access            AnalysisAccess
+	candidates        []Candidate
+	candidate         map[string]Candidate
+	analyzedNoteIDs   []string
+	analyzedRevisions map[string]int64
+	analyzedTagIDs    map[string][]string
 }
 
 func NewService(notes *note.Service) *Service {
@@ -54,6 +69,19 @@ func (s *Service) DiscardSession(sessionID string) {
 }
 
 func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInput, onProgress ...func(AnalysisProgress)) (Analysis, error) {
+	return s.analyze(ctx, spaceID, input, AnalysisAccess{}, onProgress...)
+}
+
+// AnalyzeExternal uses the same candidate engine as the GUI while binding the
+// resulting short-lived session to one authenticated external client.
+func (s *Service) AnalyzeExternal(ctx context.Context, spaceID string, input AnalysisInput, access AnalysisAccess) (Analysis, error) {
+	if strings.TrimSpace(access.OwnerID) == "" {
+		return Analysis{}, ErrAnalysisUnavailable
+	}
+	return s.analyze(ctx, spaceID, input, cloneAnalysisAccess(access))
+}
+
+func (s *Service) analyze(ctx context.Context, spaceID string, input AnalysisInput, access AnalysisAccess, onProgress ...func(AnalysisProgress)) (Analysis, error) {
 	if s == nil || s.notes == nil {
 		return Analysis{}, fmt.Errorf("organization service is not initialized")
 	}
@@ -110,11 +138,11 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 		return Analysis{}, err
 	}
 
-	knownIDs := make(map[string]struct{}, len(summaries))
+	existingIDs := make(map[string]struct{}, len(summaries))
 	byID := make(map[string]note.Summary, len(summaries))
 	for _, summary := range summaries {
-		knownIDs[summary.ID] = struct{}{}
 		byID[summary.ID] = summary
+		existingIDs[summary.ID] = struct{}{}
 	}
 	var scopedNoteIDs map[string]struct{}
 	if input.Scope == "note" {
@@ -126,7 +154,7 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 		if !target.IsTrashed && !target.Protected && !target.Locked {
 			if targetNote, getErr := s.notes.Get(ctx, input.NoteID); getErr == nil && !targetNote.Protected && !targetNote.Locked {
 				for _, relatedID := range note.ExtractNoteLinkTargets(targetNote.Content) {
-					if _, exists := byID[relatedID]; exists {
+					if related, exists := byID[relatedID]; exists && analysisNoteAllowed(access, related) {
 						scopedNoteIDs[relatedID] = struct{}{}
 					}
 				}
@@ -136,7 +164,9 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 						break
 					}
 					for _, backlink := range backlinks.Items {
-						scopedNoteIDs[backlink.ID] = struct{}{}
+						if analysisNoteAllowed(access, backlink) {
+							scopedNoteIDs[backlink.ID] = struct{}{}
+						}
 					}
 					if !backlinks.HasNext {
 						break
@@ -147,7 +177,7 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 	}
 	selected := make([]note.Summary, 0, len(summaries))
 	for _, summary := range summaries {
-		if summaryInScope(summary, input, inScope, scopedNoteIDs) {
+		if analysisNoteAllowed(access, summary) && summaryInScope(summary, input, inScope, scopedNoteIDs) {
 			selected = append(selected, summary)
 		}
 	}
@@ -208,16 +238,30 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 		onProgress[0](AnalysisProgress{Phase: "proposing", ProcessedNotes: len(selected), TotalNotes: len(selected)})
 	}
 
+	visibleNotebooks := filterAnalysisNotebooks(notebooks, access)
+	visibleTags := filterAnalysisTags(tags, active, access.ScopeRestricted)
+	if err := ctx.Err(); err != nil {
+		return Analysis{}, err
+	}
 	result.Candidates = append(result.Candidates, titleCandidates(spaceID, active)...)
-	result.Candidates = append(result.Candidates, notebookCandidates(spaceID, active, notebooks)...)
-	result.Candidates = append(result.Candidates, tagAssignmentCandidates(spaceID, active, tags)...)
+	if err := ctx.Err(); err != nil {
+		return Analysis{}, err
+	}
+	result.Candidates = append(result.Candidates, notebookCandidates(spaceID, active, visibleNotebooks)...)
+	result.Candidates = append(result.Candidates, tagAssignmentCandidates(spaceID, active, visibleTags)...)
+	if err := ctx.Err(); err != nil {
+		return Analysis{}, err
+	}
 	result.Candidates = append(result.Candidates, duplicateCandidates(spaceID, active)...)
 	result.Candidates = append(result.Candidates, emptyCandidates(spaceID, active)...)
-	result.Candidates = append(result.Candidates, linkCandidates(spaceID, active, knownIDs)...)
+	result.Candidates = append(result.Candidates, linkCandidates(spaceID, active, existingIDs, access)...)
+	if err := ctx.Err(); err != nil {
+		return Analysis{}, err
+	}
 	result.Candidates = append(result.Candidates, reciprocalLinkCandidates(spaceID, active)...)
 	result.Candidates = append(result.Candidates, orphanCandidates(spaceID, active)...)
-	result.Candidates = append(result.Candidates, relatedCandidates(spaceID, active, tags)...)
-	result.Candidates = append(result.Candidates, duplicateTagCandidates(spaceID, tags)...)
+	result.Candidates = append(result.Candidates, relatedCandidates(spaceID, active, visibleTags)...)
+	result.Candidates = append(result.Candidates, duplicateTagCandidates(spaceID, visibleTags)...)
 	if input.Scope == "note" {
 		filtered := result.Candidates[:0]
 		for _, candidate := range result.Candidates {
@@ -236,18 +280,32 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 		}
 		return result.Candidates[i].ID < result.Candidates[j].ID
 	})
-	session := analysisSession{spaceID: spaceID, created: startedAt, candidate: make(map[string]Candidate, len(result.Candidates))}
+	analyzedNoteIDs := make([]string, 0, len(active))
+	analyzedRevisions := make(map[string]int64, len(active))
+	analyzedTagIDs := make(map[string][]string, len(active))
+	for _, item := range active {
+		analyzedNoteIDs = append(analyzedNoteIDs, item.note.ID)
+		analyzedRevisions[item.note.ID] = item.note.Revision
+		analyzedTagIDs[item.note.ID] = sortedKeys(item.tagIDs)
+	}
+	sort.Strings(analyzedNoteIDs)
+	session := analysisSession{
+		spaceID: spaceID, ownerID: access.OwnerID, created: startedAt, analysis: result,
+		access: cloneAnalysisAccess(access), candidates: append([]Candidate(nil), result.Candidates...),
+		candidate: make(map[string]Candidate, len(result.Candidates)), analyzedNoteIDs: analyzedNoteIDs,
+		analyzedRevisions: analyzedRevisions, analyzedTagIDs: analyzedTagIDs,
+	}
 	for _, candidate := range result.Candidates {
 		session.candidate[candidate.ID] = candidate
 	}
 	s.mu.Lock()
 	s.sessions[sessionID] = session
 	for id, previous := range s.sessions {
-		if time.Since(previous.created) > 30*time.Minute {
+		if time.Since(previous.created) > analysisSessionTTL {
 			delete(s.sessions, id)
 		}
 	}
-	for len(s.sessions) > 5 {
+	for len(s.sessions) > maxAnalysisSessions {
 		oldestID := ""
 		var oldest time.Time
 		for id, previous := range s.sessions {
@@ -259,6 +317,127 @@ func (s *Service) Analyze(ctx context.Context, spaceID string, input AnalysisInp
 	}
 	s.mu.Unlock()
 	return result, nil
+}
+
+// AnalysisSnapshot returns one immutable view of an existing analysis. The
+// caller must still revalidate current protection, trash, and publication
+// scope before serializing any candidate.
+func (s *Service) AnalysisSnapshot(spaceID, ownerID, analysisID string, access AnalysisAccess) (AnalysisSnapshot, error) {
+	if s == nil || strings.TrimSpace(spaceID) == "" || strings.TrimSpace(ownerID) == "" || strings.TrimSpace(analysisID) == "" {
+		return AnalysisSnapshot{}, ErrAnalysisUnavailable
+	}
+	now := time.Now()
+	s.mu.Lock()
+	session, exists := s.sessions[analysisID]
+	if exists && now.Sub(session.created) >= analysisSessionTTL {
+		delete(s.sessions, analysisID)
+		exists = false
+	}
+	s.mu.Unlock()
+	if !exists || session.spaceID != spaceID || session.ownerID != ownerID || !sameAnalysisAccess(session.access, access) {
+		return AnalysisSnapshot{}, ErrAnalysisUnavailable
+	}
+	return AnalysisSnapshot{
+		Analysis: session.analysis, ExpiresAt: session.created.Add(analysisSessionTTL),
+		Candidates: append([]Candidate(nil), session.candidates...), AnalyzedNoteIDs: append([]string(nil), session.analyzedNoteIDs...),
+		AnalyzedNoteRevisions: cloneInt64Map(session.analyzedRevisions), AnalyzedNoteTagIDs: cloneStringSliceMap(session.analyzedTagIDs),
+		Access: cloneAnalysisAccess(session.access),
+	}, nil
+}
+
+func analysisNoteAllowed(access AnalysisAccess, summary note.Summary) bool {
+	if !access.ScopeRestricted {
+		return true
+	}
+	if summary.IsTrashed || summary.Protected || summary.Locked {
+		return false
+	}
+	if access.AllowedNoteIDs[summary.ID] {
+		return true
+	}
+	return summary.NotebookID != nil && access.AllowedNotebookIDs[*summary.NotebookID]
+}
+
+func filterAnalysisNotebooks(items []note.Notebook, access AnalysisAccess) []note.Notebook {
+	if !access.ScopeRestricted {
+		return items
+	}
+	result := make([]note.Notebook, 0, len(access.AllowedNotebookIDs))
+	for _, item := range items {
+		if access.AllowedNotebookIDs[item.ID] && !item.Protected && !item.Locked {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func filterAnalysisTags(items []note.Tag, active []analyzedNote, restricted bool) []note.Tag {
+	if !restricted {
+		return items
+	}
+	allowed := make(map[string]bool)
+	for _, item := range active {
+		for id := range item.tagIDs {
+			allowed[id] = true
+		}
+	}
+	result := make([]note.Tag, 0, len(allowed))
+	for _, item := range items {
+		if allowed[item.ID] {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func cloneAnalysisAccess(access AnalysisAccess) AnalysisAccess {
+	result := AnalysisAccess{OwnerID: access.OwnerID, ScopeRestricted: access.ScopeRestricted}
+	result.AllowedNoteIDs = cloneBoolMap(access.AllowedNoteIDs)
+	result.AllowedNotebookIDs = cloneBoolMap(access.AllowedNotebookIDs)
+	return result
+}
+
+func cloneBoolMap(values map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for key, value := range values {
+		if value {
+			result[key] = true
+		}
+	}
+	return result
+}
+
+func cloneInt64Map(values map[string]int64) map[string]int64 {
+	result := make(map[string]int64, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneStringSliceMap(values map[string][]string) map[string][]string {
+	result := make(map[string][]string, len(values))
+	for key, value := range values {
+		result[key] = append([]string(nil), value...)
+	}
+	return result
+}
+
+func sameAnalysisAccess(left, right AnalysisAccess) bool {
+	if left.OwnerID != right.OwnerID || left.ScopeRestricted != right.ScopeRestricted || len(left.AllowedNoteIDs) != len(right.AllowedNoteIDs) || len(left.AllowedNotebookIDs) != len(right.AllowedNotebookIDs) {
+		return false
+	}
+	for id := range left.AllowedNoteIDs {
+		if !right.AllowedNoteIDs[id] {
+			return false
+		}
+	}
+	for id := range left.AllowedNotebookIDs {
+		if !right.AllowedNotebookIDs[id] {
+			return false
+		}
+	}
+	return true
 }
 
 func summaryInScope(summary note.Summary, input AnalysisInput, notebookIDs, noteIDs map[string]struct{}) bool {
@@ -600,11 +779,16 @@ func contentHashOf(content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func linkCandidates(spaceID string, items []analyzedNote, knownIDs map[string]struct{}) []Candidate {
+func linkCandidates(spaceID string, items []analyzedNote, existingIDs map[string]struct{}, access AnalysisAccess) []Candidate {
+	// Restricted clients cannot distinguish an unpublished, protected, or
+	// missing target from a link in a published note.
+	if access.ScopeRestricted {
+		return []Candidate{}
+	}
 	result := make([]Candidate, 0)
 	for _, item := range items {
 		for _, targetID := range note.ExtractNoteLinkTargets(item.note.Content) {
-			if _, exists := knownIDs[targetID]; exists {
+			if _, exists := existingIDs[targetID]; exists {
 				continue
 			}
 			result = append(result, makeCandidate(spaceID, KindBrokenLink, item, targetID, "Markdown本文のノートリンク先IDがこの保存空間にありません。", map[string]any{"targetId": targetID}, nil, false, targetID))

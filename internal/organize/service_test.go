@@ -2,10 +2,13 @@ package organize
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"atlasnote/internal/contentlock"
 	"atlasnote/internal/database"
@@ -489,6 +492,238 @@ func TestDiscardSessionLeavesOtherScopeApplicable(t *testing.T) {
 	}
 	if result := organizer.Apply(ctx, "space", ApplyInput{SessionID: spaceAnalysis.SessionID, CandidateID: spaceAnalysis.Candidates[0].ID}); result.Status != "stale" {
 		t.Fatalf("discarded session remained applicable: %#v", result)
+	}
+}
+
+func TestExternalAnalysisIsScopedOwnedExpiringAndPreviewOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	notes, organizer := newOrganizationFixture(t)
+	publicNote, err := notes.Create(ctx, note.CreateInput{Title: "Public", Content: "# Public proposal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateNote, err := notes.Create(ctx, note.CreateInput{Title: "Private marker", Content: "# Private proposal marker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := AnalysisAccess{
+		OwnerID: "mcp-session-a", ScopeRestricted: true,
+		AllowedNoteIDs: map[string]bool{publicNote.ID: true}, AllowedNotebookIDs: map[string]bool{},
+	}
+	analysis, err := organizer.AnalyzeExternal(ctx, "space", AnalysisInput{Scope: "space"}, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analysis.AnalyzedNotes != 1 || len(analysis.Candidates) == 0 {
+		t.Fatalf("scoped analysis = %#v", analysis)
+	}
+	for _, candidate := range analysis.Candidates {
+		encoded := candidate.Reason + candidate.NoteTitle + candidate.RelatedTitle
+		if candidate.NoteID == privateNote.ID || candidate.RelatedID == privateNote.ID || strings.Contains(encoded, "Private") {
+			t.Fatalf("external analysis exposed private note: %#v", candidate)
+		}
+	}
+	if _, err := organizer.AnalysisSnapshot("space", "mcp-session-b", analysis.SessionID, AnalysisAccess{
+		OwnerID: "mcp-session-b", ScopeRestricted: true, AllowedNoteIDs: map[string]bool{publicNote.ID: true}, AllowedNotebookIDs: map[string]bool{},
+	}); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("other owner snapshot error = %v", err)
+	}
+	if result := organizer.Apply(ctx, "space", ApplyInput{SessionID: analysis.SessionID, CandidateID: analysis.Candidates[0].ID}); result.Status != "stale" {
+		t.Fatalf("external preview became applicable: %#v", result)
+	}
+
+	organizer.mu.Lock()
+	session := organizer.sessions[analysis.SessionID]
+	session.created = time.Now().Add(-analysisSessionTTL)
+	organizer.sessions[analysis.SessionID] = session
+	organizer.mu.Unlock()
+	if _, err := organizer.AnalysisSnapshot("space", access.OwnerID, analysis.SessionID, access); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("expired snapshot error = %v", err)
+	}
+}
+
+func TestRestrictedExternalAnalysisSeparatesExistingAndVisibleLinkTargets(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(root, "atlasnote.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	markdown, err := storage.NewMarkdownStore(filepath.Join(root, "notes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := note.NewService(note.NewRepository(db), markdown)
+	locks := contentlock.NewManager(db, markdown)
+	t.Cleanup(locks.Close)
+	notes.SetContentLockGuard(locks)
+	organizer := NewService(notes)
+
+	protectedNote, err := notes.Create(ctx, note.CreateInput{Title: "Protected target marker", Content: "protected body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := locks.Enable(ctx, contentlock.EnableInput{
+		TargetType: contentlock.TargetNote, TargetID: protectedNote.ID, Passphrase: "protected target passphrase",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lockedNote, err := notes.Create(ctx, note.CreateInput{Title: "Locked target marker", Content: "locked body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := locks.Enable(ctx, contentlock.EnableInput{
+		TargetType: contentlock.TargetNote, TargetID: lockedNote.ID, Passphrase: "locked target passphrase",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := locks.LockNow(ctx, contentlock.Target{Type: contentlock.TargetNote, ID: lockedNote.ID}); err != nil {
+		t.Fatal(err)
+	}
+	trashedNote, err := notes.Create(ctx, note.CreateInput{Title: "Trashed target marker", Content: "trashed body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trashed := true
+	if _, err := notes.Update(ctx, trashedNote.ID, note.UpdateInput{IsTrashed: &trashed, ExpectedRevision: &trashedNote.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	outOfScopeNote, err := notes.Create(ctx, note.CreateInput{Title: "Out of scope target marker", Content: "private body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingID := strings.Repeat("f", 32)
+	publicNote, err := notes.Create(ctx, note.CreateInput{
+		Title: "Public source", Content: "[target](atlasnote://note/" + outOfScopeNote.ID + ")",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := AnalysisAccess{
+		OwnerID: "restricted-link-test", ScopeRestricted: true,
+		AllowedNoteIDs: map[string]bool{
+			publicNote.ID: true, protectedNote.ID: true, lockedNote.ID: true, trashedNote.ID: true, missingID: true,
+		},
+	}
+	existingAnalysis, err := organizer.AnalyzeExternal(ctx, "space", AnalysisInput{Scope: "space"}, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingContent := "[target](atlasnote://note/" + missingID + ")"
+	publicNote, err = notes.Update(ctx, publicNote.ID, note.UpdateInput{Content: &missingContent, ExpectedRevision: &publicNote.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingAnalysis, err := organizer.AnalyzeExternal(ctx, "space", AnalysisInput{Scope: "space"}, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedCandidates := func(analysis Analysis) []Candidate {
+		candidates := append([]Candidate(nil), analysis.Candidates...)
+		for index := range candidates {
+			candidates[index].ID = ""
+			candidates[index].BaseRevision = 0
+			candidates[index].RelatedRevision = 0
+			candidates[index].RelatedContentHash = ""
+		}
+		return candidates
+	}
+	if !reflect.DeepEqual(normalizedCandidates(existingAnalysis), normalizedCandidates(missingAnalysis)) {
+		t.Fatalf("scope-out existing/missing results differ: existing=%#v missing=%#v", existingAnalysis.Candidates, missingAnalysis.Candidates)
+	}
+	for _, analysis := range []Analysis{existingAnalysis, missingAnalysis} {
+		for _, candidate := range analysis.Candidates {
+			if candidate.Kind == KindBrokenLink && candidate.NoteID == publicNote.ID {
+				t.Fatalf("restricted scope-out link produced broken candidate: %#v", candidate)
+			}
+		}
+	}
+	pairedResults, err := json.Marshal([][]Candidate{existingAnalysis.Candidates, missingAnalysis.Candidates})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hidden := range []string{outOfScopeNote.ID, outOfScopeNote.Title, missingID} {
+		if strings.Contains(string(pairedResults), hidden) {
+			t.Fatalf("scope-out comparison exposed hidden target value %q: %s", hidden, pairedResults)
+		}
+	}
+
+	hiddenContent := strings.Join([]string{
+		"[protected](atlasnote://note/" + protectedNote.ID + ")",
+		"[locked](atlasnote://note/" + lockedNote.ID + ")",
+		"[trashed](atlasnote://note/" + trashedNote.ID + ")",
+		"[out-of-scope](atlasnote://note/" + outOfScopeNote.ID + ")",
+		"[missing](atlasnote://note/" + missingID + ")",
+	}, "\n")
+	publicNote, err = notes.Update(ctx, publicNote.ID, note.UpdateInput{Content: &hiddenContent, ExpectedRevision: &publicNote.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenAnalysis, err := organizer.AnalyzeExternal(ctx, "space", AnalysisInput{Scope: "space"}, access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hiddenAnalysis.AnalyzedNotes != 1 || hiddenAnalysis.SkippedLocked != 0 || hiddenAnalysis.SkippedTrash != 0 {
+		t.Fatalf("restricted analysis leaked hidden target counts: %#v", hiddenAnalysis)
+	}
+	if !reflect.DeepEqual(normalizedCandidates(existingAnalysis), normalizedCandidates(hiddenAnalysis)) {
+		t.Fatalf("protected/locked/trashed result differs from other hidden targets: existing=%#v hidden=%#v", existingAnalysis.Candidates, hiddenAnalysis.Candidates)
+	}
+	for _, candidate := range hiddenAnalysis.Candidates {
+		if candidate.Kind == KindBrokenLink && candidate.NoteID == publicNote.ID {
+			t.Fatalf("restricted hidden target produced broken candidate: %#v", candidate)
+		}
+	}
+	encoded, err := json.Marshal(hiddenAnalysis.Candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hidden := range []string{
+		protectedNote.ID, protectedNote.Title, lockedNote.ID, lockedNote.Title,
+		trashedNote.ID, trashedNote.Title, outOfScopeNote.ID, outOfScopeNote.Title, missingID,
+		`"protected":true`, `"locked":true`, `"isTrashed":true`,
+	} {
+		if strings.Contains(string(encoded), hidden) {
+			t.Fatalf("restricted candidates exposed hidden target value %q: %s", hidden, encoded)
+		}
+	}
+
+	guiAnalysis, err := organizer.Analyze(ctx, "space", AnalysisInput{Scope: "space"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var guiBroken bool
+	for _, candidate := range guiAnalysis.Candidates {
+		if candidate.Kind == KindBrokenLink && candidate.NoteID == publicNote.ID && candidate.RelatedID == missingID {
+			guiBroken = true
+		}
+	}
+	if !guiBroken {
+		t.Fatal("unrestricted GUI analysis no longer reports a genuinely missing link")
+	}
+}
+
+func TestExternalAnalysisCancellationDoesNotCreateSession(t *testing.T) {
+	t.Parallel()
+	notes, organizer := newOrganizationFixture(t)
+	created, err := notes.Create(t.Context(), note.CreateInput{Title: "Cancelled", Content: "# Candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = organizer.AnalyzeExternal(ctx, "space", AnalysisInput{Scope: "space"}, AnalysisAccess{
+		OwnerID: "cancelled-owner", ScopeRestricted: true, AllowedNoteIDs: map[string]bool{created.ID: true},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled analysis error = %v", err)
+	}
+	organizer.mu.Lock()
+	defer organizer.mu.Unlock()
+	if len(organizer.sessions) != 0 {
+		t.Fatalf("cancelled analysis created %d sessions", len(organizer.sessions))
 	}
 }
 

@@ -11,8 +11,10 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"atlasnote/internal/note"
+	"atlasnote/internal/organize"
 )
 
 const (
@@ -42,11 +44,16 @@ type accessGuard interface {
 type Service struct {
 	notes         noteReader
 	locks         accessGuard
+	organizer     *organize.Service
 	activeSpaceID string
 }
 
-func New(notes noteReader, locks accessGuard, activeSpaceID string) *Service {
-	return &Service{notes: notes, locks: locks, activeSpaceID: strings.TrimSpace(activeSpaceID)}
+func New(notes noteReader, locks accessGuard, activeSpaceID string, organizer ...*organize.Service) *Service {
+	service := &Service{notes: notes, locks: locks, activeSpaceID: strings.TrimSpace(activeSpaceID)}
+	if len(organizer) > 0 {
+		service.organizer = organizer[0]
+	}
+	return service
 }
 
 func (s *Service) Execute(ctx context.Context, principal Principal, request Request) Response {
@@ -62,12 +69,14 @@ func (s *Service) Execute(ctx context.Context, principal Principal, request Requ
 	if s.activeSpaceID == "" || principal.StorageSpaceID != s.activeSpaceID || request.Scope.StorageSpaceID != s.activeSpaceID {
 		return failure(request.RequestID, StatusRejected, "SCOPE_MISMATCH", "要求された保存空間にはアクセスできません。", false)
 	}
-	required, ok := operationPermission(request.Operation)
+	required, ok := operationPermissions(request.Operation)
 	if !ok {
 		return failure(request.RequestID, StatusRejected, "OPERATION_NOT_ALLOWED", "この読み取り操作は公開されていません。", false)
 	}
-	if !principal.Permissions[required] {
-		return failure(request.RequestID, StatusRejected, "PERMISSION_DENIED", "この読み取り権限は許可されていません。", false)
+	for _, permission := range required {
+		if !principal.Permissions[permission] {
+			return failure(request.RequestID, StatusRejected, "PERMISSION_DENIED", "この読み取り権限は許可されていません。", false)
+		}
 	}
 	ctx, releaseContent := s.notes.BeginExternalRead(ctx)
 	defer releaseContent()
@@ -88,18 +97,24 @@ func (s *Service) Execute(ctx context.Context, principal Principal, request Requ
 		response = s.listBacklinks(ctx, principal, request)
 	case OperationRelated:
 		response = s.relatedNotes(ctx, principal, request)
+	case OperationOrganizeAnalyze:
+		response = s.analyzeOrganization(ctx, principal, request)
+	case OperationOrganizeGetCandidates:
+		response = s.getOrganizationCandidates(ctx, principal, request)
 	}
 	return response
 }
 
-func operationPermission(operation string) (string, bool) {
+func operationPermissions(operation string) ([]string, bool) {
 	switch operation {
 	case OperationNotesList, OperationNotebooksList, OperationTagsList:
-		return PermissionMetadata, true
+		return []string{PermissionMetadata}, true
 	case OperationNotesGet, OperationNotesSearch, OperationBacklinks, OperationRelated:
-		return PermissionContent, true
+		return []string{PermissionContent}, true
+	case OperationOrganizeAnalyze, OperationOrganizeGetCandidates:
+		return []string{PermissionProposal, PermissionContent}, true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
@@ -482,6 +497,384 @@ func (s *Service) relatedNotes(ctx context.Context, principal Principal, request
 		})
 	}
 	return success(request.RequestID, RelatedData{Items: items})
+}
+
+const (
+	maxOrganizationCandidateBytes     = 256 << 10
+	maxOrganizationCandidatePageBytes = 512 << 10
+)
+
+func (s *Service) analyzeOrganization(ctx context.Context, principal Principal, request Request) Response {
+	var input OrganizeAnalyzeInput
+	if err := decodeParams(request.Params, &input); err != nil || s.organizer == nil {
+		return invalidParams(request.RequestID)
+	}
+	if input.Scope == "" {
+		input.Scope = "space"
+	}
+	limit, err := normalizeLimit(input.Limit, maxLimit)
+	if err != nil || !validOrganizationScope(input) {
+		return invalidParams(request.RequestID)
+	}
+	if !s.organizationScopeAllowed(ctx, principal, input) {
+		return resourceUnavailable(request.RequestID)
+	}
+	access := organizationAccess(principal)
+	analysis, err := s.organizer.AnalyzeExternal(ctx, s.activeSpaceID, organize.AnalysisInput{
+		Scope: input.Scope, NotebookID: input.NotebookID, NoteID: input.NoteID, RequestID: request.RequestID,
+	}, access)
+	if err != nil {
+		return organizationServiceError(request.RequestID, err)
+	}
+	snapshot, err := s.organizer.AnalysisSnapshot(s.activeSpaceID, principal.ClientID, analysis.SessionID, access)
+	if err != nil || !s.organizationSnapshotAllowed(ctx, principal, snapshot) {
+		return analysisUnavailable(request.RequestID)
+	}
+	candidates := organizationCandidatesForPrincipal(principal, snapshot)
+	page, next := pageOrganizationCandidates(candidates, 0, limit, OperationOrganizeGetCandidates, organizationCursorFingerprint(analysis.SessionID, ""))
+	return success(request.RequestID, OrganizeAnalyzeData{
+		AnalysisID: analysis.SessionID,
+		Summary: OrganizationSummary{
+			Scope: analysis.Scope, NotebookID: analysis.NotebookID, NoteID: analysis.NoteID,
+			StartedAt: analysis.StartedAt, ExpiresAt: snapshot.ExpiresAt, AnalyzedNotes: analysis.AnalyzedNotes,
+			SkippedLocked: analysis.SkippedLocked, SkippedTrash: analysis.SkippedTrash, CandidateCount: len(candidates),
+		},
+		Candidates: page, NextCursor: next,
+	})
+}
+
+func (s *Service) getOrganizationCandidates(ctx context.Context, principal Principal, request Request) Response {
+	var input OrganizeCandidatesInput
+	if err := decodeParams(request.Params, &input); err != nil || s.organizer == nil || !validID(input.AnalysisID) || !validOrganizationKind(input.Kind) {
+		return invalidParams(request.RequestID)
+	}
+	limit, err := normalizeLimit(input.Limit, maxLimit)
+	if err != nil {
+		return invalidParams(request.RequestID)
+	}
+	fingerprint := organizationCursorFingerprint(input.AnalysisID, input.Kind)
+	offset, err := decodeCursor(input.Cursor, OperationOrganizeGetCandidates, fingerprint)
+	if err != nil {
+		return cursorError(request.RequestID)
+	}
+	access := organizationAccess(principal)
+	snapshot, err := s.organizer.AnalysisSnapshot(s.activeSpaceID, principal.ClientID, input.AnalysisID, access)
+	if err != nil || !s.organizationSnapshotAllowed(ctx, principal, snapshot) {
+		return analysisUnavailable(request.RequestID)
+	}
+	candidates := organizationCandidatesForPrincipal(principal, snapshot)
+	if input.Kind != "" {
+		filtered := make([]OrganizationCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.Kind == input.Kind {
+				filtered = append(filtered, candidate)
+			}
+		}
+		candidates = filtered
+	}
+	if offset > len(candidates) {
+		return cursorError(request.RequestID)
+	}
+	page, next := pageOrganizationCandidates(candidates, offset, limit, OperationOrganizeGetCandidates, fingerprint)
+	return success(request.RequestID, OrganizeCandidatesData{
+		AnalysisID: input.AnalysisID, Candidates: page, NextCursor: next, ExpiresAt: snapshot.ExpiresAt,
+	})
+}
+
+func validOrganizationScope(input OrganizeAnalyzeInput) bool {
+	switch input.Scope {
+	case "space":
+		return input.NotebookID == "" && input.NoteID == ""
+	case "notebook", "descendants":
+		return validID(input.NotebookID) && input.NoteID == ""
+	case "note":
+		return validID(input.NoteID) && input.NotebookID == ""
+	default:
+		return false
+	}
+}
+
+func validOrganizationKind(kind string) bool {
+	if kind == "" {
+		return true
+	}
+	switch kind {
+	case organize.KindNotebookAssignment, organize.KindNotebookMove, organize.KindUnclassifiedNote,
+		organize.KindTagAssignment, organize.KindDuplicateNote, organize.KindEmptyNote, organize.KindBrokenLink,
+		organize.KindOrphanNote, organize.KindRelatedNote, organize.KindReciprocalLink, organize.KindTitle,
+		organize.KindDuplicateTag:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) organizationScopeAllowed(ctx context.Context, principal Principal, input OrganizeAnalyzeInput) bool {
+	switch input.Scope {
+	case "space":
+		if !principal.ScopeRestricted {
+			return true
+		}
+		if len(principal.AllowedNoteIDs)+len(principal.AllowedNotebookIDs) == 0 {
+			return false
+		}
+		for id := range principal.AllowedNoteIDs {
+			allowed, err := s.noteProtectionAllowed(ctx, id)
+			if err != nil || !allowed {
+				return false
+			}
+			item, err := s.notes.Get(ctx, id)
+			if err != nil || item.IsTrashed {
+				return false
+			}
+		}
+		for id := range principal.AllowedNotebookIDs {
+			allowed, err := s.notebookAllowed(ctx, principal, id)
+			if err != nil || !allowed {
+				return false
+			}
+		}
+		return true
+	case "notebook", "descendants":
+		allowed, err := s.notebookAllowed(ctx, principal, input.NotebookID)
+		return err == nil && allowed
+	case "note":
+		protected, err := s.noteProtectionAllowed(ctx, input.NoteID)
+		if err != nil || !protected {
+			return false
+		}
+		item, err := s.notes.Get(ctx, input.NoteID)
+		if err != nil || item.IsTrashed {
+			return false
+		}
+		allowed, err := s.noteAllowed(ctx, principal, item.ID, item.NotebookID)
+		return err == nil && allowed
+	default:
+		return false
+	}
+}
+
+func organizationAccess(principal Principal) organize.AnalysisAccess {
+	return organize.AnalysisAccess{
+		OwnerID: principal.ClientID, ScopeRestricted: principal.ScopeRestricted,
+		AllowedNoteIDs:     clonePrincipalScope(principal.AllowedNoteIDs),
+		AllowedNotebookIDs: clonePrincipalScope(principal.AllowedNotebookIDs),
+	}
+}
+
+func clonePrincipalScope(values map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for id, allowed := range values {
+		if allowed {
+			result[id] = true
+		}
+	}
+	return result
+}
+
+func (s *Service) organizationSnapshotAllowed(ctx context.Context, principal Principal, snapshot organize.AnalysisSnapshot) bool {
+	if snapshot.Analysis.SpaceID != s.activeSpaceID || time.Now().UTC().Before(snapshot.Analysis.StartedAt) {
+		return false
+	}
+	if snapshot.Analysis.NotebookID != "" {
+		allowed, err := s.notebookAllowed(ctx, principal, snapshot.Analysis.NotebookID)
+		if err != nil || !allowed {
+			return false
+		}
+	}
+	for _, id := range snapshot.AnalyzedNoteIDs {
+		protected, err := s.noteProtectionAllowed(ctx, id)
+		if err != nil || !protected {
+			return false
+		}
+		item, err := s.notes.Get(ctx, id)
+		if err != nil || item.IsTrashed || item.Revision != snapshot.AnalyzedNoteRevisions[id] {
+			return false
+		}
+		allowed, err := s.noteAllowed(ctx, principal, item.ID, item.NotebookID)
+		if err != nil || !allowed {
+			return false
+		}
+		noteTags, tagErr := s.notes.ListNoteTags(ctx, id)
+		if tagErr != nil || noteTags.Error != nil {
+			return false
+		}
+		currentTagIDs := make([]string, 0, len(noteTags.Tags))
+		for _, tag := range noteTags.Tags {
+			currentTagIDs = append(currentTagIDs, tag.ID)
+		}
+		sort.Strings(currentTagIDs)
+		if !equalOrganizationStrings(currentTagIDs, snapshot.AnalyzedNoteTagIDs[id]) {
+			return false
+		}
+	}
+	tags, err := s.notes.ListTags(ctx)
+	if err != nil {
+		return false
+	}
+	existingTags := make(map[string]bool, len(tags))
+	for _, item := range tags {
+		existingTags[item.ID] = true
+	}
+	scopedTags := make(map[string]bool)
+	for _, tagIDs := range snapshot.AnalyzedNoteTagIDs {
+		for _, id := range tagIDs {
+			scopedTags[id] = true
+		}
+	}
+	validatedNotebooks := make(map[string]bool)
+	for _, candidate := range snapshot.Candidates {
+		if candidate.SpaceID != s.activeSpaceID || candidate.TagID != "" && (!existingTags[candidate.TagID] || principal.ScopeRestricted && !scopedTags[candidate.TagID]) {
+			return false
+		}
+		if candidate.NoteID != "" {
+			revision, exists := snapshot.AnalyzedNoteRevisions[candidate.NoteID]
+			if !exists || candidate.BaseRevision > 0 && revision != candidate.BaseRevision {
+				return false
+			}
+		}
+		if candidate.RelatedID != "" && (candidate.RelatedTitle != "" || candidate.RelatedRevision > 0) {
+			revision, exists := snapshot.AnalyzedNoteRevisions[candidate.RelatedID]
+			if !exists || candidate.RelatedRevision > 0 && revision != candidate.RelatedRevision {
+				return false
+			}
+		}
+		if candidate.NotebookID != "" && !validatedNotebooks[candidate.NotebookID] {
+			allowed, notebookErr := s.notebookAllowed(ctx, principal, candidate.NotebookID)
+			if notebookErr != nil || !allowed {
+				return false
+			}
+			validatedNotebooks[candidate.NotebookID] = true
+		}
+	}
+	return true
+}
+
+func equalOrganizationStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func organizationCandidatesForPrincipal(principal Principal, snapshot organize.AnalysisSnapshot) []OrganizationCandidate {
+	result := make([]OrganizationCandidate, 0, len(snapshot.Candidates))
+	scopedTags := make(map[string]bool)
+	for _, tagIDs := range snapshot.AnalyzedNoteTagIDs {
+		for _, id := range tagIDs {
+			scopedTags[id] = true
+		}
+	}
+	for _, candidate := range snapshot.Candidates {
+		relatedID := candidate.RelatedID
+		if principal.ScopeRestricted && relatedID != "" && candidate.RelatedTitle == "" && candidate.RelatedRevision == 0 {
+			relatedID = ""
+		}
+		external := OrganizationCandidate{
+			ID: candidate.ID, Kind: candidate.Kind, NoteID: candidate.NoteID, NoteTitle: candidate.NoteTitle,
+			RelatedID: relatedID, RelatedTitle: candidate.RelatedTitle, NotebookID: candidate.NotebookID, TagID: candidate.TagID,
+			Reason: candidate.Reason, Before: sanitizeOrganizationMap(candidate.Before, principal, scopedTags),
+			Proposed: sanitizeOrganizationMap(candidate.Proposed, principal, scopedTags), Applicable: candidate.Applicable,
+			BaseRevision: candidate.BaseRevision, RelatedRevision: candidate.RelatedRevision,
+		}
+		encoded, _ := json.Marshal(external)
+		if len(encoded) > maxOrganizationCandidateBytes {
+			continue
+		}
+		result = append(result, external)
+	}
+	return result
+}
+
+func sanitizeOrganizationMap(value map[string]any, principal Principal, scopedTags map[string]bool) map[string]any {
+	if value == nil {
+		return nil
+	}
+	result := make(map[string]any, len(value))
+	for key, item := range value {
+		if !principal.ScopeRestricted {
+			result[key] = item
+			continue
+		}
+		switch key {
+		case "notebookId":
+			id, _ := item.(string)
+			if id == "" || principal.AllowedNotebookIDs[id] {
+				result[key] = item
+			}
+		case "tagId":
+			id, _ := item.(string)
+			if id == "" || scopedTags[id] {
+				result[key] = item
+			}
+		case "tagIds":
+			if ids, ok := item.([]string); ok {
+				filtered := make([]string, 0, len(ids))
+				for _, id := range ids {
+					if scopedTags[id] {
+						filtered = append(filtered, id)
+					}
+				}
+				result[key] = filtered
+			}
+		case "relatedId", "targetId":
+			id, _ := item.(string)
+			if principal.AllowedNoteIDs[id] {
+				result[key] = item
+			}
+		default:
+			result[key] = item
+		}
+	}
+	return result
+}
+
+func organizationCursorFingerprint(analysisID, kind string) string {
+	return cursorFingerprint(OperationOrganizeGetCandidates, struct {
+		AnalysisID string `json:"analysisId"`
+		Kind       string `json:"kind,omitempty"`
+	}{analysisID, kind})
+}
+
+func pageOrganizationCandidates(items []OrganizationCandidate, offset, limit int, operation, fingerprint string) ([]OrganizationCandidate, string) {
+	page := make([]OrganizationCandidate, 0, limit)
+	encodedBytes := 0
+	end := offset
+	for end < len(items) && len(page) < limit {
+		encoded, _ := json.Marshal(items[end])
+		if len(page) > 0 && encodedBytes+len(encoded) > maxOrganizationCandidatePageBytes {
+			break
+		}
+		page = append(page, items[end])
+		encodedBytes += len(encoded)
+		end++
+	}
+	if end < len(items) {
+		return page, encodeCursor(operation, fingerprint, end)
+	}
+	return page, ""
+}
+
+func analysisUnavailable(requestID string) Response {
+	return failure(requestID, StatusRejected, "ANALYSIS_UNAVAILABLE", "解析結果を取得できません。再解析してください。", false)
+}
+
+func organizationServiceError(requestID string, err error) Response {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return failure(requestID, StatusError, "ANALYSIS_CANCELLED", "整理解析は完了しませんでした。", true)
+	case errors.Is(err, note.ErrValidation):
+		return invalidParams(requestID)
+	case errors.Is(err, note.ErrNotFound), errors.Is(err, organize.ErrAnalysisUnavailable):
+		return analysisUnavailable(requestID)
+	default:
+		return failure(requestID, StatusError, "ANALYSIS_UNAVAILABLE", "整理解析を完了できませんでした。", true)
+	}
 }
 
 func (s *Service) noteAllowed(ctx context.Context, principal Principal, id string, notebookID *string) (bool, error) {

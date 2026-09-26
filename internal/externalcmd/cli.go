@@ -20,7 +20,7 @@ func Run(args []string, stdout, stderr io.Writer) (bool, int) {
 	if args[0] == "mcp" {
 		return true, RunMCP(args[1:], io.Reader(nil), stdout, stderr)
 	}
-	if args[0] != "notes" && args[0] != "notebooks" && args[0] != "tags" {
+	if args[0] != "notes" && args[0] != "notebooks" && args[0] != "tags" && args[0] != "organize" {
 		return false, 0
 	}
 	operation, params, parseErr := parseCommand(args, stderr)
@@ -169,6 +169,38 @@ func parseCommand(args []string, stderr io.Writer) (string, any, error) {
 			}
 			return readapi.OperationTagsList, input, nil
 		}
+	case "organize":
+		if len(args) < 2 {
+			return "", nil, errors.New("organize subcommand is required")
+		}
+		switch args[1] {
+		case "analyze":
+			input := readapi.OrganizeAnalyzeInput{Scope: "space"}
+			flags := newFlags("organize analyze", stderr)
+			flags.StringVar(&input.Scope, "scope", "space", "space, notebook, descendants, or note")
+			flags.StringVar(&input.NotebookID, "notebook", "", "notebook ID")
+			flags.StringVar(&input.NoteID, "note", "", "note ID")
+			flags.IntVar(&input.Limit, "limit", 0, "candidate result limit")
+			addJSONFlag(flags)
+			if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 {
+				return "", nil, errors.New("invalid organize analyze arguments")
+			}
+			return readapi.OperationOrganizeAnalyze, input, nil
+		case "candidates":
+			if len(args) < 3 {
+				return "", nil, errors.New("analysis ID is required")
+			}
+			input := readapi.OrganizeCandidatesInput{AnalysisID: args[2]}
+			flags := newFlags("organize candidates", stderr)
+			flags.StringVar(&input.Kind, "kind", "", "candidate kind")
+			flags.IntVar(&input.Limit, "limit", 0, "candidate result limit")
+			flags.StringVar(&input.Cursor, "cursor", "", "page cursor")
+			addJSONFlag(flags)
+			if err := flags.Parse(args[3:]); err != nil || flags.NArg() != 0 {
+				return "", nil, errors.New("invalid organize candidates arguments")
+			}
+			return readapi.OperationOrganizeGetCandidates, input, nil
+		}
 	}
 	return "", nil, errors.New("unknown read command")
 }
@@ -233,7 +265,7 @@ func exitCode(response readapi.Response) int {
 	}
 	if response.Error != nil && (response.Error.Code == "INVALID_ARGUMENT" || response.Error.Code == "CURSOR_INVALID" ||
 		response.Error.Code == "PERMISSION_DENIED" || response.Error.Code == "SCOPE_MISMATCH" || response.Error.Code == "RESOURCE_UNAVAILABLE" ||
-		response.Error.Code == "AUTHENTICATION_FAILED") {
+		response.Error.Code == "ANALYSIS_UNAVAILABLE" || response.Error.Code == "AUTHENTICATION_FAILED") {
 		return 2
 	}
 	return 4

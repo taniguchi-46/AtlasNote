@@ -30,6 +30,7 @@
 - Wails 経由の呼び出しは Composables や API クライアント層にまとめる。
 - Go 側はユースケース、Repository、Storage の責務を分ける。
 - CLI／MCPへ公開するノート操作は共通読み取り境界と認証済みIPCを通し、外部プロセスからSQLite／Markdownを直接開かない。CLIとMCPのPrincipalを分離し、MCPはinitialize時の保存空間・接続セッション・利用者が明示したnote／Notebook scopeへ固定する。MCP権限は親接続と公開scopeの共通部分に限定し、正常終了または有効期限で失効させる。既定scopeは0件とし、公開範囲外のメタデータ・本文・検索結果を返さない。新しい公開操作は権限、保存空間scope、入力上限、型付きエラーを定義し、Stageごとの公開許可リストへ追加する。
+- CLI／MCPの整理解析は既存Organization Serviceへ許可済みnote／Notebook集合を渡し、外部用に整理ロジックを複製しない。`P`と`R1`の両権限を必須とし、同一Note Serviceで保持済みのcontent accessだけをcontext経由で再利用する。broken-linkの実在判定と外部へ候補公開できる解析対象を分離し、restricted解析では明示公開note ID以外の実在／不存在を候補から区別できないようにする。保護・ロック・ゴミ箱・scope外対象を候補へ漏らさない。analysisIdは保存空間・外部クライアント・公開scope・期限へ束縛し、候補取得時にも現在の保護・ロック・ゴミ箱・revisionを再検証する。Stage Bの外部sessionからApplyを許可しない。
 - SQLite 操作は Repository に閉じ込め、UI やサービス層に SQL 詳細を漏らさない。
 - Markdown Storage は本文保存の責務を持ち、メタデータ管理は SQLite 側に寄せる。
 - AI API Key は平文ログや例外メッセージに出さない。

@@ -116,12 +116,7 @@ func (s *Service) beginContentAccess(ctx context.Context) func() {
 // reads note bodies. The returned context lets nested service calls reuse the
 // held access gate without reacquiring its RWMutex.
 func (s *Service) BeginOrganizationRead(ctx context.Context) (context.Context, func()) {
-	var releaseContent func()
-	if s.contentLocks != nil {
-		releaseContent = s.contentLocks.BeginContentAccess(ctx)
-	} else {
-		releaseContent = func() {}
-	}
+	releaseContent := s.beginContentAccess(ctx)
 	return context.WithValue(ctx, organizationContentAccessContextKey{}, s), releaseContent
 }
 

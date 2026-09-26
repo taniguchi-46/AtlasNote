@@ -113,7 +113,11 @@ func validateDescriptor(descriptor Descriptor) error {
 	if ip == nil || !ip.IsLoopback() {
 		return errors.New("IPC endpoint is not loopback-only")
 	}
-	allowed := map[string]bool{readapi.PermissionMetadata: true, readapi.PermissionContent: true}
+	allowed := map[string]bool{
+		readapi.PermissionMetadata: true,
+		readapi.PermissionContent:  true,
+		readapi.PermissionProposal: true,
+	}
 	if len(descriptor.Permissions) == 0 || len(descriptor.Permissions) > len(allowed) {
 		return errors.New("invalid IPC permissions")
 	}

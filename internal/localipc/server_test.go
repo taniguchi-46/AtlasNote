@@ -111,7 +111,7 @@ func TestMCPSessionPermissionsAreLimitedByParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := <-principalReceived
-	if !principal.Permissions[readapi.PermissionMetadata] || principal.Permissions[readapi.PermissionContent] {
+	if !principal.Permissions[readapi.PermissionMetadata] || principal.Permissions[readapi.PermissionContent] || principal.Permissions[readapi.PermissionProposal] {
 		t.Fatalf("MCP permissions were not intersected with parent: %+v", principal.Permissions)
 	}
 	if !principal.ScopeRestricted || !principal.AllowedNoteIDs[noteID] {

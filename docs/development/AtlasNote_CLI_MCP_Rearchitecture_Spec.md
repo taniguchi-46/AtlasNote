@@ -59,6 +59,16 @@
 
 AtlasNote本体を先に起動し、対象の保存空間をアクティブにしてから接続する。`--note`と`--notebook`は繰り返し指定でき、省略時はnote／Notebook／タグのメタデータ一覧を含めて0件公開となる。`--notebook`は指定Notebookに直接所属するnoteだけを含み、子孫Notebookは自動公開しない。公開scopeまたは保存空間を変更した場合はMCPプロセスを再起動する。descriptorやセッショントークンをMCP設定へ転記しない。
 
+## Stage B 実装契約（2026-09-26）
+
+- `organize.analyze` と `organize.get_candidates` をCLI／MCP共通境界へ追加した。CLIは `AtlasNote.exe organize analyze --scope <space|notebook|descendants|note> [--notebook <id>|--note <id>] [--limit 1..100] --json` と `AtlasNote.exe organize candidates <analysisId> [--kind <kind>] [--limit 1..100] [--cursor <cursor>] --json` を使う。MCPも同名の2ツールを公開し、Stage Aと同じ共通レスポンス、requestId、終了コード、stdio `structuredContent` 契約を使う。
+- 解析は既存`internal/organize.Service`の一括候補生成、30分・最大5件のメモリsessionを再利用する。外部解析sessionには保存空間、外部クライアントID、MCP公開note／Notebook集合を追加で束縛し、別クライアント、別MCPセッション、期限切れ、偽造IDを`ANALYSIS_UNAVAILABLE`で拒否する。外部sessionは既存GUIのApply経路からも適用できないプレビュー専用とする。
+- MCP解析は明示公開note、または明示公開Notebookへ直接所属するnoteだけを候補エンジンへ渡す。Notebook・タグ候補も公開対象から導出できる集合に限定し、未公開note／NotebookのID、タイトル、本文、整理理由、件数を返さない。restricted解析ではリンク先の実在・保護状態を候補から判別できないようbroken-link候補を返さない。通常GUI／unrestricted解析では実在しないIDを従来どおりbroken候補にする。既定公開0件では`P`権限を付与せず、解析できない。`descendants`でも子Notebookは自動公開せず、同じMCP起動時に明示公開された対象だけを解析する。
+- `analyze`と`get_candidates`の両方で認証済みIPC、保存空間、クライアント、`P`と`R1`の両権限、公開scope、整理session期限、現在の保護・ロック・ゴミ箱、候補revisionを再検証する。外部読み取りが保持済みのcontent accessは同一Note Serviceのcontextに限ってOrganization Serviceで再利用し、保護状態変更との相互待ちを避けつつ保護・ロック境界を維持する。解析後に対象がscope外へ移動した場合や保護・ロック・ゴミ箱・revisionが変わった場合は、候補や候補件数を返さず解析sessionを利用不可として扱う。
+- `analyze`は要約と候補の最初のページ、`get_candidates`は任意kindの候補ページと`expiresAt`を返す。cursorはanalysisIdとkindへ束縛する。候補は最大100件に加え、外部候補1件256 KiB・候補ページ512 KiBで制限し、3 MiB IPC上限とMCPのJSON text／structuredContent二重表現に余裕を持たせる。大きすぎる候補は外部公開集合から除外する。
+- 既存解析が5,000ノートで約20.5秒を要する記録に対し、15秒のIPC client／server write timeoutでは必ず切断されるため、同期処理とキャンセル伝播を維持したまま上限だけ60秒へ延長した。読み取り中と候補生成段階間でcontextキャンセルを確認する。独立ジョブ、ストリーミング、詳細進捗プロトコルはStage Bでは追加しない。
+- Stage Bは候補生成・取得のみで、候補適用、ノート更新・削除、GUI承認、統合ターミナル、SQLite／Markdown直接アクセス、DB schema変更は行わない。
+
 ## 0. 最優先の前提と非目標
 
 1. AtlasNoteはローカルファーストのノートアプリ。既存3ペイン、Markdown正本、SQLiteメタデータ、WebDAV同期、ロック、revision/CAS、操作journal、バックアップ、未保存draft保護を維持する。

@@ -29,7 +29,7 @@ func NewClient(descriptor Descriptor) (*Client, error) {
 	}
 	return &Client{
 		descriptor: descriptor,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 

@@ -2033,7 +2033,7 @@ func (a *App) initializeServices(ctx context.Context, db *sql.DB, store *storage
 		}
 		a.newStorageArea = false
 	}
-	readService := readapi.New(service, a.contentLocks, a.activeSpace.ID)
+	readService := readapi.New(service, a.contentLocks, a.activeSpace.ID, a.organizer)
 	readIPC, err := localipc.Start(localipc.ServerConfig{
 		ManagementRoot: a.managementRoot,
 		StorageSpaceID: a.activeSpace.ID,

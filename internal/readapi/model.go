@@ -17,16 +17,19 @@ const (
 const (
 	PermissionMetadata = "R0"
 	PermissionContent  = "R1"
+	PermissionProposal = "P"
 )
 
 const (
-	OperationNotesList     = "notes.list"
-	OperationNotesGet      = "notes.get"
-	OperationNotesSearch   = "notes.search"
-	OperationNotebooksList = "notebooks.list"
-	OperationTagsList      = "tags.list"
-	OperationBacklinks     = "notes.backlinks"
-	OperationRelated       = "notes.related"
+	OperationNotesList             = "notes.list"
+	OperationNotesGet              = "notes.get"
+	OperationNotesSearch           = "notes.search"
+	OperationNotebooksList         = "notebooks.list"
+	OperationTagsList              = "tags.list"
+	OperationBacklinks             = "notes.backlinks"
+	OperationRelated               = "notes.related"
+	OperationOrganizeAnalyze       = "organize.analyze"
+	OperationOrganizeGetCandidates = "organize.get_candidates"
 )
 
 type Principal struct {
@@ -161,6 +164,20 @@ type RelatedInput struct {
 	Limit       int     `json:"limit,omitempty"`
 }
 
+type OrganizeAnalyzeInput struct {
+	Scope      string `json:"scope"`
+	NotebookID string `json:"notebookId,omitempty"`
+	NoteID     string `json:"noteId,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+}
+
+type OrganizeCandidatesInput struct {
+	AnalysisID string `json:"analysisId"`
+	Kind       string `json:"kind,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
+}
+
 type NoteListData struct {
 	Notes      []NoteSummary `json:"notes"`
 	NextCursor string        `json:"nextCursor,omitempty"`
@@ -192,4 +209,47 @@ type BacklinkData struct {
 
 type RelatedData struct {
 	Items []RelatedItem `json:"items"`
+}
+
+type OrganizationCandidate struct {
+	ID              string         `json:"id"`
+	Kind            string         `json:"kind"`
+	NoteID          string         `json:"noteId,omitempty"`
+	NoteTitle       string         `json:"noteTitle,omitempty"`
+	RelatedID       string         `json:"relatedId,omitempty"`
+	RelatedTitle    string         `json:"relatedTitle,omitempty"`
+	NotebookID      string         `json:"notebookId,omitempty"`
+	TagID           string         `json:"tagId,omitempty"`
+	Reason          string         `json:"reason"`
+	Before          map[string]any `json:"before"`
+	Proposed        map[string]any `json:"proposed,omitempty"`
+	Applicable      bool           `json:"applicable"`
+	BaseRevision    int64          `json:"baseRevision,omitempty"`
+	RelatedRevision int64          `json:"relatedRevision,omitempty"`
+}
+
+type OrganizationSummary struct {
+	Scope          string    `json:"scope"`
+	NotebookID     string    `json:"notebookId,omitempty"`
+	NoteID         string    `json:"noteId,omitempty"`
+	StartedAt      time.Time `json:"startedAt"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	AnalyzedNotes  int       `json:"analyzedNotes"`
+	SkippedLocked  int       `json:"skippedLocked"`
+	SkippedTrash   int       `json:"skippedTrash"`
+	CandidateCount int       `json:"candidateCount"`
+}
+
+type OrganizeAnalyzeData struct {
+	AnalysisID string                  `json:"analysisId"`
+	Summary    OrganizationSummary     `json:"summary"`
+	Candidates []OrganizationCandidate `json:"candidates"`
+	NextCursor string                  `json:"nextCursor,omitempty"`
+}
+
+type OrganizeCandidatesData struct {
+	AnalysisID string                  `json:"analysisId"`
+	Candidates []OrganizationCandidate `json:"candidates"`
+	NextCursor string                  `json:"nextCursor,omitempty"`
+	ExpiresAt  time.Time               `json:"expiresAt"`
 }

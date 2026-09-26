@@ -118,7 +118,7 @@ func RunMCP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				"protocolVersion": supportedMCPProtocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 				"serverInfo":      map[string]any{"name": "atlasnote", "version": "1"},
-				"instructions":    "Atlas Note本体が公開する、保存空間に限定された読み取り専用ツールです。",
+				"instructions":    "Atlas Note本体が公開する、保存空間に限定された読み取り・非破壊整理解析ツールです。",
 			}
 		case "ping":
 			response.Result = map[string]any{}
@@ -255,7 +255,8 @@ func mcpErrorResult(code, message string, retryable bool, requestID string) map[
 func mcpOperation(name string) (string, bool) {
 	switch name {
 	case readapi.OperationNotesList, readapi.OperationNotesGet, readapi.OperationNotesSearch,
-		readapi.OperationNotebooksList, readapi.OperationTagsList, readapi.OperationBacklinks, readapi.OperationRelated:
+		readapi.OperationNotebooksList, readapi.OperationTagsList, readapi.OperationBacklinks, readapi.OperationRelated,
+		readapi.OperationOrganizeAnalyze, readapi.OperationOrganizeGetCandidates:
 		return name, true
 	default:
 		return "", false
@@ -289,6 +290,16 @@ func mcpTools() []mcpTool {
 		{Name: readapi.OperationRelated, Description: "リンク・タグ・語句に基づく関連ノート候補を取得します。", InputSchema: schema(map[string]any{
 			"noteId": idProperty(), "notebookId": idProperty(), "descendants": map[string]any{"type": "boolean"}, "limit": limitProperty(20),
 		}, []string{"noteId"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationOrganizeAnalyze, Description: "明示公開範囲だけを非破壊で解析し、整理候補の最初のページを返します。", InputSchema: schema(map[string]any{
+			"scope": enumProperty("space", "notebook", "descendants", "note"), "notebookId": idProperty(),
+			"noteId": idProperty(), "limit": limitProperty(100),
+		}, []string{"scope"}), OutputSchema: objectOutput},
+		{Name: readapi.OperationOrganizeGetCandidates, Description: "同じ認証済みセッションが作成した整理解析から候補をページ取得します。", InputSchema: schema(map[string]any{
+			"analysisId": idProperty(), "kind": enumProperty(
+				"notebook-assignment", "notebook-move", "unclassified-note", "tag-assignment", "duplicate-note", "empty-note",
+				"broken-link", "orphan-note", "related-note", "reciprocal-link", "title", "duplicate-tag"),
+			"limit": limitProperty(100), "cursor": stringProperty(),
+		}, []string{"analysisId"}), OutputSchema: objectOutput},
 	}
 }
 

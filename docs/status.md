@@ -2,6 +2,12 @@
 
 最終更新: 2026-09-26
 
+## CLI・MCP・統合ターミナル再編 Stage B（2026-09-26）
+
+既存`internal/organize.Service`の一括候補生成と30分・最大5件sessionを再利用し、非破壊の`organize.analyze`／`organize.get_candidates`をCLIとMCPへ追加した。外部解析sessionは保存空間、クライアント／MCPセッション、明示公開note／Notebook集合へ束縛し、既定公開0件、別session、期限切れ、偽造ID、不正cursor、保護・ロック・ゴミ箱・scope／revision変更をfail-closedで拒否する。両操作は`P`と`R1`を必須とする。外部読み取りが同一Note Serviceで保持済みのcontent accessをOrganization Serviceが再利用し、保護状態変更との相互待ちを防ぐ。MCPでは公開対象だけを解析エンジンへ渡し、Notebook・タグ候補も公開対象から導出可能な集合へ限定する。broken-link判定用の実在ID集合は解析可能集合から分離し、restricted解析では明示公開note ID以外のscope外実在／不存在、保護、ロック、ゴミ箱を同じ候補結果として扱い、対象情報を外部結果へ漏らさない。通常GUI／unrestricted解析は従来のbroken-link判定を維持する。外部sessionは既存GUI Applyから適用できない。候補は件数とJSONサイズの両方でページングし、DB schema、Markdown、既存GUI、保存・同期・バックアップは変更していない。
+
+資料に記録済みの5,000ノート解析約20.5秒に対して従来15秒IPC timeoutでは切断されるため、同期処理のままclient／server write timeoutを60秒へ延長した。独立ジョブ、ストリーミング、外部進捗プロトコルは追加していない。Stage B対象Goテスト、既存Stage A／GUI回帰、`go vet ./...`、Frontend整理・コンテンツロック回帰、typecheck、lint、production build、bindings生成付きWails Windows/amd64 clean buildとNSIS作成、`git diff --check`は成功した。隔離したAPPDATA／LOCALAPPDATAでの`go test ./... -count=1`はStage Bを含む全対象パッケージが成功し、既知の`internal/appcleanup` Windows pin／cleanupテストだけがユーザープロファイルへのアクセス拒否で失敗した。実Claude Code／Copilot接続、Wails GUI手動操作、パッケージ版Windows実機確認、5,000ノート再計測はStage A〜E後の最終統合テストへ持ち越す。
+
 ## CLI・MCP・統合ターミナル再編 Stage 0（2026-09-26）
 
 `codex/support` を `codex/pre-phase5-future-features` へfast-forward統合し、統合HEADから `codex/cli-mcp-terminal-rearchitecture` を作成した。Go全テスト、Frontend全34テスト、型チェック、別一時出力先へのbuildは成功。既存 `frontend/dist` への通常buildは使用中ファイルの `EBUSY` で未完了。現行コードと仕様案の差分は [再編仕様書](development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md#stage-0-実コード照合2026-09-26) に記録した。CLI/MCP/IPCと統合ターミナルは未実装で、旧AI・整理GUIと保存済みAIデータは維持する。

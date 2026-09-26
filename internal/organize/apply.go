@@ -21,7 +21,9 @@ func (s *Service) ApplyCandidates(ctx context.Context, spaceID string, input App
 	s.mu.Lock()
 	session, sessionOK := s.sessions[input.SessionID]
 	candidates := make(map[string]Candidate, len(input.CandidateIDs))
-	if sessionOK && session.spaceID == spaceID {
+	// External Stage B analyses are preview-only. They must never become
+	// applicable through the existing GUI mutation path.
+	if sessionOK && session.spaceID == spaceID && session.ownerID == "" {
 		for _, id := range input.CandidateIDs {
 			if candidate, ok := session.candidate[id]; ok && candidate.SpaceID == spaceID {
 				candidates[id] = candidate
@@ -29,7 +31,7 @@ func (s *Service) ApplyCandidates(ctx context.Context, spaceID string, input App
 		}
 	}
 	s.mu.Unlock()
-	if !sessionOK || session.spaceID != spaceID {
+	if !sessionOK || session.spaceID != spaceID || session.ownerID != "" {
 		for _, id := range input.CandidateIDs {
 			results[id] = staleResult(id)
 		}

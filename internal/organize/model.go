@@ -56,6 +56,26 @@ type AnalysisInput struct {
 	RequestID  string `json:"requestId,omitempty"`
 }
 
+// AnalysisAccess limits an external analysis to the notes and notebooks that
+// were explicitly published to one authenticated client session. GUI analyses
+// leave ScopeRestricted false and keep the existing whole-space behaviour.
+type AnalysisAccess struct {
+	OwnerID            string
+	ScopeRestricted    bool
+	AllowedNoteIDs     map[string]bool
+	AllowedNotebookIDs map[string]bool
+}
+
+type AnalysisSnapshot struct {
+	Analysis              Analysis
+	ExpiresAt             time.Time
+	Candidates            []Candidate
+	AnalyzedNoteIDs       []string
+	AnalyzedNoteRevisions map[string]int64
+	AnalyzedNoteTagIDs    map[string][]string
+	Access                AnalysisAccess
+}
+
 type AnalysisProgress struct {
 	Phase          string `json:"phase"`
 	ProcessedNotes int    `json:"processedNotes"`
