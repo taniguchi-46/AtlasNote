@@ -5,7 +5,6 @@ import { listBacklinks, searchNoteLinkTargets } from '../api/noteLinks'
 import { relatedNotes } from '../api/relatedNotes'
 import { createLatestRequestGuard } from '../utils/latestRequestGuard'
 import { useNotificationStore } from './useNotificationStore'
-import { useAIChatStore } from './useAIChatStore'
 
 const BACKLINK_PAGE_SIZE = 20
 const LINK_TARGET_PAGE_SIZE = 20
@@ -25,7 +24,6 @@ export const useNoteLinkStore = defineStore('noteLinks', () => {
   const relatedDescendants = ref(false)
   const isRelatedVisible = ref(false)
   const relatedRequests = createLatestRequestGuard()
-  let relatedGeneration = 0
 
   const targetQuery = ref('')
   const targetItems = ref<note.SearchItem[]>([])
@@ -37,7 +35,6 @@ export const useNoteLinkStore = defineStore('noteLinks', () => {
   const notificationStore = useNotificationStore()
 
   function clearRelated() {
-    relatedGeneration += 1
     relatedRequests.begin()
     relatedItems.value = []
     relatedError.value = null
@@ -66,7 +63,6 @@ export const useNoteLinkStore = defineStore('noteLinks', () => {
   }
 
   async function loadRelated(noteId: string) {
-    relatedGeneration += 1
     const isLatestRequest = relatedRequests.begin()
     relatedItems.value = []
     relatedError.value = null
@@ -83,20 +79,6 @@ export const useNoteLinkStore = defineStore('noteLinks', () => {
 
   async function refreshRelatedIfVisible(noteId: string) {
     if (isRelatedVisible.value) await loadRelated(noteId)
-  }
-
-  async function addRelatedContext(noteId: string, candidate: note.RelatedNoteItem): Promise<boolean> {
-    const generation = relatedGeneration
-    if (!relatedItems.value.some((item) => item.noteId === candidate.noteId && item.revision === candidate.revision)) return false
-    try {
-      const result = await relatedNotes(relatedInput(noteId))
-      if (generation !== relatedGeneration) return false
-      const current = result.items?.find((item) => item.noteId === candidate.noteId && item.revision === candidate.revision)
-      if (!current) return false
-      return useAIChatStore().addNoteContext(current.noteId, current.title)
-    } catch {
-      return false
-    }
   }
 
   async function loadBacklinks(noteId: string) {
@@ -235,7 +217,6 @@ export const useNoteLinkStore = defineStore('noteLinks', () => {
     loadRelated,
     refreshRelatedIfVisible,
     clearRelated,
-    addRelatedContext,
     targetQuery,
     targetItems,
     isSearchingTargets,

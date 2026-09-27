@@ -1066,6 +1066,17 @@ func (a *App) ListAIArtifacts() aiservice.AIArtifactListResponse {
 	return aiservice.AIArtifactListResponse{Items: items}
 }
 
+func (a *App) ListAIArtifactsPage(kind string, offset int) aiservice.AIArtifactPageResponse {
+	if a.aiService == nil {
+		return aiservice.AIArtifactPageResponse{Items: []aiservice.AIArtifact{}, Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}
+	}
+	items, hasNext, err := a.aiService.ListArtifactsPage(a.ctx, kind, offset)
+	if err != nil {
+		return aiservice.AIArtifactPageResponse{Items: []aiservice.AIArtifact{}, Error: aiservice.SafeErrorFrom(err)}
+	}
+	return aiservice.AIArtifactPageResponse{Items: items, HasNext: hasNext}
+}
+
 func (a *App) GetAIArtifact(id string) aiservice.AIArtifactResponse {
 	if a.aiService == nil {
 		return aiservice.AIArtifactResponse{Error: aiservice.SafeErrorFrom(aiservice.ErrConfigurationUnavailable)}

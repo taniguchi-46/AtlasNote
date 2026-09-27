@@ -52,8 +52,8 @@ Go Backend
 | Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
 | Backup / Restore | アクティブな保存空間のSQLite・Markdownを設定されたアーカイブルートへ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/backup-restore.md`を正とする |
 | WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、完了済み会話、明示保存した成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
-| Organization Center | ノート／Notebook／タグの整理候補を読み取り解析し、利用者が明示承認した候補だけ既存Note Serviceと保存laneへ適用する。解析sessionとレビュー状態はscopeごとにメモリ保持し、scope切替では相互に無効化せず、ロック時は全sessionを無効化する。詳細は`docs/development/organization-center.md`を正とする |
+| Legacy AI Records | 内蔵AI生成GUIはStage Eで撤去。既存のAI履歴・成果物・要約はアクティブ保存空間のSQLiteに保持し、設定のread-only画面からWails List/Getで閲覧する。成果物と要約は別々の100件ページで読み、旧List API契約を維持する。自動移行・削除・Markdown変換はしない。旧認証情報もCredential Storeから自動削除せず、CLI／MCPでは利用しない。`internal/ai.Service`と旧Wails APIは記録アクセス互換性のため残す。旧生成経路の仕様は`docs/development/ai-chat.md`に履歴として残る |
+| Organization Service | `internal/organize.Service`はStage B／CのCLI・MCP整理候補解析と承認後適用で現役。旧整理GUIはStage Eで撤去し、Wails旧Organization APIは互換層として残す。旧GUI仕様は`docs/development/organization-center.md`に履歴として残る |
 | External Application API | `internal/readapi`が既存Note ServiceとOrganization Serviceを再利用し、CLI／MCP共通の読み取り・候補・承認待ち変更要求契約、保存空間scope、R0／R1／P／W権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。Wは操作登録までで、承認・適用はWails GUIからだけ行う。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
 | Integrated Terminal | `SupportWorkspace`のterminalタブからWails専用APIへ接続する。`internal/terminal`がWindows ConPTY＋Job Object／Unix PTY＋process groupの1 sessionを管理し、ACK付きイベントで出力を送る。shellは利用者権限で動作し、MCPの公開scopeによるsandboxではない。停止・アプリ終了で子プロセス群を解放する |
 
@@ -65,8 +65,8 @@ Go Backend
 - 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- `SupportWorkspace`が整理／AI／変更確認／ターミナルの共通枠、選択タブ、最小化、浮動座標を管理する。`OrganizationCenter`と`AIWorkspace`は常時マウントし、表示だけを切り替える。解析sessionは`useOrganizationStore`、AIの入力・timeline・処理は既存AI Storeに維持する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。ノート未選択でも整理タブを利用できる。バックリンク一覧の表示方式は維持し、整理操作だけ共通枠へ導く。
-- 共通パネルの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、API Keyは`localStorage`へ保持しない。完了済みのuser／assistant会話はアクティブ保存空間のSQLiteへ既定で履歴保存し、一覧・再開・同じ履歴IDの更新を行う。tool trace、認証情報、WebDAV同期は履歴保存対象外とする。
+- `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標を管理する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
+- 共通パネルの右側／下側配置、右側幅／下側高さは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。旧AI記録は既存保存空間のSQLite、旧認証情報は既存Credential Storeから移動しない。外部AIはターミナル＋明示scopeのCLI／MCPを正式経路とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - ローカルCLIとstdio MCPは`internal/externalcmd`から同じ認証済みIPCへ接続するが、Principalとセッショントークンは分離する。MCPは起動時に明示された公開scopeと初回接続先を保持し、descriptorを呼び出しごとに再読込しない。MCP権限は親接続と公開scopeの共通部分に限定し、正常終了または30分の有効期限でセッションを失効する。外部プロセスへRepository、SQLiteパス、Markdownパス、セッショントークンをAPI結果として公開せず、本体終了・保存空間全体のロック時はIPCを停止する。
@@ -141,7 +141,7 @@ Go Backend
 | 連携 | 方針 |
 | --- | --- |
 | WebDAV | Phase 3で採用する同期方式。コア実装済み・実サーバー受け入れ確認中で、`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧は `docs/development/webdav-sync.md` を正とする |
-| AI API | ユーザー自身の API Key を利用する。初期プロバイダーはOpenRouterとGemini APIで、モデル一覧はプロバイダーから取得する。AI設定のプロバイダーID・モデルID・credential referenceとAPI Key、要約履歴、AI会話、成果物は端末ローカルであり、WebDAV同期しない。接続先は固定HTTPSのみで、proxy・redirect・自動retryは提供しない。Go側Provider adapterは接続確認、モデル一覧、要約、AI司書、AIアシスタント、ライティングを公開し、Gemini APIは保存を伴わない`generateContent`、OpenRouterはZDR・データ収集拒否・下流fallback無効で実行する。要約は選択モデルのコンテキスト長から安全な入力上限を判定し、本文の自動切詰め・分割は行わない。AI設定は下書き・接続確認・明示適用で更新し、外部送信前に保存済み本文とrevisionのsnapshotを確認する。Web検索はProvider能力と実行ごとの明示確認が揃う場合だけ許可し、外部結果を信頼できない入力として扱う |
+| 外部AI | Stage E以降の正式経路は統合ターミナル＋CLI／MCP。MCPは明示scopeに限定し、ターミナルはsandboxではない。旧Provider adapterとWails生成APIは記録List/Getと旧データ互換性のためBackendに残るが、Frontendに旧生成・Provider設定導線を設けない。旧AI記録は元のSQLiteに保持し、WebDAV同期しない |
 | OS Keychain | WebDAVパスワードとAI API KeyはCredential Manager / Keychain / Secret Serviceへ別のservice namespaceで保存し、利用不可時はsession限定とする。AI API Keyを`.env`、SQLite、Markdown、`localStorage`へ保存しない |
 
 ### 外部Markdownのraw HTML
@@ -174,7 +174,7 @@ Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した
 
 ## Local Intelligence
 
-初期版の関連候補は`note.Service.RelatedNotes`から`note.Repository`のリンク・タグ索引と既存FTS検索を読み取る。Wails APIは現在の保存空間だけを対象とし、Markdown正本やDB schemaを変更しない。UIは既存バックリンク内へ表示し、AI参照はIDのみを既存チャットStoreへ渡す。詳細は[`../development/local-intelligence.md`](../development/local-intelligence.md)。
+初期版の関連候補は`note.Service.RelatedNotes`から`note.Repository`のリンク・タグ索引と既存FTS検索を読み取る。Wails APIは現在の保存空間だけを対象とし、Markdown正本やDB schemaを変更しない。UIは既存バックリンク内へ読み取り専用で表示する。旧AIチャットへの参照追加導線はStage Eで撤去した。詳細は[`../development/local-intelligence.md`](../development/local-intelligence.md)。
 
 ## 未確定事項
 

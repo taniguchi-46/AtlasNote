@@ -396,6 +396,12 @@ type AIArtifactListResponse struct {
 	Error *SafeError   `json:"error,omitempty"`
 }
 
+type AIArtifactPageResponse struct {
+	Items   []AIArtifact `json:"items"`
+	HasNext bool         `json:"hasNext"`
+	Error   *SafeError   `json:"error,omitempty"`
+}
+
 type AIDeleteResponse struct {
 	Deleted bool       `json:"deleted"`
 	Error   *SafeError `json:"error,omitempty"`

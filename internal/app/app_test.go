@@ -808,6 +808,15 @@ func TestAppAIRecordLifecycleUsesLocalDatabaseWithoutChangingSyncState(t *testin
 	if artifacts.Error != nil || len(artifacts.Items) != 1 || artifacts.Items[0].ID != artifactID {
 		t.Fatalf("list AI artifacts through App API = %#v", artifacts)
 	}
+	if page := app.ListAIArtifactsPage("writing", 0); page.Error != nil || len(page.Items) != 1 || page.HasNext || page.Items[0].ID != artifactID {
+		t.Fatalf("list writing artifacts page through App API = %#v", page)
+	}
+	if page := app.ListAIArtifactsPage("summary", 0); page.Error != nil || len(page.Items) != 0 || page.HasNext {
+		t.Fatalf("list empty summaries page through App API = %#v", page)
+	}
+	if page := app.ListAIArtifactsPage("invalid", 0); page.Error == nil {
+		t.Fatalf("invalid artifact page kind accepted = %#v", page)
+	}
 	if fetched := app.GetAIHistory(historyID); fetched.Error != nil || fetched.History == nil || fetched.History.Status != aiservice.AIRecordStatusSaved {
 		t.Fatalf("get saved AI history through App API = %#v", fetched)
 	}

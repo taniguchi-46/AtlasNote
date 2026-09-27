@@ -278,7 +278,12 @@ AtlasNote本体を先に起動し、対象の保存空間をアクティブに�
 - Windows 10 1809以降のConPTYを前提とする。既定shellはWindowsの`cmd.exe`、Unixの`$SHELL`または`/bin/sh`。実Wails画面でのIME、Claude Code／Codex実接続、Stage C変更承認との一連の操作は最終統合受け入れで確認する。
 
 ### Stage E: 旧GUI整理・既存データ保全
-- 旧AI/整理専用GUIを撤去。依存のなくなったStore/API/設定を整理し、現行AI記録へのアクセス方法を維持/移行。
+- 旧AI/整理専用GUIを撤去。`SupportWorkspace`の通常タブは「変更確認」「ターミナル」の2つ。右／下ドック、浮動、最小化、リサイズを維持し、AppTopBarからターミナルを開ける。
+- 旧AIチャット、Assistant、Librarian、Writing、Summary生成、Agent提案生成、Provider／モデル／API Key設定、AI workspace toggleをFrontendから撤去する。外部AIの正式経路は統合ターミナルからのClaude Code／Codex等と、明示scopeを持つCLI／MCP。ターミナル自体はsandboxではない。
+- 既存のAI履歴・成果物・保存済み要約は元の保存空間のSQLite内にそのまま保持し、設定「外部AI・旧AIデータ」からread-onlyで一覧と個別内容を閲覧する。要約は`ai_artifacts`の`kind=summary`。新体系に旧会話の共通保存形式がないため自動変換・自動移行・Markdown変換を行わず、AIテーブルを削除しない。
+- 成果物と要約は旧`ListAIArtifacts()`の先頭100件契約を維持したまま、新しいread-onlyページAPIで種類別に100件ずつ取得する。各ページは`updated_at DESC, id ASC`で並べ、さらに表示で101件目以降へ到達できる。
+- Credential Store内の旧AI認証情報は自動削除せず、新機能で利用しない。秘密値は画面へ表示しない。旧AIの生成APIと記録List/Getを共有する`internal/ai.Service`、Wailsの記録List/Get、Stage A〜Cが使う`internal/organize.Service`を互換層として残す。旧Organization Wails APIも既存呼出し契約への影響を避けて残し、GUIからは呼び出さない。
+- 保存済み旧shortcut／localStorage設定に旧action IDや旧AI設定値があっても起動時に無視し、別操作へ再割当しない。DB migration、schema reset、storage／sync形式変更は行わない。実Wails、Claude Code／Codex、IMEを含む手動確認は全Stage後の最終統合テストに残す。
 - **完了条件:** 既存3ペイン/同期/保存/バックアップ/保護を維持、旧導線が残らず、記録データが消失しない。
 
 **実装順は依存関係に応じてStage C/Dを調整可能。ただし代替完成前にStage Eを実施しない。**

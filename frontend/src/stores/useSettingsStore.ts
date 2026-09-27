@@ -16,7 +16,6 @@ import {
 
 export type EditorFirstLineStyle = 'heading1' | 'heading2' | 'heading3' | 'paragraph'
 export type AIWorkspacePlacement = 'right' | 'bottom'
-export type AIAgentEditPermission = 'review-required' | 'auto-update'
 export type ContentLockAutoLockMinutes = 0 | 1 | 5 | 15 | 30 | 60
 export type SettingsTab =
   | 'theme'
@@ -43,7 +42,6 @@ export const AI_WORKSPACE_BOTTOM_HEIGHT_MAX = 760
 const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26] as const
 const FIRST_LINE_STYLE_OPTIONS: EditorFirstLineStyle[] = ['heading1', 'heading2', 'heading3', 'paragraph']
 const AI_WORKSPACE_PLACEMENT_OPTIONS = ['right', 'bottom'] as const
-const AI_AGENT_EDIT_PERMISSION_OPTIONS = ['review-required', 'auto-update'] as const
 export const CONTENT_LOCK_AUTO_LOCK_MINUTE_OPTIONS = [0, 1, 5, 15, 30, 60] as const
 
 function readNumberOption<T extends readonly number[]>(key: string, fallback: T[number], options: T) {
@@ -90,14 +88,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const aiWorkspacePlacement = ref<AIWorkspacePlacement>(
     readStringOption('atlas-ai-workspace-placement', 'right', AI_WORKSPACE_PLACEMENT_OPTIONS),
   )
-  const aiAgentEditPermission = ref<AIAgentEditPermission>(
-    readStringOption(
-      'atlas-ai-agent-edit-permission',
-      'review-required',
-      AI_AGENT_EDIT_PERMISSION_OPTIONS,
-    ),
-  )
-  const aiEnabled = ref(readBooleanOption('atlas-ai-enabled', true))
   const aiWorkspaceRightWidth = ref(
     readClampedNumberInRange(
       'atlas-ai-workspace-right-width',
@@ -153,14 +143,6 @@ export const useSettingsStore = defineStore('settings', () => {
 
   watch(aiWorkspacePlacement, (newPlacement) => {
     localStorage.setItem('atlas-ai-workspace-placement', newPlacement)
-  }, { immediate: true })
-
-  watch(aiAgentEditPermission, (newPermission) => {
-    localStorage.setItem('atlas-ai-agent-edit-permission', newPermission)
-  }, { immediate: true })
-
-  watch(aiEnabled, (newEnabled) => {
-    localStorage.setItem('atlas-ai-enabled', String(newEnabled))
   }, { immediate: true })
 
   watch(aiWorkspaceRightWidth, (newWidth) => {
@@ -305,8 +287,6 @@ export const useSettingsStore = defineStore('settings', () => {
     sidebarWidth,
     noteListWidth,
     aiWorkspacePlacement,
-    aiAgentEditPermission,
-    aiEnabled,
     aiWorkspaceRightWidth,
     aiWorkspaceBottomHeight,
     contentLockAutoLockMinutes,

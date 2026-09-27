@@ -126,12 +126,16 @@ try {
     defaults,
   )
   assert.deepEqual(shortcuts.parseStoredShortcutBindings('broken json'), defaults)
+  const oldAI = { code: 'F8', ctrl: false, shift: false, alt: false, meta: false }
+  const storedOldAI = JSON.stringify({ version: 2, bindings: { 'ai.toggleWorkspace': [oldAI, null] } })
+  const withoutOldAI = shortcuts.parseStoredShortcutBindings(storedOldAI)
+  assert.equal('ai.toggleWorkspace' in withoutOldAI, false)
+  assert.equal(shortcuts.findMatchingShortcutAction({ code: 'F8', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }, withoutOldAI, 'app'), null)
 
-  const [noteEditorSource, appSource, settingsSource, aiWorkspaceSource] = await Promise.all([
+  const [noteEditorSource, appSource, settingsSource] = await Promise.all([
     readFile(path.join(rootDir, 'src', 'components', 'NoteEditor.vue'), 'utf8'),
     readFile(path.join(rootDir, 'src', 'App.vue'), 'utf8'),
     readFile(path.join(rootDir, 'src', 'components', 'ShortcutSettingsPanel.vue'), 'utf8'),
-    readFile(path.join(rootDir, 'src', 'components', 'AIWorkspace.vue'), 'utf8'),
   ])
   assert.match(noteEditorSource, /undoRedo:\s*false/, 'Tiptap fixed undo keymap must be disabled')
   assert.match(noteEditorSource, /findMatchingShortcutAction[\s\S]*'editor'/, 'editor keys must use settings')
@@ -143,7 +147,7 @@ try {
     /event\.code === 'Escape'[\s\S]*settingsStore\.setShortcutBinding\(actionId, slot, null\)/,
     'Escape must clear the current shortcut binding',
   )
-  assert.match(aiWorkspaceSource, /通常のノート編集の「元に戻す」対象にはなりません/, 'Agent apply must not promise local undo')
+  assert.doesNotMatch(appSource, /case 'ai\.toggleWorkspace'/)
 
   console.log('keyboard shortcut tests passed')
 } finally {

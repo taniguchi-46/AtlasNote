@@ -2,6 +2,12 @@
 
 最終更新: 2026-09-27
 
+## CLI・MCP・統合ターミナル再編 Stage E（2026-09-27、実装・独立監査待ち）
+
+監査Medium修正: 旧AI成果物と要約に種類別ページAPIと「さらに表示」を追加し、旧List APIの100件契約を維持した。CIが呼ぶ`test:agent-proposal`は旧カード参照だけを除き、ノート保存・draft・CAS検査を残した。対象Goテスト、`go vet ./...`、Frontend typecheck／lintは成功。Frontend実行型テストとproduction buildはNode profile `EPERM`で未完了。
+
+旧AI／整理専用GUI、旧生成StoreとFrontend生成API、Provider設定・旧shortcutを撤去し、SupportWorkspaceを「変更確認」「ターミナル」に整理した。AppTopBarからターミナルを開く。設定「外部AI・旧AIデータ」で既存履歴・成果物・要約をread-only閲覧する。既存SQLite記録とCredential Storeの旧認証情報は自動削除・変換・移行せず、新機能は旧認証情報を利用しない。記録List/GetのためBackend AI ServiceとWails互換層、Stage A〜CのOrganization Serviceを保持する。`go test ./... -count=1`は既知の`internal/appcleanup` Windows権限テストのみ失敗し、他パッケージは通過。`go vet ./...`、Frontend typecheck／lintは通過した。Stage Eを含むFrontend script群、production build、Wails Windows/amd64 clean buildはNodeが`C:\Users\mt252`の`lstat`で`EPERM`となり未完了。危険な権限昇格は行っていない。実Wails／Claude Code／Codex／IMEの最終統合テストと独立監査は未実施。
+
 ## CLI・MCP・統合ターミナル再編 Stage D（2026-09-27）
 
 既存SupportWorkspaceへterminalタブを追加し、xterm描画とWindows ConPTY／Unix PTYの1 sessionをWails専用APIで接続した。出力は描画ACK付きで送信し、停止・shell終了・アプリ終了で子プロセス群を解放する。ターミナルは利用者権限のshellであり、MCP公開scopeによるsandboxではない。PTYのWindows smoke、日本語入出力、終了コード、大量出力、停止競合、Frontendの入出力・resize・再起動テスト、型検査・lint、Frontend production build、Wails Windows/amd64 clean build、`go vet ./...`は成功。`go test ./... -count=1`は既知の`internal/appcleanup` Windows権限エラーのみ失敗し、Stage D対象とStage A〜C関連のGo／Frontendテストは成功した。実Wails画面でのCLI／MCP統合受け入れは別の監査チャットと最終統合確認で扱う。

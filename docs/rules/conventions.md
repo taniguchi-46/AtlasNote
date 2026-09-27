@@ -47,11 +47,11 @@
 - 主要操作はキーボード操作とマウス操作の両方を想定する。
 - Reka UI のアクセシビリティ前提を崩さない。
 - UnoCSS のユーティリティを使い、独自 CSS は必要な範囲に絞る。
-- AI機能は`AIWorkspace`の単一チャットtimelineへ統合する。コンポーザーでは開いているノートを削除不能の固定context chipとして表示し、`＋`メニューから追加ノート、Notebook検索scope、要約、文章作成6種、タイトル・タグ・分類・関連・重複・Web検索のスキル／ツールを選択する。Askは読み取り専用で、現行Agentは許可済み読み取りと候補生成だけに限定する。Agent変更提案は、端末ローカル設定の既定`review-required`では差分確認と利用者の明示適用を経て、`auto-update`では通常のAgent送信が返した検証済み本文1差分だけを既存のrevision/CAS・保存laneを通して適用する。送信ボタンは入力欄の右下内側へ置く。
-- モデル切替ボタンは既存のAI設定画面を開く。AIのmode、入力、context、timeline、tool trace、結果を`useSettingsStore`や`localStorage`へ保存しない。右側／下側配置、希望寸法、非秘密のAgent本文編集権限だけを端末UI設定として保存し、狭いウィンドウでは実効寸法だけを調整する。
-- Web検索はProvider能力を確認し、外部通信について利用者の明示確認を得た場合だけ実行する。構造化tool traceは画面メモリだけに保持し、ログ、SQLite、Markdown、WebDAVへ保存しない。
-- 整理センターの候補は「提案」として変更前・変更案・根拠を表示し、各書込操作に明示承認を求める。同一ノートへの承認候補は1バッチでCASし、ノート群は順次適用して競合・失敗を候補ごとに残す。情報候補と重複タグは自動で変更しない。整理とAIは`SupportWorkspace`の共通枠でタブ表示し、タブ切替ではStoreやコンポーネントを破棄しない。バックリンクの整理操作は対象note scopeを共通枠で開く。scope切替時は別sessionを無効化せず、ロック時だけ全sessionを無効化する。
-- Local Intelligenceの関連候補は読み取り専用とし、リンク・タグ・FTSの派生索引から件数制限付きで取得する。索引不整合とロック状態取得失敗は結果を返さず、AI参照追加時は候補を再検証する。
+- Stage E以降、AtlasNote自身から旧Providerへ生成要求を送るGUIを置かない。外部AIは統合ターミナル＋CLI／MCPを利用し、MCP公開scopeは明示指定する。ターミナルをMCP scopeのsandboxと誤認させない。旧AI履歴・成果物・要約は元のSQLiteに保持し、設定内のread-only画面でList/Getのみ利用する。自動移行・自動削除・Markdown変換をしない。
+- 旧AI成果物と要約のページ取得は種類を`writing`／`summary`に限定し、固定上限100件、非負offset、`updated_at DESC, id ASC`を維持する。既存`ListAIArtifacts()`の応答は変えない。
+- 旧AI Provider／モデル／API Key／Agent編集権限設定は表示しない。既存Credential Storeの旧認証情報は自動削除せず、新機能で利用しない。secret値をUIやログに出さない。右側／下側配置と希望寸法だけを端末UI設定として維持し、旧localStorage値は無理に移行・削除しない。
+- 整理候補は既存`internal/organize.Service`で生成し、CLI／MCPからの要求はStage B／Cのscope・CAS・承認契約を通す。旧整理GUIと専用Storeは使わない。変更確認GUIでの明示承認と保存laneは維持する。
+- Local Intelligenceの関連候補は読み取り専用とし、リンク・タグ・FTSの派生索引から件数制限付きで取得する。索引不整合とロック状態取得失敗は結果を返さない。旧AIへの参照追加導線は表示しない。
 
 ## エディタおよびフロントエンド実装時の追加ルール
 

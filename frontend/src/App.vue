@@ -39,7 +39,7 @@
       @search="handleSearch"
       @new-note="handleNewNote"
       @import-notes="handleOpenNoteImport"
-      @open-organization="organizationStore.open('tasks')"
+      @open-terminal="supportStore.open('terminal')"
       @toggle-always-on-top="handleToggleAlwaysOnTop"
       @open-settings="handleOpenSettings"
     />
@@ -171,17 +171,11 @@ import { useNotebookStore } from './stores/useNotebookStore'
 import { useSearchStore, type SearchFilters } from './stores/useSearchStore'
 import { useTagStore } from './stores/useTagStore'
 import { useSyncStore } from './stores/useSyncStore'
-import { useAIStore } from './stores/useAIStore'
-import { useAIAssistantStore } from './stores/useAIAssistantStore'
-import { useAIChatStore } from './stores/useAIChatStore'
-import { useAILibrarianStore } from './stores/useAILibrarianStore'
-import { useAIWritingStore } from './stores/useAIWritingStore'
 import { useStorageSpaceStore } from './stores/useStorageSpaceStore'
 import { useStorageLocationStore } from './stores/useStorageLocationStore'
 import { useBackupStore } from './stores/useBackupStore'
 import { useContentLockStore } from './stores/useContentLockStore'
 import { useNoteImportStore } from './stores/useNoteImportStore'
-import { useOrganizationStore } from './stores/useOrganizationStore'
 import { useNoteLinkStore } from './stores/useNoteLinkStore'
 import { useNoteExportStore } from './stores/useNoteExportStore'
 import { useNotificationStore } from './stores/useNotificationStore'
@@ -230,17 +224,11 @@ const notebookStore = useNotebookStore()
 const searchStore = useSearchStore()
 const tagStore = useTagStore()
 const syncStore = useSyncStore()
-const aiStore = useAIStore()
-const aiAssistantStore = useAIAssistantStore()
-const aiChatStore = useAIChatStore()
-const aiLibrarianStore = useAILibrarianStore()
-const aiWritingStore = useAIWritingStore()
 const storageSpaceStore = useStorageSpaceStore()
 const storageLocationStore = useStorageLocationStore()
 const backupStore = useBackupStore()
 const contentLockStore = useContentLockStore()
 const noteImportStore = useNoteImportStore()
-const organizationStore = useOrganizationStore()
 const noteLinkStore = useNoteLinkStore()
 const supportStore = useSupportWorkspaceStore()
 watch(() => storageSpaceStore.activeSpaceId, () => {
@@ -275,13 +263,7 @@ storageSpaceStore.setSwitchLifecycle(
   () => prepareStorageSpaceSwitch({
      isBackupBusy: () => backupStore.isBusy || backupStore.status?.pendingRestore === true,
     isSyncBusy: () => syncStore.isBusy,
-    isAIBusy: () => (
-      aiStore.isSettingsBusy
-      || aiStore.isGenerating
-      || aiAssistantStore.isBusy
-      || aiLibrarianStore.isGenerating
-      || aiWritingStore.isBusy
-    ),
+    isAIBusy: () => false,
     isImportBusy: () => noteImportStore.isBusy,
     isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
@@ -299,13 +281,7 @@ storageLocationStore.setLifecycle(
   () => prepareStorageSpaceSwitch({
      isBackupBusy: () => backupStore.isBusy || backupStore.status?.pendingRestore === true,
     isSyncBusy: () => syncStore.isBusy,
-    isAIBusy: () => (
-      aiStore.isSettingsBusy
-      || aiStore.isGenerating
-      || aiAssistantStore.isBusy
-      || aiLibrarianStore.isGenerating
-      || aiWritingStore.isBusy
-    ),
+    isAIBusy: () => false,
     isImportBusy: () => noteImportStore.isBusy,
     isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     suspendSync: () => syncStore.suspend(),
@@ -323,13 +299,7 @@ backupStore.setLifecycle(
   () => prepareBackupOperation({
     isStorageSpaceBusy: () => storageSpaceStore.isBusy,
     isSyncBusy: () => syncStore.isBusy,
-    isAIBusy: () => (
-      aiStore.isSettingsBusy
-      || aiStore.isGenerating
-      || aiAssistantStore.isBusy
-      || aiLibrarianStore.isGenerating
-      || aiWritingStore.isBusy
-    ),
+    isAIBusy: () => false,
     isImportBusy: () => noteImportStore.isBusy,
     isExportBusy: () => noteExportStore.isBusy || noteEditorRef.value?.isAttachmentExportBusy() === true,
     isContentLockBusy: () => contentLockStore.isBusy,
@@ -488,10 +458,6 @@ function executeGlobalShortcut(actionId: ShortcutActionId) {
       if (!noteStore.activeNote || !noteEditorRef.value) return false
       noteEditorRef.value.toggleEditMode()
       return true
-    case 'ai.toggleWorkspace':
-      if (!settingsStore.aiEnabled) return false
-      supportStore.toggleAI()
-      return true
     case 'editor.undo':
     case 'editor.redo':
       return false
@@ -560,14 +526,6 @@ watch(() => contentLockStore.lastChangedTarget, async (target) => {
 async function handleLockedTargets(targets: { type: 'space' | 'notebook' | 'note'; id: string }[]) {
   if (targets.length === 0) return
   noteLinkStore.clearRelated()
-  aiAssistantStore.discardConversation()
-  aiLibrarianStore.discard()
-  aiWritingStore.clear()
-  aiStore.discardSummary()
-  aiStore.discardDraft()
-  aiChatStore.clearConversation()
-  supportStore.invalidateForLock()
-  await organizationStore.clearForLock()
   try {
     if (targets.some((target) => target.type === 'space')) {
       contentLockStore.cancelAccessRequest()
@@ -641,7 +599,6 @@ async function initializeReadyWorkspace(status: StartupStatus) {
     })
   }
   await syncStore.initialize().catch(() => {})
-  await aiStore.initialize().catch(() => {})
   await storageSpaceStore.initialize()
   if (status.backupRestoreSafetyBackupId) {
     notificationStore.notify('復元前の現在データを安全用バックアップとして保存しました', {
@@ -908,7 +865,6 @@ onBeforeUnmount(() => {
   backupStore.dispose()
   storageSpaceStore.clearSwitchLifecycle()
   storageLocationStore.clearLifecycle()
-  aiStore.discardSummary()
   contentLockAutoLock.dispose()
   contentLockStore.cancelAccessRequest()
   document.body.classList.remove('is-pane-resizing')

@@ -1,8 +1,5 @@
 <template>
   <div class="backlink-panel-content">
-    <button class="backlink-organization-trigger" type="button" @click="organizationStore.openNote(noteId)">
-      関連ノートを整理
-    </button>
     <p v-if="linkStore.isLoadingBacklinks && linkStore.backlinks.length === 0" class="backlink-status">
       読み込み中…
     </p>
@@ -58,29 +55,21 @@
           <small>{{ item.reasons.join('・') }}</small>
           <div class="related-actions">
             <button type="button" @click="emit('open-note', item.noteId)">ノートを開く</button>
-            <button type="button" @click="addReference(item)">参照に追加</button>
           </div>
         </li>
       </ul>
-      <p v-if="referenceMessage" role="status" class="backlink-status">{{ referenceMessage }}</p>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useOrganizationStore } from '../stores/useOrganizationStore'
 import { useNotebookStore } from '../stores/useNotebookStore'
 import { useNoteLinkStore } from '../stores/useNoteLinkStore'
-import type { note } from '../../wailsjs/go/models'
-import { ref, watch } from 'vue'
 
 const props = defineProps<{ noteId: string }>()
 const emit = defineEmits<{ 'open-note': [noteId: string] }>()
 const linkStore = useNoteLinkStore()
-const organizationStore = useOrganizationStore()
 const notebookStore = useNotebookStore()
-const referenceMessage = ref('')
-watch([() => props.noteId, () => linkStore.relatedNotebookId, () => linkStore.relatedDescendants], () => { referenceMessage.value = '' })
 
 function changeNotebookScope(event: Event) {
   const value = (event.target as HTMLSelectElement).value
@@ -89,17 +78,6 @@ function changeNotebookScope(event: Event) {
 
 function changeDescendants(event: Event) {
   linkStore.setRelatedScope(linkStore.relatedNotebookId, (event.target as HTMLInputElement).checked)
-}
-
-async function addReference(item: note.RelatedNoteItem) {
-  const noteId = props.noteId
-  const notebookId = linkStore.relatedNotebookId
-  const descendants = linkStore.relatedDescendants
-  const added = await linkStore.addRelatedContext(noteId, item)
-  if (noteId !== props.noteId || notebookId !== linkStore.relatedNotebookId || descendants !== linkStore.relatedDescendants) return
-  referenceMessage.value = added
-    ? 'AIの参照に追加しました。送信前に内容を確認してください。'
-    : '参照に追加できませんでした。候補を再読み込みしてください。'
 }
 
 function formatDate(value: string | Date) {
@@ -121,17 +99,6 @@ function formatDate(value: string | Date) {
 .related-snippet { margin: 4px 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .related-actions { display: flex; gap: 8px; margin-top: 5px; }
 .related-actions button { padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
-.backlink-organization-trigger {
-  width: 100%;
-  margin: 0 0 8px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 11px;
-  text-align: left;
-}
-.backlink-organization-trigger:hover { background: var(--bg-hover); }
 
 .backlink-status {
   margin: 0;

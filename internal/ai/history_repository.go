@@ -327,6 +327,47 @@ LIMIT %d
 	return items, nil
 }
 
+func (r *Repository) listArtifactsPage(ctx context.Context, kind string, offset int) ([]AIArtifact, bool, error) {
+	condition := "artifact.kind <> ?"
+	if kind == "summary" {
+		condition = "artifact.kind = ?"
+	}
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT artifact.id, artifact.kind, artifact.title, artifact.provider_id, artifact.model_id,
+       artifact.content, %s, artifact.created_at, artifact.updated_at
+FROM ai_artifacts artifact
+WHERE %s
+ORDER BY artifact.updated_at DESC, artifact.id ASC
+LIMIT ? OFFSET ?
+`, artifactStatusExpression, condition), string(ArtifactKindSummary), aiRecordListLimit+1, offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("list AI artifacts page: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]AIArtifact, 0, aiRecordListLimit)
+	hasNext := false
+	for rows.Next() {
+		if len(items) == aiRecordListLimit {
+			hasNext = true
+			break
+		}
+		item, err := scanArtifact(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		item.Sources, err = r.listArtifactSources(ctx, item.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate AI artifacts page: %w", err)
+	}
+	return items, hasNext, nil
+}
+
 func (r *Repository) getArtifact(ctx context.Context, id string) (AIArtifact, error) {
 	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
 SELECT artifact.id, artifact.kind, artifact.title, artifact.provider_id, artifact.model_id,

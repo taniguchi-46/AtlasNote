@@ -9,18 +9,16 @@ const rootDir = process.cwd()
 const utilityPath = path.join(rootDir, 'src', 'utils', 'agentEditProposal.ts')
 const highlightUtilityPath = path.join(rootDir, 'src', 'utils', 'agentEditorHighlight.ts')
 const noteStorePath = path.join(rootDir, 'src', 'stores', 'useNoteStore.ts')
-const proposalCardPath = path.join(rootDir, 'src', 'components', 'AIAgentProposalCard.vue')
 const outDir = path.join(rootDir, '.tmp', 'agent-proposal-test')
 const outFile = path.join(outDir, 'agentEditProposal.mjs')
 const highlightOutFile = path.join(outDir, 'agentEditorHighlight.mjs')
 const noteStoreOutFile = path.join(outDir, 'useNoteStore.mjs')
 const mockNotesFile = path.join(outDir, 'mock-notes.mjs')
 
-const [utilitySource, highlightUtilitySource, noteStoreSource, proposalCardSource] = await Promise.all([
+const [utilitySource, highlightUtilitySource, noteStoreSource] = await Promise.all([
   readFile(utilityPath, 'utf8'),
   readFile(highlightUtilityPath, 'utf8'),
   readFile(noteStorePath, 'utf8'),
-  readFile(proposalCardPath, 'utf8'),
 ])
 
 assert.match(noteStoreSource, /function applyAgentEditProposal/)
@@ -60,43 +58,6 @@ assert.ok(
 assert.match(agentApplySource, /actualRevision: updated\.revision/)
 assert.match(agentApplySource, /error\.value = 'Agentの変更提案をノートへ反映できませんでした'/)
 assert.doesNotMatch(agentApplySource, /error\.value = e instanceof Error/)
-assert.doesNotMatch(proposalCardSource, /v-html/)
-assert.doesNotMatch(proposalCardSource, /<pre>/)
-assert.match(proposalCardSource, /createAgentEditVisualDiff/)
-assert.match(proposalCardSource, /role="region"/)
-assert.match(proposalCardSource, /tabindex="0"/)
-assert.match(proposalCardSource, /aria-label="削除される本文"/)
-assert.match(proposalCardSource, /aria-label="追加される本文"/)
-assert.match(proposalCardSource, /visualDiff\.beforeLines/)
-assert.match(proposalCardSource, /visualDiff\.afterLines/)
-assert.match(proposalCardSource, /is-removed/)
-assert.match(proposalCardSource, /is-added/)
-assert.match(proposalCardSource, /is-placeholder/)
-assert.match(proposalCardSource, /gridRow: line\.rowNumber \+ 1/)
-assert.match(proposalCardSource, /is-word-change/)
-assert.match(
-  proposalCardSource,
-  /\.ai-agent-proposal-diff-line\.is-removed\s*\{[^}]*var\(--color-danger\)[^}]*box-shadow: inset 3px 0 0 var\(--color-danger\)/s,
-)
-assert.match(
-  proposalCardSource,
-  /\.ai-agent-proposal-diff-line\.is-added\s*\{[^}]*var\(--color-success\)[^}]*box-shadow: inset 3px 0 0 var\(--color-success\)/s,
-)
-assert.match(proposalCardSource, /\.is-word-change\s*\{[^}]*font-weight: 600;/s)
-assert.match(
-  proposalCardSource,
-  /\.is-removed \.is-word-change\s*\{[^}]*var\(--color-danger\)/s,
-)
-assert.match(
-  proposalCardSource,
-  /\.is-added \.is-word-change\s*\{[^}]*var\(--color-success\)/s,
-)
-assert.match(proposalCardSource, /@container \(min-width: 520px\)/)
-assert.match(proposalCardSource, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
-assert.match(proposalCardSource, /display: contents/)
-assert.match(proposalCardSource, /本文へ適用/)
-assert.match(proposalCardSource, /提案を破棄/)
-
 await mkdir(outDir, { recursive: true })
 const compiled = ts.transpileModule(utilitySource, {
   compilerOptions: {

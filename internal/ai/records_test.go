@@ -43,3 +43,15 @@ func TestServiceRejectsInvalidAIRecordsWithoutPersistence(t *testing.T) {
 		}
 	}
 }
+
+func TestListArtifactsPageRejectsInvalidReadScope(t *testing.T) {
+	service, _ := newV3Service(t, &testV3TextAdapter{testProviderAdapter: &testProviderAdapter{}, text: "generated"})
+	for _, input := range []struct {
+		kind   string
+		offset int
+	}{{"all", 0}, {"summary", -1}, {"writing", -1}} {
+		if _, _, err := service.ListArtifactsPage(t.Context(), input.kind, input.offset); !errors.Is(err, ErrInputInvalid) {
+			t.Fatalf("kind=%q offset=%d error=%v, want ErrInputInvalid", input.kind, input.offset, err)
+		}
+	}
+}

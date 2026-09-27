@@ -72,6 +72,15 @@ func (s *Service) ListArtifacts(ctx context.Context) ([]AIArtifact, error) {
 	return s.repository.listArtifacts(ctx)
 }
 
+// ListArtifactsPage keeps legacy artifact and summary streams separate so
+// either category remains reachable when the other has many records.
+func (s *Service) ListArtifactsPage(ctx context.Context, kind string, offset int) ([]AIArtifact, bool, error) {
+	if (kind != "writing" && kind != "summary") || offset < 0 {
+		return nil, false, ErrInputInvalid
+	}
+	return s.repository.listArtifactsPage(ctx, kind, offset)
+}
+
 func (s *Service) GetArtifact(ctx context.Context, id string) (AIArtifact, error) {
 	if strings.TrimSpace(id) == "" {
 		return AIArtifact{}, ErrArtifactNotFound

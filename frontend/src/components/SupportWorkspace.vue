@@ -19,8 +19,6 @@
     <header class="support-header" @pointerdown="startMove">
       <img :src="atlasNoteLogo" alt="" aria-hidden="true">
       <nav aria-label="サポート機能" @pointerdown.stop>
-        <button type="button" :class="{ active: store.activeTab === 'organize' }" :aria-current="store.activeTab === 'organize' ? 'page' : undefined" @click="store.open('organize')">整理</button>
-        <button type="button" :class="{ active: store.activeTab === 'ai' }" :aria-current="store.activeTab === 'ai' ? 'page' : undefined" @click="store.open('ai')">AI</button>
         <button type="button" :class="{ active: store.activeTab === 'changes' }" :aria-current="store.activeTab === 'changes' ? 'page' : undefined" @click="store.open('changes')">変更確認</button>
         <button type="button" :class="{ active: store.activeTab === 'terminal' }" :aria-current="store.activeTab === 'terminal' ? 'page' : undefined" @click="store.open('terminal')">ターミナル</button>
       </nav>
@@ -30,14 +28,8 @@
       </div>
     </header>
     <div class="support-content">
-      <OrganizationCenter v-show="store.activeTab === 'organize'" />
       <ExternalChangeReview v-show="store.activeTab === 'changes'" />
-      <AIWorkspace v-show="store.activeTab === 'ai' && settingsStore.aiEnabled" />
       <TerminalComponent v-show="store.activeTab === 'terminal'" :visible="store.isOpen && !store.isMinimized && store.activeTab === 'terminal'" />
-      <div v-if="store.activeTab === 'ai' && !settingsStore.aiEnabled" class="support-ai-disabled">
-        <p>AI機能は現在オフです。整理機能は引き続き利用できます。</p>
-        <button type="button" @click="settingsStore.openSettings('ai')">AI設定を開く</button>
-      </div>
     </div>
     <button v-if="store.isFloating" class="support-floating-resize" type="button" aria-label="サポートのサイズを変更" @pointerdown.stop.prevent="startFloatingResize" />
     <button v-else class="support-dock-resize" type="button" role="separator" :aria-label="effectivePlacement === 'right' ? 'サポートの幅を調整' : 'サポートの高さを調整'" :aria-orientation="effectivePlacement === 'right' ? 'vertical' : 'horizontal'" :aria-valuemin="effectivePlacement === 'right' ? AI_WORKSPACE_RIGHT_WIDTH_MIN : AI_WORKSPACE_BOTTOM_HEIGHT_MIN" :aria-valuemax="effectivePlacement === 'right' ? AI_WORKSPACE_RIGHT_WIDTH_MAX : AI_WORKSPACE_BOTTOM_HEIGHT_MAX" :aria-valuenow="effectiveSize" @keydown="handleResizeKeydown" @pointerdown="startDockResize" />
@@ -55,8 +47,6 @@ import {
 } from '../stores/useSettingsStore'
 import { useSupportWorkspaceStore } from '../stores/useSupportWorkspaceStore'
 import { useNoteStore } from '../stores/useNoteStore'
-import AIWorkspace from './AIWorkspace.vue'
-import OrganizationCenter from './OrganizationCenter.vue'
 import ExternalChangeReview from './ExternalChangeReview.vue'
 import TerminalComponent from './TerminalComponent.vue'
 
@@ -169,9 +159,8 @@ onBeforeUnmount(() => { end(); observer?.disconnect(); window.removeEventListene
 .support-header button{min-height:29px;padding:3px 7px;border:0;border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer;white-space:nowrap}
 .support-header nav button.active{background:var(--bg-active);color:var(--brand-primary);font-weight:600}
 .support-actions button{display:grid;width:29px;padding:0;place-items:center}
-.support-header button:focus-visible,.support-ai-disabled button:focus-visible{outline:2px solid var(--brand-primary)}
+.support-header button:focus-visible{outline:2px solid var(--brand-primary)}
 .support-content{display:flex;min-height:0;flex:1;flex-direction:column;overflow:hidden}
-.support-ai-disabled{padding:16px;font-size:12px}.support-ai-disabled button{padding:7px;border:1px solid var(--border);border-radius:5px;background:var(--bg-input);color:var(--text-primary);cursor:pointer}
 .support-restore{position:absolute;right:8px;z-index:30;display:grid;width:30px;height:30px;padding:0;place-items:center;border:1px solid var(--border);border-radius:6px;background:var(--bg-sidebar);color:var(--text-primary);cursor:pointer}
 .support-floating-resize{position:absolute;right:0;bottom:0;width:18px;height:18px;border:0;background:linear-gradient(135deg,transparent 48%,var(--text-secondary) 52%,transparent 57%);cursor:nwse-resize;touch-action:none}
 .support-dock-resize{position:absolute;top:0;bottom:0;left:-4px;width:8px;border:0;background:transparent;cursor:col-resize;touch-action:none}

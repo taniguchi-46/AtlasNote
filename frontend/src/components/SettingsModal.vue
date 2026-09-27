@@ -206,7 +206,7 @@
           </TabsContent>
 
           <TabsContent value="ai" as-child>
-            <AISettingsPanel />
+            <LegacyAIRecordsPanel />
           </TabsContent>
 
           <TabsContent value="storage-locations" as-child>
@@ -259,7 +259,6 @@ import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import type { SettingsTab } from '../stores/useSettingsStore'
 import { useSyncStore } from '../stores/useSyncStore'
-import { useAIStore } from '../stores/useAIStore'
 import { useStorageSpaceStore } from '../stores/useStorageSpaceStore'
 import { useStorageLocationStore } from '../stores/useStorageLocationStore'
 import { useBackupStore } from '../stores/useBackupStore'
@@ -267,7 +266,7 @@ import { openInstalledApps } from '../api/startup'
 import { searchSettings, type SettingsSearchItem } from '../utils/settingsSearch'
 import NotebookIconPicker from './NotebookIconPicker.vue'
 import SyncSettingsPanel from './SyncSettingsPanel.vue'
-import AISettingsPanel from './AISettingsPanel.vue'
+import LegacyAIRecordsPanel from './LegacyAIRecordsPanel.vue'
 import StorageSpaceSettingsPanel from './StorageSpaceSettingsPanel.vue'
 import StorageLocationSettingsPanel from './StorageLocationSettingsPanel.vue'
 import BackupSettingsPanel from './BackupSettingsPanel.vue'
@@ -279,7 +278,6 @@ const settingsStore = useSettingsStore()
 const noteStore = useNoteStore()
 const appStore = useAppStore()
 const syncStore = useSyncStore()
-const aiStore = useAIStore()
 const storageSpaceStore = useStorageSpaceStore()
 const storageLocationStore = useStorageLocationStore()
 const backupStore = useBackupStore()
@@ -291,7 +289,7 @@ const tabs: { id: SettingsTab; name: string }[] = [
   { id: 'shortcuts', name: 'ショートカット' },
 ]
 tabs.push({ id: 'sync', name: '同期' })
-tabs.push({ id: 'ai', name: 'AI' })
+tabs.push({ id: 'ai', name: '外部AI・旧AIデータ' })
 tabs.push({ id: 'storage-locations', name: '保存場所' })
 tabs.push({ id: 'backups', name: 'バックアップ' })
 tabs.push({ id: 'locks', name: 'ロック' })
@@ -313,7 +311,6 @@ watch(
     uninstallMessage.value = ''
     autoSaveMessage.value = ''
     syncStore.resetDraft()
-    aiStore.resetDraft()
     void storageSpaceStore.initialize()
     void storageLocationStore.initialize()
     void backupStore.initialize()
@@ -383,7 +380,6 @@ function handleOpenChange(open: boolean) {
   }
 
   syncStore.discardDraft()
-  aiStore.discardDraft()
   settingsQuery.value = ''
   settingsStore.closeSettings()
 }

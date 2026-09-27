@@ -10,7 +10,6 @@ export type ShortcutActionId =
   | 'window.toggleAlwaysOnTop'
   | 'theme.toggle'
   | 'editor.toggleMode'
-  | 'ai.toggleWorkspace'
 
 export type ShortcutScope = 'app' | 'editor'
 
@@ -81,7 +80,6 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: 'window.toggleAlwaysOnTop', label: '常に最前面を切り替える', scope: 'app', defaultBinding: null },
   { id: 'theme.toggle', label: 'テーマを切り替える', scope: 'app', defaultBinding: null },
   { id: 'editor.toggleMode', label: 'Markdown／リッチテキストを切り替える', scope: 'app', defaultBinding: null },
-  { id: 'ai.toggleWorkspace', label: 'AIワークスペースを切り替える', scope: 'app', defaultBinding: null },
 ]
 
 const shortcutActionById = new Map(SHORTCUT_ACTIONS.map((action) => [action.id, action]))
