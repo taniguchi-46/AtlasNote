@@ -507,7 +507,7 @@ function handleGlobalShortcut(event: KeyboardEvent) {
   const target = event.target
   if (
     target instanceof Element
-    && target.closest('[data-shortcut-capture], [role="dialog"], [role="menu"], [role="listbox"]')
+    && target.closest('[data-shortcut-capture], [data-terminal], [role="dialog"], [role="menu"], [role="listbox"]')
   ) return
 
   const actionId = findMatchingShortcutAction(event, settingsStore.shortcutBindings, 'app')

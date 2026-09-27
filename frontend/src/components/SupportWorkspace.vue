@@ -14,7 +14,7 @@
     class="support-workspace"
     :class="{ 'is-floating': store.isFloating }"
     :style="panelStyle"
-    aria-label="整理とAIのサポート"
+    aria-label="サポートワークスペース"
   >
     <header class="support-header" @pointerdown="startMove">
       <img :src="atlasNoteLogo" alt="" aria-hidden="true">
@@ -22,6 +22,7 @@
         <button type="button" :class="{ active: store.activeTab === 'organize' }" :aria-current="store.activeTab === 'organize' ? 'page' : undefined" @click="store.open('organize')">整理</button>
         <button type="button" :class="{ active: store.activeTab === 'ai' }" :aria-current="store.activeTab === 'ai' ? 'page' : undefined" @click="store.open('ai')">AI</button>
         <button type="button" :class="{ active: store.activeTab === 'changes' }" :aria-current="store.activeTab === 'changes' ? 'page' : undefined" @click="store.open('changes')">変更確認</button>
+        <button type="button" :class="{ active: store.activeTab === 'terminal' }" :aria-current="store.activeTab === 'terminal' ? 'page' : undefined" @click="store.open('terminal')">ターミナル</button>
       </nav>
       <div class="support-actions" @pointerdown.stop>
         <button type="button" :title="store.isFloating ? 'ドック表示' : 'フローティング表示'" :aria-label="store.isFloating ? 'ドック表示' : 'フローティング表示'" :aria-pressed="store.isFloating" @click="store.toggleFloating"><AppWindowIcon :size="16" aria-hidden="true" /></button>
@@ -32,6 +33,7 @@
       <OrganizationCenter v-show="store.activeTab === 'organize'" />
       <ExternalChangeReview v-show="store.activeTab === 'changes'" />
       <AIWorkspace v-show="store.activeTab === 'ai' && settingsStore.aiEnabled" />
+      <TerminalComponent v-show="store.activeTab === 'terminal'" :visible="store.isOpen && !store.isMinimized && store.activeTab === 'terminal'" />
       <div v-if="store.activeTab === 'ai' && !settingsStore.aiEnabled" class="support-ai-disabled">
         <p>AI機能は現在オフです。整理機能は引き続き利用できます。</p>
         <button type="button" @click="settingsStore.openSettings('ai')">AI設定を開く</button>
@@ -56,6 +58,7 @@ import { useNoteStore } from '../stores/useNoteStore'
 import AIWorkspace from './AIWorkspace.vue'
 import OrganizationCenter from './OrganizationCenter.vue'
 import ExternalChangeReview from './ExternalChangeReview.vue'
+import TerminalComponent from './TerminalComponent.vue'
 
 const store = useSupportWorkspaceStore()
 const settingsStore = useSettingsStore()

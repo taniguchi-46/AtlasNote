@@ -269,6 +269,14 @@ AtlasNote本体を先に起動し、対象の保存空間をアクティブに�
 - 右/下ドック、PTY、CLI起動/終了、MCP接続、表示状態/ショートカットの受け入れ。
 - **完了条件:** WindowsのWails実画面で実際の対話CLI、ノート取得、候補生成、承認・適用を一連で操作できる。
 
+#### Stage D 実装契約（2026-09-27）
+
+- `SupportWorkspace`に1つのterminalタブを追加し、既存の右／下ドック、浮動、最小化、リサイズを使用する。描画は`@xterm/xterm`と`@xterm/addon-fit`、scrollbackは2,000行。ターミナル出力、入力履歴はDB、localStorage、診断ログへ保存しない。
+- `internal/terminal`は`crosspty`のWindows ConPTY／Job Object、Unix PTY／process groupを使用する。Windowsは`COMSPEC`、Unixは`SHELL`を確認し既定shellへfallbackする。AtlasNote実行ファイルのディレクトリは子shellのPATHにだけ追加する。認証情報やIPC tokenは追加環境変数に注入しない。
+- Wails GUI専用の`StartTerminal`、`WriteTerminal`、`ResizeTerminal`、`AckTerminal`、`StopTerminal`で1 sessionを管理し、`terminal:data`／`terminal:exit`を送る。出力はBase64でUTF-8の分割境界を保持し、描画ACKで送信を制御する。停止、shell終了、アプリ終了でPTYと子プロセス群を閉じる。CLI／MCP／local IPCにterminal操作を公開しない。
+- ターミナルは利用者権限で任意OSコマンドを実行でき、OS上で許可されたファイルへ直接アクセス可能。MCPのR0／R1／P／Wおよび公開scopeはターミナルをsandbox化しない。Claude Code／Codexは利用者が別途インストール・認証し、手入力で起動する。AI回答の自動入力や別保存経路は設けない。
+- Windows 10 1809以降のConPTYを前提とする。既定shellはWindowsの`cmd.exe`、Unixの`$SHELL`または`/bin/sh`。実Wails画面でのIME、Claude Code／Codex実接続、Stage C変更承認との一連の操作は最終統合受け入れで確認する。
+
 ### Stage E: 旧GUI整理・既存データ保全
 - 旧AI/整理専用GUIを撤去。依存のなくなったStore/API/設定を整理し、現行AI記録へのアクセス方法を維持/移行。
 - **完了条件:** 既存3ペイン/同期/保存/バックアップ/保護を維持、旧導線が残らず、記録データが消失しない。

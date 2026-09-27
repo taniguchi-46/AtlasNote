@@ -55,6 +55,7 @@ Go Backend
 | AI Integration | ユーザー自身の API Key を使う知識整理、要約、AIアシスタント、ライティング支援。AI機能は`AIWorkspace`の単一チャットtimelineへ統合し、開いているノートを固定コンテキスト、追加ノートとNotebookを明示コンテキスト／検索scopeとして扱う。Askは読み取り専用で、制限付きAgentは開いているノート本文の単一差分だけを提案する。端末ローカル設定の既定`review-required`では明示適用時だけ、`auto-update`では通常のAgent送信が返した検証済み提案だけを既存のrevision/CAS・保存laneを通して適用する。Web検索は明示確認付きのOpenRouter Web Search／Exaだけを使うProvider管理ツールで、任意の外部操作は許可しない。成功した要約履歴、完了済み会話、明示保存した成果物は端末ローカルSQLiteに保存し、WebDAV同期しない。詳細は`docs/development/ai-chat.md`を正とする |
 | Organization Center | ノート／Notebook／タグの整理候補を読み取り解析し、利用者が明示承認した候補だけ既存Note Serviceと保存laneへ適用する。解析sessionとレビュー状態はscopeごとにメモリ保持し、scope切替では相互に無効化せず、ロック時は全sessionを無効化する。詳細は`docs/development/organization-center.md`を正とする |
 | External Application API | `internal/readapi`が既存Note ServiceとOrganization Serviceを再利用し、CLI／MCP共通の読み取り・候補・承認待ち変更要求契約、保存空間scope、R0／R1／P／W権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。Wは操作登録までで、承認・適用はWails GUIからだけ行う。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
+| Integrated Terminal | `SupportWorkspace`のterminalタブからWails専用APIへ接続する。`internal/terminal`がWindows ConPTY＋Job Object／Unix PTY＋process groupの1 sessionを管理し、ACK付きイベントで出力を送る。shellは利用者権限で動作し、MCPの公開scopeによるsandboxではない。停止・アプリ終了で子プロセス群を解放する |
 
 ## データ / 状態管理
 
@@ -64,7 +65,7 @@ Go Backend
 - 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- `SupportWorkspace`が整理／AIの共通枠、選択タブ、最小化、浮動座標を管理する。`OrganizationCenter`と`AIWorkspace`は常時マウントし、表示だけを切り替える。解析sessionは`useOrganizationStore`、AIの入力・timeline・処理は既存AI Storeに維持する。ノート未選択でも整理タブを利用できる。バックリンク一覧の表示方式は維持し、整理操作だけ共通枠へ導く。
+- `SupportWorkspace`が整理／AI／変更確認／ターミナルの共通枠、選択タブ、最小化、浮動座標を管理する。`OrganizationCenter`と`AIWorkspace`は常時マウントし、表示だけを切り替える。解析sessionは`useOrganizationStore`、AIの入力・timeline・処理は既存AI Storeに維持する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。ノート未選択でも整理タブを利用できる。バックリンク一覧の表示方式は維持し、整理操作だけ共通枠へ導く。
 - 共通パネルの右側／下側配置、右側幅／下側高さ、非秘密のAgent本文編集権限は`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。AIのmode、入力、追加コンテキスト、timeline、構造化tool trace、API Keyは`localStorage`へ保持しない。完了済みのuser／assistant会話はアクティブ保存空間のSQLiteへ既定で履歴保存し、一覧・再開・同じ履歴IDの更新を行う。tool trace、認証情報、WebDAV同期は履歴保存対象外とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。

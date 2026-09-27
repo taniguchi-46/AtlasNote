@@ -2,6 +2,10 @@
 
 最終更新: 2026-09-27
 
+## CLI・MCP・統合ターミナル再編 Stage D（2026-09-27）
+
+既存SupportWorkspaceへterminalタブを追加し、xterm描画とWindows ConPTY／Unix PTYの1 sessionをWails専用APIで接続した。出力は描画ACK付きで送信し、停止・shell終了・アプリ終了で子プロセス群を解放する。ターミナルは利用者権限のshellであり、MCP公開scopeによるsandboxではない。PTYのWindows smoke、日本語入出力、終了コード、大量出力、停止競合、Frontendの入出力・resize・再起動テスト、型検査・lint、Frontend production build、Wails Windows/amd64 clean build、`go vet ./...`は成功。`go test ./... -count=1`は既知の`internal/appcleanup` Windows権限エラーのみ失敗し、Stage D対象とStage A〜C関連のGo／Frontendテストは成功した。実Wails画面でのCLI／MCP統合受け入れは別の監査チャットと最終統合確認で扱う。
+
 ## CLI・MCP・統合ターミナル再編 Stage C（2026-09-27）
 
 外部CLI/MCPの`organize.request_apply`、`notes.propose_edit`、`notes.request_create/update/move/tags/trash`、`operations.get`を共通Application Serviceへ追加した。W権限は承認待ち操作の作成に限定し、MCP childでは親権限と公開scopeの共通部分だけを与える。操作は保存空間・発行元・期限へ束縛した最大64件のメモリ管理とし、外部結果にはGUI用レビュー本文を返さない。GUIの変更確認タブで明示承認した場合だけ、dirty draft flush／対象note queueの後に本体が短命単回permitを内部生成・消費し、既存Note／Organize ServiceのCAS・journalを通して適用する。保存失敗は操作とdraftを保持し、revision競合は自動マージせず案を残す。MCP終了後のpending操作は自身の期限までGUIで確認できる。詳細は[再編仕様書](development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md#stage-c-実装契約2026-09-27)を正とする。実Wails画面と実MCPクライアントの手動統合確認は全Stage後に実施する。

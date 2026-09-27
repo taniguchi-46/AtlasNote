@@ -31,6 +31,7 @@ import (
 	"atlasnote/internal/readapi"
 	"atlasnote/internal/storage"
 	syncservice "atlasnote/internal/sync"
+	"atlasnote/internal/terminal"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -51,6 +52,7 @@ type App struct {
 	aiService                   *aiservice.Service
 	backupService               *backupservice.Service
 	readIPC                     *localipc.Server
+	terminal                    *terminal.Service
 	changeService               *readapi.Service
 	spaceRegistry               *notespace.Registry
 	activeSpace                 notespace.Space
@@ -165,6 +167,11 @@ func newApp(productVersion string) *App {
 
 func newAppWithUserGuide(productVersion string, userGuideContent string) *App {
 	app := &App{diagnostics: newAppDiagnosticsStore(productVersion), userGuideContent: userGuideContent}
+	app.terminal = terminal.New(func(name string, event terminal.Event) {
+		if app.ctx != nil {
+			runtime.EventsEmit(app.ctx, name, event)
+		}
+	})
 	app.initialize(context.Background())
 	return app
 }
@@ -211,6 +218,9 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.terminal != nil {
+		a.shutdownErr = errors.Join(a.shutdownErr, a.terminal.Shutdown())
+	}
 	a.shutdownErr = errors.Join(a.shutdownErr, a.stopReadIPC(ctx))
 	a.changeService = nil
 	if a.aiService != nil {
