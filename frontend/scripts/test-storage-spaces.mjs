@@ -108,9 +108,8 @@ try {
   assert.doesNotMatch(topBarSource, /保存空間|StorageSpace/, 'the top bar must not select storage spaces')
   assert.match(appSource, /prepareStorageSpaceSwitch/, 'App must own switch preparation')
   assert.match(appSource, /await RestartApp\(\)/, 'a successful selection must automatically restart the app')
-  assert.match(appSource, /aiAssistantStore\.isBusy/, 'assistant work must block switching')
-  assert.match(appSource, /aiLibrarianStore\.isGenerating/, 'librarian work must block switching')
-  assert.match(appSource, /aiWritingStore\.isBusy/, 'writing work must block switching')
+  assert.match(appSource, /prepareStorageSpaceSwitch\(\{[\s\S]*?isAIBusy:\s*\(\) => false,/, 'App must pass its current AI busy contract to switch preparation')
+  assert.doesNotMatch(appSource, /\b(?:aiAssistantStore|aiLibrarianStore|aiWritingStore|aiStore|aiChatStore)\b/, 'App must not depend on removed AI stores')
   assert.match(appSource, /noteImportStore\.isBusy/, 'note import work must block switching')
   assert.match(appSource, /noteExportStore\.isBusy/, 'note export work must block switching')
 
