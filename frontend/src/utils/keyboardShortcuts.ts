@@ -3,6 +3,7 @@ export type ShortcutActionId =
   | 'editor.redo'
   | 'note.save'
   | 'note.new'
+  | 'note.delete'
   | 'search.focus'
   | 'settings.open'
   | 'sync.run'
@@ -34,6 +35,7 @@ export type ShortcutActionDefinition = {
 
 export type ShortcutEventLike = {
   code: string
+  key?: string
   ctrlKey: boolean
   shiftKey: boolean
   altKey: boolean
@@ -73,6 +75,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: 'editor.redo', label: 'やり直す', scope: 'editor', defaultBinding: createBinding('KeyY', { ctrl: true }) },
   { id: 'note.save', label: 'ノートを保存', scope: 'app', defaultBinding: createBinding('KeyS', { ctrl: true }) },
   { id: 'note.new', label: '新しいノート', scope: 'app', defaultBinding: createBinding('KeyN', { ctrl: true }) },
+  { id: 'note.delete', label: 'ノートを削除', scope: 'app', defaultBinding: null },
   { id: 'search.focus', label: '検索欄へ移動', scope: 'app', defaultBinding: createBinding('KeyF', { ctrl: true }) },
   { id: 'settings.open', label: '設定を開く', scope: 'app', defaultBinding: createBinding('Comma', { ctrl: true }) },
   { id: 'sync.run', label: '同期', scope: 'app', defaultBinding: null },
@@ -98,6 +101,7 @@ const codeLabels: Record<string, string> = {
   Slash: '/',
   Space: 'Space',
   Enter: 'Enter',
+  Delete: 'Delete',
   ArrowUp: '↑',
   ArrowDown: '↓',
   ArrowLeft: '←',
@@ -140,7 +144,7 @@ function isSupportedShortcutCode(code: string) {
 }
 
 function hasRequiredModifier(binding: ShortcutBinding) {
-  return binding.ctrl || binding.alt || binding.meta || /^F(?:[1-9]|1[0-2])$/.test(binding.code)
+  return binding.ctrl || binding.alt || binding.meta || binding.code === 'Delete' || /^F(?:[1-9]|1[0-2])$/.test(binding.code)
 }
 
 function isReservedEditingBinding(binding: ShortcutBinding) {
@@ -190,7 +194,7 @@ export function shortcutBindingsEqual(
 
 export function bindingFromKeyboardEvent(event: ShortcutEventLike): ShortcutBinding | null {
   if (event.isComposing || event.getModifierState?.('AltGraph')) return null
-  const binding = createBinding(event.code, {
+  const binding = createBinding(event.key === 'Delete' ? 'Delete' : event.code, {
     ctrl: event.ctrlKey,
     shift: event.shiftKey,
     alt: event.altKey,
@@ -218,7 +222,7 @@ export function formatShortcutBinding(binding: ShortcutBinding | null) {
 
 export function matchesShortcut(event: ShortcutEventLike, binding: ShortcutBinding | null) {
   if (!binding || event.isComposing || event.getModifierState?.('AltGraph')) return false
-  return event.code === binding.code
+  return (event.key === 'Delete' ? 'Delete' : event.code) === binding.code
     && event.ctrlKey === binding.ctrl
     && event.shiftKey === binding.shift
     && event.altKey === binding.alt
@@ -261,7 +265,7 @@ export function validateShortcutBinding(
     return {
       ok: false,
       code: 'INVALID_BINDING',
-      message: 'Ctrl、Alt、Metaのいずれか、またはF1〜F12を含むキーを指定してください。',
+      message: 'Ctrl、Alt、Metaのいずれかを含むキー、Delete、またはF1〜F12を指定してください。',
     }
   }
   if (isReservedEditingBinding(normalized)) {

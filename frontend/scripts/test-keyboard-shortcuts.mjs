@@ -27,6 +27,19 @@ try {
   assert.equal(shortcuts.formatShortcutBinding(defaults['editor.redo'][0]), 'Ctrl+Y')
   assert.deepEqual(defaults['sync.run'], [null, null])
   assert.deepEqual(defaults['theme.toggle'], [null, null])
+  assert.deepEqual(defaults['note.delete'], [null, null])
+  const deleteKeyEvent = { code: 'Delete', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false }
+  const deleteKeyBinding = shortcuts.bindingFromKeyboardEvent(deleteKeyEvent)
+  assert.equal(deleteKeyBinding.code, 'Delete')
+  const numpadDeleteEvent = { ...deleteKeyEvent, code: 'NumpadDecimal', key: 'Delete' }
+  assert.deepEqual(shortcuts.bindingFromKeyboardEvent(numpadDeleteEvent), deleteKeyBinding)
+  assert.equal(shortcuts.matchesShortcut(numpadDeleteEvent, deleteKeyBinding), true)
+  assert.equal(shortcuts.bindingFromKeyboardEvent({ ...numpadDeleteEvent, key: '.' }), null)
+  assert.equal(shortcuts.matchesShortcut({ ...numpadDeleteEvent, key: '.' }, deleteKeyBinding), false)
+  assert.equal(shortcuts.validateShortcutBinding('note.delete', deleteKeyBinding, defaults).ok, true)
+  assert.equal(shortcuts.findMatchingShortcutAction(deleteKeyEvent, { ...defaults, 'note.delete': [deleteKeyBinding, null] }, 'app'), 'note.delete')
+  assert.equal(shortcuts.findMatchingShortcutAction({ ...deleteKeyEvent, isComposing: true }, { ...defaults, 'note.delete': [deleteKeyBinding, null] }, 'app'), null)
+  assert.deepEqual(shortcuts.parseStoredShortcutBindings(JSON.stringify({ version: 2, bindings: {} }))['note.delete'], [null, null])
 
   const ctrlZEvent = {
     code: 'KeyZ',
@@ -79,11 +92,15 @@ try {
     ],
     'editor.redo': [null, null],
     'sync.run': [{ code: 'F6', ctrl: false, shift: false, alt: false, meta: false }, null],
+    'note.delete': [{ code: 'KeyD', ctrl: true, shift: true, alt: false, meta: false }, null],
   }
   const restored = shortcuts.parseStoredShortcutBindings(
     shortcuts.serializeShortcutBindings(customized),
   )
   assert.deepEqual(restored, customized)
+  const deleteEvent = { code: 'KeyD', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false }
+  assert.equal(shortcuts.findMatchingShortcutAction(deleteEvent, defaults, 'app'), null)
+  assert.equal(shortcuts.findMatchingShortcutAction(deleteEvent, restored, 'app'), 'note.delete')
   assert.equal(
     shortcuts.findMatchingShortcutAction(ctrlZEvent, restored, 'editor'),
     null,
@@ -141,7 +158,8 @@ try {
   assert.match(noteEditorSource, /findMatchingShortcutAction[\s\S]*'editor'/, 'editor keys must use settings')
   assert.match(noteEditorSource, /@beforeinput="handleMarkdownBeforeInput"/, 'Markdown input must record history')
   assert.match(appSource, /addEventListener\('keydown', handleGlobalShortcut, true\)/, 'app shortcuts must use capture dispatch')
-  assert.match(settingsSource, /Esc、Delete、Backspace/, 'shortcut capture must document every key that clears a binding')
+  assert.match(settingsSource, /Esc、Backspace/, 'shortcut capture must document every key that clears a binding')
+  assert.doesNotMatch(settingsSource, /event\.code === 'Delete'/, 'Delete must be captured as a binding')
   assert.match(
     settingsSource,
     /event\.code === 'Escape'[\s\S]*settingsStore\.setShortcutBinding\(actionId, slot, null\)/,

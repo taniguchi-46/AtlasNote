@@ -85,7 +85,7 @@
           }"
         >
       <AppSidebar />
-      <NoteList />
+      <NoteList ref="noteListRef" />
       <div ref="editorWorkspaceRef" class="editor-workspace" :class="{ 'is-bottom': settingsStore.aiWorkspacePlacement === 'bottom' || workspaceNarrow }">
         <NoteEditor ref="noteEditorRef" />
         <SupportWorkspace />
@@ -322,6 +322,7 @@ const isAlwaysOnTop = ref(localStorage.getItem('atlas-always-on-top') === 'true'
 const appShellRef = ref<HTMLElement | null>(null)
 const appTopBarRef = ref<AppTopBarExpose | null>(null)
 const noteEditorRef = ref<NoteEditorExpose | null>(null)
+const noteListRef = ref<InstanceType<typeof NoteList> | null>(null)
 const activeResize = ref<ResizablePane | null>(null)
 let resizeObserver: ResizeObserver | null = null
 let cancelBeforeCloseListener: (() => void) | null = null
@@ -435,6 +436,10 @@ function executeGlobalShortcut(actionId: ShortcutActionId) {
     case 'note.new':
       void handleNewNote()
       return true
+    case 'note.delete':
+      if (!noteStore.activeNote || !noteListRef.value || noteStore.isSaving) return false
+      void noteListRef.value.deleteActiveNote()
+      return true
     case 'search.focus':
       if (!appTopBarRef.value) return false
       appTopBarRef.value.focusSearch()
@@ -471,6 +476,11 @@ function handleGlobalShortcut(event: KeyboardEvent) {
   if (settingsStore.isSettingsOpen || isNoteImportOpen.value || contentLockStore.accessRequest) return
 
   const target = event.target
+  if (
+    (event.code === 'Delete' || event.key === 'Delete')
+    && target instanceof Element
+    && target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')
+  ) return
   if (
     target instanceof Element
     && target.closest('[data-shortcut-capture], [data-terminal], [role="dialog"], [role="menu"], [role="listbox"]')

@@ -532,6 +532,14 @@ async function deleteNoteFromList(item: note.Summary) {
   }
 }
 
+async function deleteActiveNote() {
+  const item = noteStore.activeNote
+  if (!item) return
+  await deleteNoteFromList(item)
+}
+
+defineExpose({ deleteActiveNote })
+
 async function handleMoveToNotebook(notebookId: string | null) {
   const targetIds = contextMenu.value.targetIds
   if (targetIds.length === 0) return

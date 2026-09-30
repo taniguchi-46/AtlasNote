@@ -13,7 +13,7 @@
     </div>
 
     <p class="shortcut-capture-help">
-      「変更」を選んで新しいキーを押してください。Esc、Delete、Backspaceで割り当てを解除します。
+      「変更」を選んで新しいキーを押してください。Esc、Backspaceで割り当てを解除します。
     </p>
     <p
       v-if="feedback?.actionId === null"
@@ -115,7 +115,6 @@ function handleCaptureKeydown(actionId: ShortcutActionId, slot: ShortcutBindingS
 
   if (
     event.code === 'Escape'
-    || event.code === 'Delete'
     || event.code === 'Backspace'
   ) {
     const result = settingsStore.setShortcutBinding(actionId, slot, null)
@@ -132,7 +131,7 @@ function handleCaptureKeydown(actionId: ShortcutActionId, slot: ShortcutBindingS
     feedback.value = {
       actionId,
       kind: 'error',
-      message: 'Ctrl、Alt、Metaのいずれか、またはF1〜F12を含めてください。',
+      message: 'Ctrl、Alt、Metaのいずれかを含むキー、Delete、またはF1〜F12を指定してください。',
     }
     return
   }
