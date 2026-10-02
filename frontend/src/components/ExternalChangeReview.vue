@@ -12,7 +12,7 @@
         <p>対象: {{ review.items.map((item) => item.noteTitle || item.noteId || '新しいノート').join('、') }}</p>
         <p>影響件数: {{ review.impactCount }}　期限: {{ formatTime(review.expiresAt) }}</p>
         <div v-for="(item, index) in review.items" :key="item.candidateId || index" class="external-review-item">
-          <p>項目の状態: {{ stateLabel(item.status || review.state) }}</p>
+          <p>項目の状態: {{ stateLabel(displayItemState(review, item)) }}</p>
           <p v-if="item.reason"><strong>理由:</strong> {{ item.reason }}</p>
           <div class="external-review-diff">
             <section><strong>変更前</strong><pre>{{ formatValue(item.before) }}</pre></section>
@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { approveExternalChange, listExternalChangeReviews, rejectExternalChange, type ChangeReview } from '../api/externalChanges'
+import { approveExternalChange, listExternalChangeReviews, rejectExternalChange, type ChangeReview, type ChangeReviewItem } from '../api/externalChanges'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useTagStore } from '../stores/useTagStore'
 
@@ -95,6 +95,13 @@ function kindLabel(kind: string): string {
     'notes.request_move': 'Notebook移動', 'notes.request_tags': 'タグ変更',
     'notes.request_trash': 'ゴミ箱へ移動',
   } as Record<string, string>)[kind] ?? kind
+}
+function displayItemState(review: ChangeReview, item: ChangeReviewItem): string {
+  // 部分適用の結果は保持し、古い承認待ちだけを親の終端状態に合わせる。
+  if (['applied', 'conflict', 'rejected', 'expired'].includes(review.state) && item.status === 'pending_approval') {
+    return review.state
+  }
+  return item.status || review.state
 }
 function stateLabel(state: string): string {
   return ({ pending_approval: '承認待ち', applying: '適用中', applied: '適用済み', conflict: '競合', rejected: '却下', expired: '期限切れ', 'save-failure': '保存失敗', 'not-executed': '未適用', stale: '期限切れ', 'not-applicable': '適用対象外' } as Record<string, string>)[state] ?? state
