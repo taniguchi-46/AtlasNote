@@ -271,6 +271,8 @@ AtlasNote本体を先に起動し、対象の保存空間をアクティブに�
 
 #### Stage D 実装契約（2026-09-27）
 
+- D.1 Multi Terminal（2026-10-03）: `StartTerminal`は毎回新しいsession IDを返す。BackendはID別active mapと終了済みIDのcompletion signalを保持し、Write／Resize／ACK／Stopをsession単位に分離する。終了済みIDのStopは冪等、不明IDは拒否する。ShutdownはStart禁止と生成途中PTYの回収、全active sessionの並行停止とended待機を行う。Frontendは独立したxterm／FitAddon／入力queue／exit codeを持つ複数tabを表示し、＋で生成、🗑で選択中sessionだけを終了・閉じる。`shell N`は番号を再利用せず、自然終了したtabはbufferを保持する。Panel非表示でもPTYを維持し、active切替後のnextTick→fit→Resizeと全sessionへの表示設定反映を行う。Split、profile選択、session／出力の永続化は対象外。自動テストに加え、実Wailsの操作・IME・Ctrl+C・app終了後process残存はMANUAL_REQUIRED。以下の単一session記述はD.1前の履歴。
+
 - IDE風Panel追加（2026-10-01）: 新規既定配置は下（保存済み右／下は保持）。ヘッダー右側に単一session用の新規／終了／More、Panelに最大化／復元／閉じるを置く。最大化はEditor workspace内の一時状態とし、保存済み希望寸法を変更しない。floating時は最大化不可。sessionバーは実体1つのみ。Windows既定shellは引き続きCOMSPECであり、Frontend表示は「既定のshell／shell 1」とする。
 - 表示設定拡張（2026-10-01）: `TerminalSettingsPanel.vue`が表示位置のsegmented control、font size（新規既定14px）、font family、4配色、cursor style／blink、scrollback（既定2000行）を扱う。既存キーを維持し、追加値は`atlas-terminal-font-family`／`atlas-terminal-cursor-style`／`atlas-terminal-cursor-blink`／`atlas-terminal-scrollback`へ保存。未インストールfontはmonospaceへfallbackし、font size／family変更はxterm options→fit→既存ResizeTerminalの順に反映する。非表示中は再表示時にfitする。以下の2026-09-30記録は追加前の実装履歴。
 
@@ -278,7 +280,7 @@ AtlasNote本体を先に起動し、対象の保存空間をアクティブに�
 
 - `SupportWorkspace`に1つのterminalタブを追加し、既存の右／下ドック、浮動、最小化、リサイズを使用する。描画は`@xterm/xterm`と`@xterm/addon-fit`、scrollbackは2,000行。ターミナル出力、入力履歴はDB、localStorage、診断ログへ保存しない。
 - `internal/terminal`は`crosspty`のWindows ConPTY／Job Object、Unix PTY／process groupを使用する。Windowsは`COMSPEC`、Unixは`SHELL`を確認し既定shellへfallbackする。AtlasNote実行ファイルのディレクトリは子shellのPATHにだけ追加する。認証情報やIPC tokenは追加環境変数に注入しない。
-- Wails GUI専用の`StartTerminal`、`WriteTerminal`、`ResizeTerminal`、`AckTerminal`、`StopTerminal`で1 sessionを管理し、`terminal:data`／`terminal:exit`を送る。出力はBase64でUTF-8の分割境界を保持し、描画ACKで送信を制御する。停止、shell終了、アプリ終了でPTYと子プロセス群を閉じる。CLI／MCP／local IPCにterminal操作を公開しない。
+- Wails GUI専用の`StartTerminal`、`WriteTerminal`、`ResizeTerminal`、`AckTerminal`、`StopTerminal`で複数sessionを管理し、sessionId付きの`terminal:data`／`terminal:exit`を送る。出力はBase64でUTF-8の分割境界を保持し、session単位の描画ACKで送信を制御する。停止、shell終了、アプリ終了で対象PTYと子プロセス群を閉じる。CLI／MCP／local IPCにterminal操作を公開しない。
 - ターミナルは利用者権限で任意OSコマンドを実行でき、OS上で許可されたファイルへ直接アクセス可能。MCPのR0／R1／P／Wおよび公開scopeはターミナルをsandbox化しない。Claude Code／Codexは利用者が別途インストール・認証し、手入力で起動する。AI回答の自動入力や別保存経路は設けない。
 - Windows 10 1809以降のConPTYを前提とする。既定shellはWindowsの`cmd.exe`、Unixの`$SHELL`または`/bin/sh`。実Wails画面でのIME、Claude Code／Codex実接続、Stage C変更承認との一連の操作は最終統合受け入れで確認する。
 

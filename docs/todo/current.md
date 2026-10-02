@@ -6,10 +6,11 @@ Multi Terminal / Splitの実装を優先し、その後にCLI / MCP / Terminal�
 
 ## Multi Terminal
 
-- [ ] Backendの単一session管理を複数session管理へ変更する。
-- [ ] Terminal sessionの新規作成、切替、個別終了を実装する。
-- [ ] 全sessionを安全にShutdownする。
-- [ ] 既存PTY lifecycle、Job Object、EOF、ACK契約を維持し、対象テストを更新する。
+- [x] Backendの単一session管理を複数session管理へ変更する。
+- [x] Terminal sessionの新規作成、切替、個別終了を実装する。
+- [x] 全sessionを安全にShutdownする。
+- [x] 既存PTY lifecycle、Job Object、EOF、ACK契約を維持し、対象テストを更新する。
+- [ ] MANUAL_REQUIRED: 実Wailsで3 Terminalの別コマンド実行、tab切替・buffer保持、2番だけ終了・1番/3番継続、新規shell 4、Ctrl+C isolation、日本語IME、panel resize、app終了後のchild process残存なしを確認する。
 
 ## Split Terminal
 

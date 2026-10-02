@@ -55,7 +55,7 @@ Go Backend
 | Legacy AI Records | 内蔵AI生成GUIはStage Eで撤去。既存のAI履歴・成果物・要約はアクティブ保存空間のSQLiteに保持し、設定のread-only画面からWails List/Getで閲覧する。成果物と要約は別々の100件ページで読み、旧List API契約を維持する。自動移行・削除・Markdown変換はしない。旧認証情報もCredential Storeから自動削除せず、CLI／MCPでは利用しない。`internal/ai.Service`と旧Wails APIは記録アクセス互換性のため残す。旧生成経路の仕様は`docs/archive/phase4/ai-chat.md`に履歴として残る |
 | Organization Service | `internal/organize.Service`はStage B／CのCLI・MCP整理候補解析と承認後適用で現役。旧整理GUIはStage Eで撤去し、Wails旧Organization APIは互換層として残す。旧GUI仕様は`docs/development/specs/organization-center.md`に履歴として残る |
 | External Application API | `internal/readapi`が既存Note ServiceとOrganization Serviceを再利用し、CLI／MCP共通の読み取り・候補・承認待ち変更要求契約、保存空間scope、R0／R1／P／W権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。Wは操作登録までで、承認・適用はWails GUIからだけ行う。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/specs/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
-| Integrated Terminal | `SupportWorkspace`のterminalタブからWails専用APIへ接続する。`internal/terminal`がWindows ConPTY＋Job Object／Unix PTY＋process groupの1 sessionを管理し、ACK付きイベントで出力を送る。shellは利用者権限で動作し、MCPの公開scopeによるsandboxではない。停止・アプリ終了で子プロセス群を解放する |
+| Integrated Terminal | `SupportWorkspace`のterminalタブからWails専用APIへ接続する。`internal/terminal`がsession ID別にWindows ConPTY＋Job Object／Unix PTY＋process groupを管理し、session単位のACK付きイベントで出力を送る。Shutdownは新規Startを禁止し、生成途中のPTYを回収しながら全sessionを並行停止する。shellは利用者権限で動作し、MCPの公開scopeによるsandboxではない。停止・アプリ終了で子プロセス群を解放する |
 
 ## データ / 状態管理
 
@@ -65,7 +65,7 @@ Go Backend
 - 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/specs/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標、Editor workspace内の一時的な最大化を管理する。`TerminalComponent`の操作toolbarをPanelヘッダーへ配置し、単一sessionバーを表示する。`TerminalSettingsPanel`は端末表示設定、`utils/terminalAppearance.ts`はxterm配色とfont fallbackを担当する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
+- `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標、Editor workspace内の一時的な最大化を管理する。`TerminalComponent`の操作toolbarをPanelヘッダーへ配置し、複数sessionバーで生成・切替・個別終了を行う。sessionごとに独立したxterm bufferと入力queueを持ち、表示中のactive sessionだけをfit／resizeする。Panel非表示でPTYを停止せず、自然終了したtabはexit codeとbufferをユーザーが閉じるまで保持する。`TerminalSettingsPanel`は端末表示設定、`utils/terminalAppearance.ts`はxterm配色とfont fallbackを担当する。terminal sessionはメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
 - 共通パネルの右側／下側配置、右側幅／下側高さは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。旧AI記録は既存保存空間のSQLite、旧認証情報は既存Credential Storeから移動しない。外部AIはターミナル＋明示scopeのCLI／MCPを正式経路とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/specs/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。

@@ -2,7 +2,7 @@
 
 > AIを前提としたローカルファーストの知識管理・Second Brainアプリ
 
-Atlas Noteは、Markdownをノート本文の正本として、SQLiteでメタデータや検索索引を管理するデスクトップアプリです。現在はCLI / MCP / Terminalの再設計を完了し、Multi TerminalとSplitを次の開発テーマとしています。
+Atlas Noteは、Markdownをノート本文の正本として、SQLiteでメタデータや検索索引を管理するデスクトップアプリです。CLI / MCP / Terminalの再設計とMulti Terminalを実装し、Multi Terminalの実Wails確認とSplitを次の開発テーマとしています。
 
 ## 主な特徴
 

@@ -41,10 +41,9 @@ var (
 
 type Service struct {
 	mu           sync.Mutex
-	current      *session
-	lastID       string
-	starting     bool
-	startDone    chan struct{}
+	sessions     map[string]*session
+	ended        map[string]<-chan struct{}
+	starts       sync.WaitGroup
 	shuttingDown bool
 	emit         func(string, Event)
 	start        func(crosspty.CommandConfig) (crosspty.Pty, error)
@@ -65,7 +64,7 @@ type session struct {
 }
 
 func New(emit func(string, Event)) *Service {
-	return &Service{emit: emit, start: crosspty.Start}
+	return &Service{emit: emit, start: crosspty.Start, sessions: make(map[string]*session), ended: make(map[string]<-chan struct{})}
 }
 
 func validSize(cols, rows int) bool {
@@ -81,21 +80,10 @@ func (s *Service) Start(cols, rows int) (State, error) {
 		s.mu.Unlock()
 		return State{}, ErrServiceShuttingDown
 	}
-	if s.current != nil || s.starting {
-		s.mu.Unlock()
-		return State{}, errors.New("terminal is already running")
-	}
-	s.starting = true
-	startDone := make(chan struct{})
-	s.startDone = startDone
+	// Add under the same lock that prohibits new starts during Shutdown.
+	s.starts.Add(1)
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.starting = false
-		s.startDone = nil
-		close(startDone)
-		s.mu.Unlock()
-	}()
+	defer s.starts.Done()
 	config, err := shellConfig(cols, rows)
 	if err != nil {
 		return State{}, errors.New("terminal shell is unavailable")
@@ -116,7 +104,7 @@ func (s *Service) Start(cols, rows int) (State, error) {
 		return State{}, ErrServiceShuttingDown
 	}
 	session := &session{id: id, pty: p, done: make(chan struct{}), ack: make(chan uint64, 1), ended: make(chan struct{})}
-	s.current = session
+	s.sessions[id] = session
 	go s.run(session)
 	s.mu.Unlock()
 	return State{SessionID: id}, nil
@@ -125,13 +113,14 @@ func (s *Service) Start(cols, rows int) (State, error) {
 func (s *Service) get(id string) (*session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id == "" || s.current == nil || s.current.id != id {
-		if id != "" && id == s.lastID {
+	p := s.sessions[id]
+	if id == "" || p == nil {
+		if _, ok := s.ended[id]; ok {
 			return nil, ErrSessionEnded
 		}
 		return nil, ErrSessionNotFound
 	}
-	return s.current, nil
+	return p, nil
 }
 
 func (s *Service) Write(id, data string) error {
@@ -187,43 +176,54 @@ func (s *Service) Stop(id string) error {
 	p, err := s.get(id)
 	if err != nil {
 		s.mu.Lock()
-		alreadyEnded := id != "" && id == s.lastID
+		ended := s.ended[id]
 		s.mu.Unlock()
-		if alreadyEnded {
-			return nil
+		if ended != nil {
+			return waitEnded(ended)
 		}
 		return err
 	}
 	closeErr := p.stop()
-	select {
-	case <-p.ended:
-	case <-time.After(6 * time.Second):
-		return errors.New("terminal shutdown timed out")
-	}
-	return closeErr
+	return errors.Join(closeErr, waitEnded(p.ended))
 }
 
 func (s *Service) Shutdown() error {
 	s.mu.Lock()
 	s.shuttingDown = true
-	startDone := s.startDone
-	p := s.current
+	active := make([]*session, 0, len(s.sessions))
+	for _, p := range s.sessions {
+		active = append(active, p)
+	}
+	ended := make([]<-chan struct{}, 0, len(s.ended))
+	for _, done := range s.ended {
+		ended = append(ended, done)
+	}
 	s.mu.Unlock()
-	if startDone != nil {
-		<-startDone
-		s.mu.Lock()
-		p = s.current
-		s.mu.Unlock()
+	// Close every PTY independently: a slow Close or in-flight Start must not
+	// prevent other sessions from releasing their process trees and ACK waiters.
+	results := make(chan error, len(active)+len(ended))
+	for _, p := range active {
+		go func() { results <- errors.Join(p.stop(), waitEnded(p.ended)) }()
 	}
-	if p == nil {
-		return nil
+	for _, done := range ended {
+		go func() { results <- waitEnded(done) }()
 	}
-	closeErr := p.stop()
+	// Starts that finish after the shutdown flag close their newly created PTY
+	// before Done; none can be published into the active map after the snapshot.
+	s.starts.Wait()
+	var err error
+	for range len(active) + len(ended) {
+		err = errors.Join(err, <-results)
+	}
+	return err
+}
+
+func waitEnded(ended <-chan struct{}) error {
 	select {
-	case <-p.ended:
-		return closeErr
+	case <-ended:
+		return nil
 	case <-time.After(6 * time.Second):
-		return errors.Join(closeErr, errors.New("terminal shutdown timed out"))
+		return errors.New("terminal shutdown timed out")
 	}
 }
 
@@ -329,10 +329,10 @@ func (s *Service) run(p *session) {
 	stopped := p.stopped
 	p.mu.Unlock()
 	s.mu.Lock()
-	if s.current == p {
-		s.current = nil
-		s.lastID = p.id
-	}
+	delete(s.sessions, p.id)
+	// Retain only the ID and completion signal for ended-ID errors and
+	// idempotent Stop, including the window before the exit event finishes.
+	s.ended[p.id] = p.ended
 	s.mu.Unlock()
 	s.emit("terminal:exit", Event{SessionID: p.id, ExitCode: code, Stopped: stopped})
 	close(p.ended)

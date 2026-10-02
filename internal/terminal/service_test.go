@@ -38,9 +38,6 @@ func TestTerminalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Start(80, 24); err == nil {
-		t.Fatal("second session started")
-	}
 	if err := service.Resize(state.SessionID, 100, 30); err != nil {
 		t.Fatal(err)
 	}
