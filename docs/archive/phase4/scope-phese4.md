@@ -4,21 +4,21 @@
 
 ## 位置付け
 
-この文書は、Phase 4 v1「AI設定・単発要約」の要求範囲と境界を定義する。v1の実装順序と未完了の確認事項は [`todo-phese4.md`](../../todo/todo-phese4.md) を参照する。Phase 4全体はv3完了をもって完了とし、v2・v3の詳細は下記のversion mapを正とする。
+この文書は、Phase 4 v1「AI設定・単発要約」の要求範囲と境界を定義する。v1の実装順序と未完了の確認事項は [`todo-phese4.md`](todo-phese4.md) を参照する。Phase 4全体はv3完了をもって完了とし、v2・v3の詳細は下記のversion mapを正とする。
 
 Phase 3の受け入れは、非本番の実WebDAVで動作OKを確認して完了している。Phase 4 v1はD-01〜D-07の実装前設計を承認済みであり、D-02（AI認証・秘密情報）とD-05（Provider adapter・実行制御）のGo実装および関連Goテスト、D-06（AI設定UI・要約操作）とmock Wails APIを使う`test:ai-store`を完了している。D-07のCI拡張・保存/同期境界のローカル受け入れとGitHub Actions CI受け入れも完了した（2026-07-27、[CI run #30229339977](https://github.com/taniguchi-46/AtlasNote/actions/runs/30229339977)成功）。
 
 ## 参照する正本
 
-- 要求範囲: [`scope.md`](scope.md)
+- 要求範囲: [`scope.md`](../../development/scopes/scope.md)
 - 現在状況: [`../../status.md`](../../status.md)
-- Phase 4 v1 TODO: [`../../todo/todo-phese4.md`](../../todo/todo-phese4.md)
+- Phase 4 v1 TODO: [`todo-phese4.md`](todo-phese4.md)
 - Phase 4 v2詳細スコープ: [`scope-phese4-v2.md`](scope-phese4-v2.md)
-- Phase 4 v2 TODO: [`../../todo/todo-phese4-v2.md`](../../todo/todo-phese4-v2.md)
+- Phase 4 v2 TODO: [`todo-phese4-v2.md`](todo-phese4-v2.md)
 - Phase 4 v3詳細スコープ: [`scope-phese4-v3.md`](scope-phese4-v3.md)
-- Phase 4 v3 TODO: [`../../todo/todo-phese4-v3.md`](../../todo/todo-phese4-v3.md)
-- 既存のローカル保存・競合契約: [`../note-concurrency.md`](../note-concurrency.md)
-- Phase 3同期契約: [`../webdav-sync.md`](../webdav-sync.md)
+- Phase 4 v3 TODO: [`todo-phese4-v3.md`](todo-phese4-v3.md)
+- 既存のローカル保存・競合契約: [`../note-concurrency.md`](../../development/specs/note-concurrency.md)
+- Phase 3同期契約: [`../webdav-sync.md`](../../development/specs/webdav-sync.md)
 - アーキテクチャ・データ境界: [`../../rules/architecture.md`](../../rules/architecture.md)
 
 ## 目的

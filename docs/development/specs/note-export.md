@@ -8,7 +8,7 @@
 - ノートタイトルは保存ダイアログの推奨ファイル名と文書メタデータにだけ使用し、本文先頭へ重複して追加しない。
 - 添付ファイル、画像の埋め込み、複数ノートの一括出力は対象外とする。画像要素は画像データを出力せず、`alt`文字列だけを本文へ残す。
 
-要求範囲は [`scopes/scope-pre-phase5.md`](scopes/scope-pre-phase5.md) を正とする。
+要求範囲は [`scopes/scope-pre-phase5.md`](../scopes/scope-pre-phase5.md) を正とする。
 
 ## 正本と責務境界
 

@@ -6,13 +6,13 @@
 
 Phase 2の完了記録を維持しながら、Phase 3「同期」を設計承認後に段階的に実装します。
 
-機能要件は `docs/development/scopes/scope.md`、現在状況は `docs/status.md`、Phase 3の同期設計は `docs/development/webdav-sync.md` を正とします。
+機能要件は `docs/development/scopes/scope.md`、現在状況は `docs/status.md`、Phase 3の同期設計は `docs/development/specs/webdav-sync.md` を正とします。
 
 本書は承認済み設計に従った実装順序の記録です。Phase 3の進捗・受け入れ記録は `docs/archive/phase3/todo.md`、Phase 2の実績は `docs/archive/phase2/todo.md` を参照します。
 
 ## 現在のPhase
 
-Phase 3はschema version 10、Joplin方式の同期設定、フェイルセーフ、安全な復旧操作を含む実装とローカル自動検証まで完了しています。非本番の実WebDAVサーバー受け入れ、手動UI受け入れ、CI上の最終確認も2026-07-19に完了しました。実サーバーまたは同期実装の更新時は回帰確認を継続します。Phase 4実装前の未確定事項は [`scope-phese4.md`](scopes/scope-phese4.md) と [`todo-phese4.md`](../todo/todo-phese4.md) で管理します。
+Phase 3はschema version 10、Joplin方式の同期設定、フェイルセーフ、安全な復旧操作を含む実装とローカル自動検証まで完了しています。非本番の実WebDAVサーバー受け入れ、手動UI受け入れ、CI上の最終確認も2026-07-19に完了しました。実サーバーまたは同期実装の更新時は回帰確認を継続します。Phase 4実装前の未確定事項は [`scope-phese4.md`](../phase4/scope-phese4.md) と [`todo-phese4.md`](../phase4/todo-phese4.md) で管理します。
 
 ## Phase 3実装順序
 
@@ -20,7 +20,7 @@ Phase 3はschema version 10、Joplin方式の同期設定、フェイルセー�
 
 実装状況: 設計レビュー完了、コア実装完了（2026-07-15）
 
-- `docs/development/webdav-sync.md` で、同期対象、change set、`head`/manifest/objectのリモート配置、vault識別、初回同期、tombstone、strong ETag、hash、last-synced baseを確定済み。
+- `docs/development/specs/webdav-sync.md` で、同期対象、change set、`head`/manifest/objectのリモート配置、vault識別、初回同期、tombstone、strong ETag、hash、last-synced baseを確定済み。
 - Markdown正本、SQLiteメタデータ、FTS5・ノートリンク索引、`revision`、操作journal、ローカル保存laneの責務境界を維持する。
 - durable outbox、同期状態、manifest commit、競合状態、15秒・60秒・5分の最大3回retry、オフライン、部分成功、終了前flushの契約を確定済み。
 - `CredentialStore`、同期設定タブ、HTTPS/Basic、明示的なHTTP許可トグル、endpoint検証、timeout、ログ・エラーの秘密情報非露出を確定済み。
@@ -72,13 +72,13 @@ Phase 3はschema version 10、Joplin方式の同期設定、フェイルセー�
 
 ## Phase 2実装順序（完了記録・履歴）
 
-以下はPhase 2の実績を残すための履歴です。現在の実装状態と未確認事項は [`status.md`](../status.md) と [Phase 2アーカイブ](../archive/phase2/todo.md) を参照します。
+以下はPhase 2の実績を残すための履歴です。現在の実装状態と未確認事項は [`status.md`](../../status.md) と [Phase 2アーカイブ](../phase2/todo.md) を参照します。
 
 ### 0. revision・競合・保存キュー
 
 実装状況: 完了（2026-07-12）
 
-- 確定仕様は `docs/development/note-concurrency.md` を正とする。
+- 確定仕様は `docs/development/specs/note-concurrency.md` を正とする。
 - ノート単位の整数revisionと `expectedRevision` によるCASを実装する。
 - stale更新ではMarkdown、SQLite、操作ジャーナル、`updated_at`を変更しない。
 - autosaveとメタデータ更新を同じノート単位queueで直列化する。
@@ -96,7 +96,7 @@ Phase 3はschema version 10、Joplin方式の同期設定、フェイルセー�
 
 ### 2. タグ実装
 
-実装状況: 完了（2026-07-13）。確定仕様は `docs/development/tag-design.md` を正とする。
+実装状況: 完了（2026-07-13）。確定仕様は `docs/development/specs/tag-design.md` を正とする。
 
 - タグ名の正規化、長さ、Unicode case-foldによる重複防止、削除時の扱いを実装する。
 - `tags` / `note_tags`の多対多関連、主キー・外部キー・UNIQUE・逆引きINDEXを実装する。

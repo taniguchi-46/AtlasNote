@@ -1,8 +1,12 @@
-# 完了Phaseアーカイブ
+# 完了Phase・過去資料アーカイブ
 
-完了したPhaseのスコープ、実装チェックリスト、受け入れ記録を保管します。現行の要件・設計契約・進捗は `docs/development/`、`docs/todo/`、`docs/status.md` を正とします。
+完了したPhaseのscope、TODO、受け入れ記録と、現行の正本から外れた作業履歴・旧設計を保管します。現行状況は [`../status.md`](../status.md)、現行要件・設計は [`../development/`](../development/README.md)、未完了作業は [`../todo/`](../todo/README.md) を参照してください。
 
-| Phase | 資料 |
+| 場所 | 内容 |
 | --- | --- |
-| Phase 2：整理・検索 | [スコープ](phase2/scope.md) / [TODO・実績](phase2/todo.md) |
-| Phase 3：同期 | [TODO・受け入れ記録](phase3/todo.md) |
+| [phase2/](phase2/) | Phase 2 scope・TODO・実績 |
+| [phase3/](phase3/) | Phase 3同期受け入れ記録 |
+| [phase4/](phase4/README.md) | 完了したPhase 4 v1〜v3 scope・TODO、旧AI GUI設計 |
+| [history/](history/README.md) | 旧status履歴、過去の実装計画、状況スナップショット |
+
+アーカイブ資料は履歴・完了根拠です。現行仕様と異なる記載がある場合、現行のdevelopment資料とstatusを優先してください。

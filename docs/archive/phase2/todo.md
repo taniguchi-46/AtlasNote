@@ -6,7 +6,7 @@
 
 Phase 2「整理・検索」を、安全な最小差分で段階的に実装した記録を保持する。
 
-機能要件は `docs/archive/phase2/scope.md`、実装順序は `docs/development/implementation-plan.md` を正とする。
+機能要件は `docs/archive/phase2/scope.md`、実装順序は `docs/archive/history/phase3-implementation-plan.md` を正とする。
 
 ## 現状・前提
 
@@ -31,7 +31,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 
 - [x] 現在のドキュメント整理差分をレビューし、削除・更新内容に問題がないことを確認する。
 - [x] `docs/archive/phase2/scope.md`の対象機能と対象外機能を確認する。
-- [x] `docs/development/implementation-plan.md`の実装順序を確認し、最初に着手する機能を決める。
+- [x] `docs/archive/history/phase3-implementation-plan.md`の実装順序を確認し、最初に着手する機能を決める。
 - [x] 最初の実装対象をタイトル検索に限定するか判断する（タイトル・本文検索を実装済み）。
 - [x] 1機能ごとの変更範囲をRepository、Service、Wails API、Store、UIに分けて整理する。
 - [x] 検索方式、API、DB変更、テスト方針が未確定のまま機能実装へ進まないことを確認する。
@@ -74,7 +74,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
   - [x] 永続revision、フロントのdraft version、operation ID、同期世代の責務を分離する。
   - [x] CAS対象、競合時のdraft保持、保存キューの順序とflushを定義する。
   - [x] ローカル保存キューと将来の同期用durable outboxを分離する。
-  - [x] 詳細仕様を `docs/development/note-concurrency.md` に記録する。
+  - [x] 詳細仕様を `docs/development/specs/note-concurrency.md` に記録する。
 
 ### Medium
 
@@ -118,7 +118,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 
 ## 2. タグ設計
 
-設計の正本: [`docs/development/tag-design.md`](../../development/tag-design.md)
+設計の正本: [`docs/development/specs/tag-design.md`](../../development/specs/tag-design.md)
 
 - [x] タグ名の正規化、最大長、空文字、大文字小文字の扱いを決める。
 - [x] 同名タグのUNIQUE制約を決める。
@@ -212,7 +212,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 - [x] `isSaving`を要求数または保存キューで管理する。
 - [x] Markdown / Rich変換の空段落、code fence、URL、多重markをテストする。
 - [x] operation ID、note ID、処理段階、エラー分類を使ったログへ整理する。
-- [x] 大量ノート時の起動、検索、一覧表示を計測する（5,000件基準値を`docs/development/performance.md`へ記録済み）。
+- [x] 大量ノート時の起動、検索、一覧表示を計測する（5,000件基準値を`docs/development/guides/performance.md`へ記録済み）。
 - [x] 履歴・同期・AIストリーミング着手前にrevision / CASと競合検出を実装する。
   - [x] schema version 3で `notes.revision` を追加し、既存行をrevision `1`へbackfillする。
   - [x] Note / Summary / Recordと既存Repository・Serviceの入出力へrevisionを追加する。
@@ -243,7 +243,7 @@ Phase 2「整理・検索」を、安全な最小差分で段階的に実装し�
 - [x] `docs/status.md`を実装状態へ更新する。
 - [x] `docs/rules/architecture.md`へ確定した検索・タグ設計を反映する。
 - [x] `docs/archive/phase2/scope.md`と実装の差分を確認する。
-- [x] API、DB、migration、テストの変更内容を記録する（`docs/status.md`、`docs/development/search-index.md`、`docs/development/performance.md`）。
+- [x] API、DB、migration、テストの変更内容を記録する（`docs/status.md`、`docs/development/specs/search-index.md`、`docs/development/guides/performance.md`）。
 - [x] 不要なTODO、古い前提、リンク切れがないことを確認する。
 
 ## Phase 2完了条件（CI確認済み・残課題あり）

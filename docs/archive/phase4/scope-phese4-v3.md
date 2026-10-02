@@ -6,9 +6,9 @@
 
 ## 位置付け
 
-本書は、Phase 4 v2（AI司書・実行体験）の後に実装するv3の要求範囲と、Phase 4全体を完了と判定するための最終条件を定義する。v1は [`scope-phese4.md`](scope-phese4.md)、v2は [`scope-phese4-v2.md`](scope-phese4-v2.md)、v3の作業チェックは [`../../todo/todo-phese4-v3.md`](../../todo/todo-phese4-v3.md) を正とする。
+本書は、Phase 4 v2（AI司書・実行体験）の後に実装するv3の要求範囲と、Phase 4全体を完了と判定するための最終条件を定義する。v1は [`scope-phese4.md`](scope-phese4.md)、v2は [`scope-phese4-v2.md`](scope-phese4-v2.md)、v3の作業チェックは [`todo-phese4-v3.md`](todo-phese4-v3.md) を正とする。
 
-v3では、AIアシスタントとAIライティングを追加し、利用者が明示的に保存したAI履歴・生成成果物を端末内で管理する。要約は生成成功時に要約本文と参照元revisionだけを端末内の履歴へ自動保存する。AI設定、資格情報、履歴、生成成果物はv3でもWebDAV同期しない。単一チャットの現行実装と詳細なUI・実行契約は [`../ai-chat.md`](../ai-chat.md) を正とする。
+v3では、AIアシスタントとAIライティングを追加し、利用者が明示的に保存したAI履歴・生成成果物を端末内で管理する。要約は生成成功時に要約本文と参照元revisionだけを端末内の履歴へ自動保存する。AI設定、資格情報、履歴、生成成果物はv3でもWebDAV同期しない。単一チャットの現行実装と詳細なUI・実行契約は [`../ai-chat.md`](ai-chat.md) を正とする。
 
 ## 目的
 
@@ -16,7 +16,7 @@ v3では、AIアシスタントとAIライティングを追加し、利用者�
 
 ## 保存仕様（2026-07-28確定）
 
-詳細な正本は [`ai-integration.md`](../ai-integration.md) の「v3保存仕様（D-03/D-04追補）」とする。v3では次の5項目を確定する。
+詳細な正本は [`ai-integration.md`](ai-integration.md) の「v3保存仕様（D-03/D-04追補）」とする。v3では次の5項目を確定する。
 
 1. AIアシスタント履歴とAIライティング成果物は利用者の明示操作時に、要約履歴は生成成功時に、SQLiteのローカル管理データとして分離保存する。schema version 12で `ai_histories`、`ai_history_messages`、`ai_history_sources`、`ai_artifacts`、`ai_artifact_sources` を追加し、version 13で `ai_artifacts.kind` に `summary` を追加する。WebDAV同期対象にはしない。
 2. 保存するのは、保存操作時のuser／assistantメッセージ、明示保存された最終編集済み成果物、または成功した要約本文と参照元ノート／revisionだけとする。system prompt、内部指示、raw context、Provider request body、API Key、Authorization、raw provider error、生成中chunk、要約元本文そのものは保存しない。

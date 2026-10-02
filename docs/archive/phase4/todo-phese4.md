@@ -4,7 +4,7 @@
 
 Phase 4 v1「AI設定・単発要約」の実装前に、AI認証・秘密情報、生成結果の保存、Phase 3 WebDAV同期との境界、プロバイダー共通契約、受け入れ条件を確定する。v2・v3の詳細TODOは別文書で管理し、未確定事項を実装で先に固定しない。
 
-詳細スコープは [`scope-phese4.md`](../development/scopes/scope-phese4.md)、v2は [`scope-phese4-v2.md`](../development/scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](todo-phese4-v3.md)、現在状況は [`../status.md`](../status.md) を正とする。Phase 4はv3完了をもって完了する。
+詳細スコープは [`scope-phese4.md`](scope-phese4.md)、v2は [`scope-phese4-v2.md`](scope-phese4-v2.md) と [`todo-phese4-v2.md`](todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](scope-phese4-v3.md) と [`todo-phese4-v3.md`](todo-phese4-v3.md)、現在状況は [`../status.md`](../../status.md) を正とする。Phase 4はv3完了をもって完了する。
 
 ## 現状・前提
 

@@ -6,7 +6,7 @@
 
 Phase 3の設計レビューを基に、schema version 10、WebDAVクライアント、CredentialStore、durable outbox、同期Service、Joplin方式の設定UI、空同期先フェイルセーフ、安全な復旧操作の実装と自動検証まで完了しました。非本番の実WebDAVサーバー受け入れ、手動UI受け入れ、CI最終確認も2026-07-19に完了しています。実サーバーまたは同期実装の更新時は回帰確認を継続します。
 
-本書はPhase 3同期契約の正本です。実装順序は [`implementation-plan.md`](implementation-plan.md)、完了済みの進捗・受け入れ記録は [Phase 3アーカイブ](../archive/phase3/todo.md) を参照します。
+本書はPhase 3同期契約の正本です。実装順序は [`implementation-plan.md`](../../archive/history/phase3-implementation-plan.md)、完了済みの進捗・受け入れ記録は [Phase 3アーカイブ](../../archive/phase3/todo.md) を参照します。
 
 ## 1. 目的と前提
 
@@ -20,7 +20,7 @@ Phase 3では、複数端末のAtlas Note間でノートと管理情報をWebDAV
 - フロントエンドのautosave・ノート操作laneと、同期用durable outboxは分離する。
 - 競合した本文を自動mergeしたり、ユーザーの確認なしに強制上書きしたりしない。
 
-関連する確定仕様は `docs/development/note-concurrency.md`、`docs/development/search-index.md`、`docs/development/tag-design.md` とする。
+関連する確定仕様は `docs/development/specs/note-concurrency.md`、`docs/development/specs/search-index.md`、`docs/development/specs/tag-design.md` とする。
 
 ## 2. 同期対象と正本
 

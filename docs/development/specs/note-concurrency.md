@@ -235,7 +235,7 @@ WHERE id = ? AND revision = ?;
 
 ## 実装順序（完了記録）
 
-以下はPhase 2で実装した順序の記録です。Phase 3の同期outboxは [`webdav-sync.md`](webdav-sync.md) と [`implementation-plan.md`](implementation-plan.md) に従って実装済みです。
+以下はPhase 2で実装した順序の記録です。Phase 3の同期outboxは [`webdav-sync.md`](webdav-sync.md) と [`implementation-plan.md`](../../archive/history/phase3-implementation-plan.md) に従って実装済みです。
 
 1. revision migration、モデル、RepositoryのCASを実装済み。
 2. Serviceの更新・削除・補償・復旧へrevisionを接続済み。

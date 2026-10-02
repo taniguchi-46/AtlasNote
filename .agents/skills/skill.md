@@ -1,32 +1,11 @@
-# Atlas Note 汎用開発スキル
+# Atlas Note 開発チェックリスト
 
-このメモは、Atlas Note で AI Agent が開発するときに参照する短い作業ルールです。
+Atlas Noteの開発作業で、`.agents/AGENTS.md` と [`docs/rules/ai.md`](../../docs/rules/ai.md) を補う短いチェックリストです。独立した仕様の正本ではありません。
 
-## 使う場面
+1. [`docs/status.md`](../../docs/status.md) で現況と次の優先作業を確認する。
+2. [`docs/README.md`](../../docs/README.md) と対象機能のscope・仕様・TODOから正本を確認する。
+3. 対象に関係するarchitecture、conventions、development workflowの契約を読む。
+4. 既存実装、呼び出し元、関連テストを確認して最小差分で進める。
+5. 変更した文書・実装のリンク、進捗、確認結果を正本へ反映する。
 
-- Wails / Go / Vue 3 / TypeScript のコードを追加・修正するとき。
-- ノート、タグ、検索、同期、AI 支援、設定などの仕様を整理するとき。
-- AI Agent が作業前にプロジェクト固有の前提を確認したいとき。
-
-## 手順
-
-1. `docs/status.md` で現在状況と保留事項を確認する。
-2. `docs/README.md` で正本と関連資料を確認する。
-3. `docs/rules/architecture.md` で対象領域の構成と責務境界を確認する。
-4. `docs/rules/conventions.md` で命名と実装ルールを確認する。
-5. 関連する既存ファイルを探す。
-6. 既存パターンに合わせて小さく実装する。
-7. 可能なら確認コマンドを実行する。
-8. 仕様やコマンドが確定したら `docs/status.md` や関連 docs を更新する。
-
-## Atlas Note 固有の注意
-
-- ノート本文は Markdown、メタデータは SQLite という分担を前提に考える。
-- ローカルファーストを崩す実装は避ける。
-- WebDAV 同期と AI API Key 保存は、データ消失や秘匿情報に関わるため慎重に扱う。
-- UI は実用的なデスクトップアプリとして、一覧、検索、編集、設定の動線を優先する。
-- 文字化けした文言はそのまま残さない。
-
-## 汎用テンプレート化
-
-他プロジェクトでも使える知識は `.codex/templates/` に分離し、Atlas Note 固有の名称、パス、仕様を混ぜない。
+ノート本文はMarkdownを正本、SQLiteはメタデータ・関連情報・再構築可能な索引として扱います。同期、資格情報、復旧、Agent提案の契約は対象仕様を確認してください。

@@ -6,9 +6,9 @@
 
 ## 1. 位置付け
 
-本書は、Phase 4 v1「AI設定・単発要約」の認証・プロバイダー・生成結果・同期境界・UI・受け入れ条件を記録する設計書です。v2は [`scope-phese4-v2.md`](scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](../todo/todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md)、現在状況は [`../status.md`](../status.md) を参照します。Phase 4全体はv3完了をもって完了します。
+本書は、Phase 4 v1「AI設定・単発要約」の認証・プロバイダー・生成結果・同期境界・UI・受け入れ条件を記録する設計書です。v2は [`scope-phese4-v2.md`](scope-phese4-v2.md) と [`todo-phese4-v2.md`](todo-phese4-v2.md)、v3は [`scope-phese4-v3.md`](scope-phese4-v3.md) と [`todo-phese4-v3.md`](todo-phese4-v3.md)、現在状況は [`../status.md`](../../status.md) を参照します。Phase 4全体はv3完了をもって完了します。
 
-本書のv1「決定結果」が`承認済み`になるまで、AI API実装、DB migration、WebDAV契約変更は開始しません。v2・v3の実装前承認はそれぞれのscope／TODOで管理します。決定内容に応じて、`scope-phese4.md`、version別TODO、[`../rules/architecture.md`](../rules/architecture.md)、[`environment.md`](environment.md) の記載を更新します。
+本書のv1「決定結果」が`承認済み`になるまで、AI API実装、DB migration、WebDAV契約変更は開始しません。v2・v3の実装前承認はそれぞれのscope／TODOで管理します。決定内容に応じて、`scope-phese4.md`、version別TODO、[`../rules/architecture.md`](../../rules/architecture.md)、[`environment.md`](../../development/guides/environment.md) の記載を更新します。
 
 ## 2. 7項目の決定表
 
@@ -36,7 +36,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 - API Key、アクセストークン、Authorizationヘッダー、プロンプト、ノート本文をSQLite、Markdown、`localStorage`、`.env`、ログ、エラー、診断情報へ保存・出力しない。
 - AIが利用できない場合も、ローカル保存・編集・検索・既存同期を継続できる状態を維持する。
 
-既存のrevision・CAS・ストリーミング契約の詳細は [`note-concurrency.md`](note-concurrency.md)、Phase 3同期契約の詳細は [`webdav-sync.md`](webdav-sync.md) を正とします。
+既存のrevision・CAS・ストリーミング契約の詳細は [`note-concurrency.md`](../../development/specs/note-concurrency.md)、Phase 3同期契約の詳細は [`webdav-sync.md`](../../development/specs/webdav-sync.md) を正とします。
 
 ## 4. 決定方法
 
@@ -209,7 +209,7 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 次の条件をすべて満たすまで、Phase 4 v1のコード実装を開始しません。
 
 - D-01〜D-07が`承認済み`または、対象外とする理由付きで確定している。
-- [`todo-phese4.md`](../todo/todo-phese4.md) の必須設計・セキュリティ・受け入れ項目が完了している。
+- [`todo-phese4.md`](todo-phese4.md) の必須設計・セキュリティ・受け入れ項目が完了している。
 - 生成結果の保存・破棄・再生成・競合の扱いが、revision/CAS・操作journal・ノート単位laneと矛盾しない。
 - AI利用失敗時もローカル保存・編集・検索・既存同期を継続できることをテスト方針で保証している。
 - 実キー、秘密情報、実endpointを使わずにProvider契約とUI状態を検証できる。
@@ -217,8 +217,8 @@ Phase 4の決定は、次の既存契約を変更しないことを前提とし�
 
 ## 8. v2・v3への引き継ぎ
 
-- v2は [`scope-phese4-v2.md`](scopes/scope-phese4-v2.md) と [`todo-phese4-v2.md`](../todo/todo-phese4-v2.md) を正とし、AI司書、ストリーミング、部分応答、キャンセル、構造化出力を扱う。v2ではAI結果を永続化しない。
-- v3は [`scope-phese4-v3.md`](scopes/scope-phese4-v3.md) と [`todo-phese4-v3.md`](../todo/todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物、および成功時に自動保存する要約履歴を扱う。AIデータはWebDAV同期しない。
+- v2は [`scope-phese4-v2.md`](scope-phese4-v2.md) と [`todo-phese4-v2.md`](todo-phese4-v2.md) を正とし、AI司書、ストリーミング、部分応答、キャンセル、構造化出力を扱う。v2ではAI結果を永続化しない。
+- v3は [`scope-phese4-v3.md`](scope-phese4-v3.md) と [`todo-phese4-v3.md`](todo-phese4-v3.md) を正とし、AIアシスタント、AIライティング、明示保存するローカルAI履歴・生成成果物、および成功時に自動保存する要約履歴を扱う。AIデータはWebDAV同期しない。
 - Phase 4完了はv3完了とする。
 
 ### v3保存仕様（D-03/D-04追補・2026-07-28）

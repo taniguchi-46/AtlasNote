@@ -15,7 +15,7 @@
   - `Joplin` のようなオープンで自由度の高い拡張性。
 - **AI 連携**: ユーザー自身が所持している API Key を使用して、知識の整理やライティング支援、要約などをローカル環境主体で実行します。
 - **開発者向け機能**: マークダウンを標準とし、コードスニペットの管理などを容易にします。
-- **データ所有権**: データはローカルファーストで動作し、WebDAVによるデバイス間同期のコア実装と自動検証が完了しています。実サーバー受け入れ確認は継続中です。
+- **データ所有権**: データはローカルファーストで動作します。WebDAVによるデバイス間同期はコア実装・自動検証・非本番実サーバーでの受け入れ確認が完了しており、同期実装やサーバーを変更した際は回帰確認を行います。
 
 ---
 
@@ -151,16 +151,16 @@ npm --prefix frontend run test:markdown-safety      # Markdown安全性テスト
 さらに詳しく知りたい場合は、以下のドキュメントを参照してください。
 
 - **プロジェクトのルール**
-  - [ai.md](../rules/ai.md): AI Agent（および人間）の共通開発ガイド。
-  - [architecture.md](../rules/architecture.md): 本文/SQLite整合性など、より詳細なアーキテクチャ設計。
-  - [conventions.md](../rules/conventions.md): 命名規則（PascalCase, camelCase等）やTiptapの拡張ルール。
-  - [BRANCHING.md](../rules/BRANCHING.md): Git のブランチ運用・コミット規約。
+  - [ai.md](../../rules/ai.md): AI Agent（および人間）の共通開発ガイド。
+  - [architecture.md](../../rules/architecture.md): 本文/SQLite整合性など、より詳細なアーキテクチャ設計。
+  - [conventions.md](../../rules/conventions.md): 命名規則（PascalCase, camelCase等）やTiptapの拡張ルール。
+  - [BRANCHING.md](../../rules/BRANCHING.md): Git のブランチ運用・コミット規約。
 - **現在の状況・セットアップ**
-  - [docs README](../README.md): ドキュメントの入口、正本、参照順。
+  - [docs README](../../README.md): ドキュメントの入口、正本、参照順。
   - [setup.md](setup.md): 開発環境のより詳細なセットアップ手順や Codex 特有の権限問題の解説。
   - [environment.md](environment.md): 開発環境、確認コマンド、秘密情報の扱い。
-  - [status.md](../status.md): 現在の実装済み機能と、次のフェーズでやるべき開発タスクの進捗管理。
+  - [status.md](../../status.md): 現在の実装済み機能と、次に取り組む開発タスクの進捗管理。
 - **Phase 3同期**
-  - [webdav-sync.md](webdav-sync.md): 同期対象、競合、認証、outboxの確定設計。
-  - [implementation-plan.md](implementation-plan.md): Phase 3の実装順序。
-  - [Phase 3アーカイブ](../archive/phase3/todo.md): Phase 3の完了済み進捗・受け入れ記録。
+  - [webdav-sync.md](../specs/webdav-sync.md): 同期対象、競合、認証、outboxの確定設計。
+  - [implementation-plan.md](../../archive/history/phase3-implementation-plan.md): Phase 3の実装順序。
+  - [Phase 3アーカイブ](../../archive/phase3/todo.md): Phase 3の完了済み進捗・受け入れ記録。

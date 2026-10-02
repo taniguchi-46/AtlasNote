@@ -6,7 +6,7 @@
 
 v1で確立した安全な単発要約を基盤に、AI司書、ストリーミング、部分応答、キャンセル、構造化出力を追加する。v2ではAI履歴・生成成果物を永続化せず、Phase 3 WebDAV契約と既存のローカル保存契約を維持する。
 
-詳細スコープは [`scope-phese4-v2.md`](../development/scopes/scope-phese4-v2.md)、v1の前提は [`scope-phese4.md`](../development/scopes/scope-phese4.md)、v3の後続範囲は [`scope-phese4-v3.md`](../development/scopes/scope-phese4-v3.md) を正とする。
+詳細スコープは [`scope-phese4-v2.md`](scope-phese4-v2.md)、v1の前提は [`scope-phese4.md`](scope-phese4.md)、v3の後続範囲は [`scope-phese4-v3.md`](scope-phese4-v3.md) を正とする。
 
 ## 進捗分類（2026-08-24）
 

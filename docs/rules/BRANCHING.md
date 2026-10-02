@@ -1,6 +1,6 @@
 # ブランチ運用ルール
 
-Atlas Note のブランチ、コミット、PR の基本ルールです。Phaseごとの統合ブランチと、そこから分ける作業ブランチを使います。
+Atlas Note のブランチ、コミット、PR の基本ルールです。以下のPhase統合ブランチ構成は従来の運用モデルです。実際の作業ブランチとマージ先は、依頼内容・現在のブランチ・リポジトリの運用指示を確認して決めます。
 
 ## ブランチ構造
 
@@ -26,26 +26,18 @@ main
 | `docs/<topic>` | ドキュメントのみの変更 | 対象の `dev-PhaseN` |
 | `chore/<topic>` | 設定、依存関係、リポジトリ整備 | 対象の `dev-PhaseN` |
 
-現在のPhase 3統合ブランチは既存の `dev-phese3` です。この表記の修正やブランチ名変更は、このドキュメント整理の対象外とします。
+`codex/<topic>` 形式の作業ブランチも利用されています。ここに記載したブランチ名だけから作業先を推測せず、既存ブランチの確認やブランチ作成・改名・マージ・pushは、作業依頼とリポジトリの指示に従ってください。
 
 ## 機能開発フロー
 
+作業開始時は現在のブランチと変更状態を確認し、依頼で指定されたブランチを使います。
+
 ```bash
-git checkout dev
-git pull origin dev
-
-git checkout -b dev-PhaseN
-
-git checkout dev-PhaseN
-git checkout -b feature/<topic>
-
-# 実装・確認
-git status
-git add <files>
-git commit -m "feat(<scope>): <summary>"
-
-git push origin feature/<topic>
+git status --short --branch
+git branch --list
 ```
+
+ブランチの作成・切替・pushは、リポジトリ固有の指示と依頼に従って行います。上記のPhase統合フローを機械的に適用しないでください。
 
 ## コミット規則
 

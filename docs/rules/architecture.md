@@ -47,14 +47,14 @@ Go Backend
 | Repository Layer | SQLite と Markdown Storage への永続化を隠蔽する層 |
 | SQLite | ノートのメタデータ、タグ、リンク、検索用インデックスなど |
 | Markdown Storage | ノート本文の永続化 |
-| Attachments | `notes/attachments/<noteID>/manifest.json` と管理ID付き画像本体を保存する。本文には `atlasnote-attachment://` 参照だけを保持し、PNG／JPEGの検証、ロック時の暗号化、削除ジャーナル、ZIP出力を担当する。WebDAVでは添付entityとして検証付き同期を行う。詳細は`docs/development/attachments.md`を正とする |
-| Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/storage-spaces.md`を正とする |
-| Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/note-export.md`を正とする |
-| Backup / Restore | アクティブな保存空間のSQLite・Markdownを設定されたアーカイブルートへ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/backup-restore.md`を正とする |
-| WebDAV Sync | `docs/development/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
-| Legacy AI Records | 内蔵AI生成GUIはStage Eで撤去。既存のAI履歴・成果物・要約はアクティブ保存空間のSQLiteに保持し、設定のread-only画面からWails List/Getで閲覧する。成果物と要約は別々の100件ページで読み、旧List API契約を維持する。自動移行・削除・Markdown変換はしない。旧認証情報もCredential Storeから自動削除せず、CLI／MCPでは利用しない。`internal/ai.Service`と旧Wails APIは記録アクセス互換性のため残す。旧生成経路の仕様は`docs/development/ai-chat.md`に履歴として残る |
-| Organization Service | `internal/organize.Service`はStage B／CのCLI・MCP整理候補解析と承認後適用で現役。旧整理GUIはStage Eで撤去し、Wails旧Organization APIは互換層として残す。旧GUI仕様は`docs/development/organization-center.md`に履歴として残る |
-| External Application API | `internal/readapi`が既存Note ServiceとOrganization Serviceを再利用し、CLI／MCP共通の読み取り・候補・承認待ち変更要求契約、保存空間scope、R0／R1／P／W権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。Wは操作登録までで、承認・適用はWails GUIからだけ行う。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
+| Attachments | `notes/attachments/<noteID>/manifest.json` と管理ID付き画像本体を保存する。本文には `atlasnote-attachment://` 参照だけを保持し、PNG／JPEGの検証、ロック時の暗号化、削除ジャーナル、ZIP出力を担当する。WebDAVでは添付entityとして検証付き同期を行う。詳細は`docs/development/specs/attachments.md`を正とする |
+| Storage Spaces | 保存ルート内でSQLite、Markdown、同期状態、AIローカルデータ、単一writer lockを空間ごとに分離する。詳細は`docs/development/specs/storage-spaces.md`を正とする |
+| Note Export | アクティブな単一ノートの保存済みMarkdown snapshotを、revision・コンテンツロック再検証後にHTML／PDFへ変換し、OSネイティブ保存ダイアログで選択したパスへ原子的に出力する。詳細は`docs/development/specs/note-export.md`を正とする |
+| Backup / Restore | アクティブな保存空間のSQLite・Markdownを設定されたアーカイブルートへ世代保存し、SHA-256・SQLite integrity検証、再起動前stage、起動時swap／rollbackで復元する。詳細は`docs/development/specs/backup-restore.md`を正とする |
+| WebDAV Sync | `docs/development/specs/webdav-sync.md` のPhase 3契約に従うformat/head/manifest/object、durable outbox、競合、フェイルセーフ、復旧処理。コア実装済み |
+| Legacy AI Records | 内蔵AI生成GUIはStage Eで撤去。既存のAI履歴・成果物・要約はアクティブ保存空間のSQLiteに保持し、設定のread-only画面からWails List/Getで閲覧する。成果物と要約は別々の100件ページで読み、旧List API契約を維持する。自動移行・削除・Markdown変換はしない。旧認証情報もCredential Storeから自動削除せず、CLI／MCPでは利用しない。`internal/ai.Service`と旧Wails APIは記録アクセス互換性のため残す。旧生成経路の仕様は`docs/archive/phase4/ai-chat.md`に履歴として残る |
+| Organization Service | `internal/organize.Service`はStage B／CのCLI・MCP整理候補解析と承認後適用で現役。旧整理GUIはStage Eで撤去し、Wails旧Organization APIは互換層として残す。旧GUI仕様は`docs/development/specs/organization-center.md`に履歴として残る |
+| External Application API | `internal/readapi`が既存Note ServiceとOrganization Serviceを再利用し、CLI／MCP共通の読み取り・候補・承認待ち変更要求契約、保存空間scope、R0／R1／P／W権限、保護・ロック・ゴミ箱除外、revision・派生索引検証を担当する。Wは操作登録までで、承認・適用はWails GUIからだけ行う。`internal/localipc`は本体稼働中だけ認証済みloopback IPCを公開する。CLIはdescriptorのローカル利用者セッション、MCPはinitialize時の保存空間と明示公開note／Notebookへ固定した短命セッションを使い、外部プロセスによるSQLite／Markdown直接操作を許さない。IPCだけの起動失敗はGUIの起動失敗にしない。詳細は`docs/development/specs/AtlasNote_CLI_MCP_Rearchitecture_Spec.md`を正とする |
 | Integrated Terminal | `SupportWorkspace`のterminalタブからWails専用APIへ接続する。`internal/terminal`がWindows ConPTY＋Job Object／Unix PTY＋process groupの1 sessionを管理し、ACK付きイベントで出力を送る。shellは利用者権限で動作し、MCPの公開scopeによるsandboxではない。停止・アプリ終了で子プロセス群を解放する |
 
 ## データ / 状態管理
@@ -62,18 +62,18 @@ Go Backend
 - ノート本文は Markdown ファイルとして保存する方針。
 - ノートのメタデータ、タグ、リンク、同期状態、検索補助情報は SQLite に保存する方針。
 - ノート本文のファイル名は安定 ID を使った `note-id.md` とし、ユーザー入力をファイルパスへ直接使用しない。
-- 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
+- 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/specs/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
 - `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標、Editor workspace内の一時的な最大化を管理する。`TerminalComponent`の操作toolbarをPanelヘッダーへ配置し、単一sessionバーを表示する。`TerminalSettingsPanel`は端末表示設定、`utils/terminalAppearance.ts`はxterm配色とfont fallbackを担当する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
 - 共通パネルの右側／下側配置、右側幅／下側高さは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。旧AI記録は既存保存空間のSQLite、旧認証情報は既存Credential Storeから移動しない。外部AIはターミナル＋明示scopeのCLI／MCPを正式経路とする。
-- アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
+- アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/specs/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。
 - ローカルCLIとstdio MCPは`internal/externalcmd`から同じ認証済みIPCへ接続するが、Principalとセッショントークンは分離する。MCPは起動時に明示された公開scopeと初回接続先を保持し、descriptorを呼び出しごとに再読込しない。MCP権限は親接続と公開scopeの共通部分に限定し、正常終了または30分の有効期限でセッションを失効する。外部プロセスへRepository、SQLiteパス、Markdownパス、セッショントークンをAPI結果として公開せず、本体終了・保存空間全体のロック時はIPCを停止する。
 - 外部整理解析は既存Organization Serviceの候補生成と短命sessionを再利用し、外部クライアントIDと公開scopeへ追加で束縛する。`organize.analyze`／`organize.get_candidates`は`P`と`R1`の両方を必須とする。MCPは明示公開対象だけを解析し、broken-link判定では実在ID集合を内部参照する。ただしrestricted解析で明示公開note ID以外のリンク先はbroken候補にせず、scope外の実在／不存在、保護、ロック、ゴミ箱の差やID・タイトル・状態を候補へ追加しない。候補取得時にもscope・保護・ロック・ゴミ箱・revisionを再検証する。外部読み取りが同一Note Serviceのcontent accessを保持している場合はOrganization Serviceで再取得せず、外部解析sessionはプレビュー専用で既存GUIのApply経路から適用しない。
 - Stage Cの外部変更要求は`readapi.Service`のメモリ内operationに保持し、GUIの変更確認タブからの明示承認だけが内部permitを生成・消費する。Frontendは承認前に既存のdirty draft保存laneをflushし、対象note queueを通す。本体は適用直前に保存空間・公開scope・保護・ロック・ゴミ箱・revisionを再確認し、Note／Organization ServiceのCAS・journalへ委譲する。外部IPCには承認・token発行・直接保存ルートを追加しない。
-- 整理候補はGo側のorganization Serviceで解析・サーバー側sessionへ束縛する。UIから渡す候補IDだけで提案内容を決めず、適用直前に保存空間・保護状態・revisionを再検証し、既存CAS／Note Serviceを通す。詳細は`docs/development/organization-center.md`を正とする。
-- 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/webdav-sync.md` を正とする。
+- 整理候補はGo側のorganization Serviceで解析・サーバー側sessionへ束縛する。UIから渡す候補IDだけで提案内容を決めず、適用直前に保存空間・保護状態・revisionを再検証し、既存CAS／Note Serviceを通す。詳細は`docs/development/specs/organization-center.md`を正とする。
+- 同期用のhead ETag、manifest/object hash、last-synced base、durable outboxは、ローカルrevisionと操作journalから分離して管理する。詳細は `docs/development/specs/webdav-sync.md` を正とする。
 
 ### ノート保存空間
 
@@ -81,7 +81,7 @@ Go Backend
 - 新しい保存空間は表示名ではなく128 bitの内部IDから`spaces/<ID>/`を導出し、各空間に既存のSQLite、Markdown、`.sync-recovery/`、`atlasnote.lock`を配置する。
 - 現在の空間はversion付き`storage-spaces.json`で管理し、短時間の`storage-spaces.lock`と一時ファイル・sync・renameで更新する。不正な台帳を自動上書きしない。
 - 実行中のRepository／Serviceは切り替えず、dirty draftのflush、同期の一時停止、AI／同期／インポート／エクスポートbusy確認、対象空間の事前検証後に選択を保存する。現在プロセスのDB・lock解放後にアプリを自動再起動し、選択先を初期化する。
-- 設定画面だけで一覧・作成・選択を提供する。削除、改名、外部保存先、暗号化は後続スコープとする。詳細は`docs/development/storage-spaces.md`を正とする。
+- 設定画面だけで一覧・作成・選択を提供する。削除、改名、外部保存先、暗号化は後続スコープとする。詳細は`docs/development/specs/storage-spaces.md`を正とする。
 
 ### SQLite / Markdown の整合性
 
@@ -97,7 +97,7 @@ Go Backend
 - アプリ起動時はSQLiteやMarkdownへアクセスする前に、データディレクトリ直下の `atlasnote.lock` をOSレベルで排他取得する。同じデータディレクトリを使用する2つ目のプロセスはwriterとして初期化しない。
 - ロックはアプリ終了時にSQLite接続を閉じてから解放する。ロックファイルの存在自体ではなくOSロックの取得結果で判定し、異常終了後にファイルが残っても次回起動を妨げない。
 - 単一writer保証とは別に、整数 `revision` と `expectedRevision` による同一端末内のCASを管理する。端末間の比較には同期用のhead、manifest、object、baseを使用する。
-- revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/note-concurrency.md` を正とする。
+- revision、競合検出、ノート単位保存キューの確定仕様は `docs/development/specs/note-concurrency.md` を正とする。
 - ローカル保存キューと同期用durable outboxは分離し、ローカルrevisionを端末間の新旧比較には使用しない。
 - 空の同期先を検出した場合は既定ONのフェイルセーフでlocal正本へのremote適用を止める。再アップロードはheadの`If-Match`成功後だけlocal同期状態を更新する。
 - remote正本からの全再取得は実行中のDB・notesへ直接適用せず、`.sync-recovery/staging/`の別vaultでhash・payload・SQLite integrityを検証する。次回起動時にデータロック取得後かつSQLite open前に現行vaultを`.sync-recovery/backups/`へ退避してswapし、失敗時はrollbackする。
@@ -106,9 +106,9 @@ Go Backend
 ### バックアップと復元
 
 - バックアップの正本はアクティブ保存空間のSQLiteとMarkdownであり、検索索引などの派生データを別管理しない。自動バックアップは同期排他ゲートと保存空間スナップショットゲートを保持してコピーする。
-- バックアップ世代は設定されたアーカイブルートの`.atlasnote-backups/<spaceID>/generations/`へ保存する。manifestのファイル一覧・サイズ・SHA-256を使って追加ファイル、欠落、symlink、パス traversalを検証する。物理保存場所の選択と移行は`docs/development/storage-locations.md`を正とする。
+- バックアップ世代は設定されたアーカイブルートの`.atlasnote-backups/<spaceID>/generations/`へ保存する。manifestのファイル一覧・サイズ・SHA-256を使って追加ファイル、欠落、symlink、パス traversalを検証する。物理保存場所の選択と移行は`docs/development/specs/storage-locations.md`を正とする。
 - 復元はプレビュー確認トークンを必要とし、検証済みコピーをstagingへ作ってから`pending.json`で次回起動へ引き渡す。データロック取得後かつSQLite open前に現行データを安全用世代とrollback領域へ退避し、フェーズマーカーによって中断後も再開できるようにする。
-- 復元と同期復旧のpending状態は同時に処理せず、復元失敗時は現行データを優先してrollbackする。詳細な保存上限、API、テストは`docs/development/backup-restore.md`を正とする。
+- 復元と同期復旧のpending状態は同時に処理せず、復元失敗時は現行データを優先してrollbackする。詳細な保存上限、API、テストは`docs/development/specs/backup-restore.md`を正とする。
 
 ### Markdown全文検索
 
@@ -116,7 +116,7 @@ Go Backend
 - 日本語の部分一致を優先し、FTS5の `trigram` tokenizerを使用する。
 - `notes` テーブルに本文カラムを追加しない。
 - 索引更新失敗でMarkdown正本の保存をrollbackせず、不整合は検出・再構築する。
-- 索引方式、更新タイミング、再構築の確定仕様は `docs/development/search-index.md` を正とする。
+- 索引方式、更新タイミング、再構築の確定仕様は `docs/development/specs/search-index.md` を正とする。
 
 ### タグとノート関連
 
@@ -125,7 +125,7 @@ Go Backend
 - `note_tags`は`(note_id, tag_id)`複合主キーと両方向の`ON DELETE CASCADE`を使う。タグ別ノート検索に備え、`(tag_id, note_id)`の逆引きINDEXを置く。
 - タグの作成・改名・削除、ノートのタグ付与・解除はRepository / Service / Wails API / フロントAPI / Piniaの責務境界を通す。ComponentからWails APIを直接呼ばない。
 - タグ操作はMarkdown、`notes.updated_at`、`notes.revision`、FTS5索引、保存操作ジャーナルを変更しない。ゴミ箱内ノートのタグは保持し、UIからの変更だけを無効化する。
-- タグの確定仕様、migration、rollback、構造化エラーは `docs/development/tag-design.md` を正とする。タグクリックは単一タグの通常一覧へ遷移し、ノートブック選択および全文検索条件とは同時に保持しない。
+- タグの確定仕様、migration、rollback、構造化エラーは `docs/development/specs/tag-design.md` を正とする。タグクリックは単一タグの通常一覧へ遷移し、ノートブック選択および全文検索条件とは同時に保持しない。
 
 ### ノートリンク・バックリンク
 
@@ -140,9 +140,9 @@ Go Backend
 
 | 連携 | 方針 |
 | --- | --- |
-| WebDAV | Phase 3で採用する同期方式。コア実装済み・実サーバー受け入れ確認中で、`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧は `docs/development/webdav-sync.md` を正とする |
+| WebDAV | Phase 3で採用した同期方式。コア実装と非本番実サーバー受け入れ確認は完了済み。同期仕様（`head`/manifest/object配置、HTTPS/Basic認証、明示的HTTP/TLS/proxy設定、outbox、競合、フェイルセーフ、復旧）は `docs/development/specs/webdav-sync.md` を正とする |
 | 外部AI | Stage E以降の正式経路は統合ターミナル＋CLI／MCP。MCPは明示scopeに限定し、ターミナルはsandboxではない。旧Provider adapterとWails生成APIは記録List/Getと旧データ互換性のためBackendに残るが、Frontendに旧生成・Provider設定導線を設けない。旧AI記録は元のSQLiteに保持し、WebDAV同期しない |
-| OS Keychain | WebDAVパスワードとAI API KeyはCredential Manager / Keychain / Secret Serviceへ別のservice namespaceで保存し、利用不可時はsession限定とする。AI API Keyを`.env`、SQLite、Markdown、`localStorage`へ保存しない |
+| OS Keychain | WebDAVパスワードはCredential Manager / Keychain / Secret Serviceへ保存し、利用不可時はsession限定とする。旧AI API Key記録が残っている場合も新しいCLI / MCP連携では使用しない。キーを`.env`、SQLite、Markdown、`localStorage`へ保存しない |
 
 ### 外部Markdownのraw HTML
 
@@ -163,18 +163,18 @@ Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した
 - md・txt・HTMLのインポートはGo側のOSネイティブファイルダイアログで選択し、フロントエンドからファイルパスを受け取らない。フロントエンドはAPIクライアントとPinia Storeを経由して保存先、タイトル決定方式、構造化結果だけを扱う。
 - `internal/noteimport` はUTF-8入力の変換とタイトル決定を担当し、タイトル方式は自動・ファイル名・先頭見出し・メタデータから選ぶ。ノート作成は既存の `note.Service.Create` に委譲する。直接SQLiteやMarkdownファイルへ書き込まないため、操作journal、派生索引、sync outbox、コンテンツロックを迂回しない。
 - HTMLはDOM解析後に許可構造だけをMarkdownへ再構築し、`hidden`属性を持つ本文要素と子孫を破棄する。raw HTML、属性、スクリプト、CSS、外部リソース、危険URLを保存しない。通常のmd本文はBOMを除いて保持し、既存のraw HTML表示時安全化に従う。
-- 複数ファイルは1ファイル1ノートとし、変換失敗はファイル単位で返す。保存失敗後は成功済みノートを保持して残りを中止する。詳細は `docs/development/note-import.md` を正とする。
+- 複数ファイルは1ファイル1ノートとし、変換失敗はファイル単位で返す。保存失敗後は成功済みノートを保持して残りを中止する。詳細は `docs/development/specs/note-import.md` を正とする。
 
 ### ノートエクスポート
 
 - HTML／PDFエクスポートは、アクティブな単一ノートのdirty draftを保存laneでflushしてから、保存済みMarkdownと`expectedRevision`をsnapshotとして扱う。出力は読み取り専用で、Markdown、SQLite、操作journal、派生索引、sync outboxを変更しない。
 - 保存先はGo側のOSネイティブダイアログで選択し、フロントエンドへパスを返さない。ダイアログ中はコンテンツgateを保持せず、選択後の最終本文・revision・lock再検証から同一ディレクトリの一時ファイルを使った原子的確定までexport gateを保持する。コンテンツロックのwriter取得順はexport→AI→通常アクセスとする。
 - HTMLはTiptapが生成した断片をGo側でallowlistにより再サニタイズし、CSPと固定CSSを含む自己完結UTF-8文書へ変換する。PDFは`pdfmake` 0.3.11と同梱Noto Sans JPを使い、選択可能な日本語を含むA4縦の文書として直接生成する。外部リソースや画像データは出力しない。
-- 保護済み・解除済みノートは暗号化領域外へ平文を作ることを明示警告し、確認済みrequestだけを許可する。本文、形式別payload、保存先フルパスはログへ出さない。詳細は `docs/development/note-export.md` を正とする。
+- 保護済み・解除済みノートは暗号化領域外へ平文を作ることを明示警告し、確認済みrequestだけを許可する。本文、形式別payload、保存先フルパスはログへ出さない。詳細は `docs/development/specs/note-export.md` を正とする。
 
 ## Local Intelligence
 
-初期版の関連候補は`note.Service.RelatedNotes`から`note.Repository`のリンク・タグ索引と既存FTS検索を読み取る。Wails APIは現在の保存空間だけを対象とし、Markdown正本やDB schemaを変更しない。UIは既存バックリンク内へ読み取り専用で表示する。旧AIチャットへの参照追加導線はStage Eで撤去した。詳細は[`../development/local-intelligence.md`](../development/local-intelligence.md)。
+初期版の関連候補は`note.Service.RelatedNotes`から`note.Repository`のリンク・タグ索引と既存FTS検索を読み取る。Wails APIは現在の保存空間だけを対象とし、Markdown正本やDB schemaを変更しない。UIは既存バックリンク内へ読み取り専用で表示する。旧AIチャットへの参照追加導線はStage Eで撤去した。詳細は[`../development/local-intelligence.md`](../development/specs/local-intelligence.md)。
 
 ## 未確定事項
 

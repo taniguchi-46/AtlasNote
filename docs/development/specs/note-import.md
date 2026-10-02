@@ -7,7 +7,7 @@
 - 保存先は最上位階層、既存ノートブック、新しいトップレベルノートブックから選択する。
 - 添付ファイル、画像の保存、ドラッグ＆ドロップは対象外とする。
 
-要求とHTML変換規則は [`scopes/scope-pre-phase5.md`](scopes/scope-pre-phase5.md) を正とする。
+要求とHTML変換規則は [`scopes/scope-pre-phase5.md`](../scopes/scope-pre-phase5.md) を正とする。
 
 ## 境界と保存契約
 

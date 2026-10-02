@@ -52,14 +52,14 @@ MVPで構築したローカル保存基盤と3ペインUIを維持しながら�
 
 ### 検索基盤（確定・実装済み）
 
-- SQLite FTS5 contentful索引とtrigram tokenizerを採用した。詳細は [`search-index.md`](../../development/search-index.md) を正とする。
+- SQLite FTS5 contentful索引とtrigram tokenizerを採用した。詳細は [`search-index.md`](../../development/specs/search-index.md) を正とする。
 - タイトル検索と本文全文検索の責務を分離した。
 - Markdown外部変更時はhashでreconciliationし、索引を再構築可能にした。
-- 検索結果のページング、最大件数、並び順、入力検証を [`search-api.md`](../../development/search-api.md) に確定した。
+- 検索結果のページング、最大件数、並び順、入力検証を [`search-api.md`](../../development/specs/search-api.md) に確定した。
 
 ### タグ設計（完了）
 
-確定仕様と実装・検証状況は `docs/development/tag-design.md` を正とする。
+確定仕様と実装・検証状況は `docs/development/specs/tag-design.md` を正とする。
 
 - タグ名の正規化、最大長、大文字小文字の扱い
 - UNIQUE制約とINDEX

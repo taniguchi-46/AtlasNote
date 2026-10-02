@@ -37,7 +37,7 @@
 - Markdown Storage は本文保存の責務を持ち、メタデータ管理は SQLite 側に寄せる。
 - AI API Key は平文ログや例外メッセージに出さない。
 - Mermaid専用実装は`codex/mermaid-full`で管理する。通常開発ブランチでは既存フェンスを通常のコードとして扱い、ソースを保持する。
-- WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを [`docs/development/webdav-sync.md`](../development/webdav-sync.md) に従って実装する。
+- WebDAV 同期はローカルデータを正とする前提で、競合時の扱いを [`docs/development/specs/webdav-sync.md`](../development/specs/webdav-sync.md) に従って実装する。
 - 添付画像は `atlasnote-attachment://<noteID>/<attachmentID>` の管理参照だけを本文へ保存し、data URL、ローカル絶対パス、Blob URL、base64本体を永続化しない。保存・読込・ZIP出力は `frontend/src/api/attachments.ts` とGoの添付Store／Wails APIを通し、コンポーネントからファイルシステムへ直接アクセスしない。
 - 画像貼り付けの非同期処理ではノートID、本文、選択範囲、Richドキュメントの世代を再検証し、古い応答で本文を変更しない。保存失敗時は本文を保持し、入力データまたは保存済み添付を再試行状態へ残す。通常の文字・表の貼り付け経路を画像処理で上書きしない。
 

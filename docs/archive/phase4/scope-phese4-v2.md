@@ -6,9 +6,9 @@
 
 ## 位置付け
 
-本書は、Phase 4 v1（AI設定・単発要約）の後に実装するv2の要求範囲と完了条件を定義する。v1の正本は [`scope-phese4.md`](scope-phese4.md)、v2の作業チェックは [`../../todo/todo-phese4-v2.md`](../../todo/todo-phese4-v2.md) とする。Phase 4全体の完了条件はv3完了であり、v3の範囲は [`scope-phese4-v3.md`](scope-phese4-v3.md) を参照する。
+本書は、Phase 4 v1（AI設定・単発要約）の後に実装するv2の要求範囲と完了条件を定義する。v1の正本は [`scope-phese4.md`](scope-phese4.md)、v2の作業チェックは [`todo-phese4-v2.md`](todo-phese4-v2.md) とする。Phase 4全体の完了条件はv3完了であり、v3の範囲は [`scope-phese4-v3.md`](scope-phese4-v3.md) を参照する。
 
-v2では、初期プロバイダーをOpenRouterとGemini APIに限定したまま、AI司書の候補提示と実行中の操作体験を追加する。AI司書は単一チャットtimelineの`＋`メニューから利用する。v2の生成結果と会話は永続化せず、既存のMarkdown正本、SQLite、操作journal、WebDAV outboxをAI処理だけで変更しない。共通コンポーザー、Provider管理Web検索、制限付きAgentモードの横断契約は [`../ai-chat.md`](../ai-chat.md) とv3 scopeを参照する。
+v2では、初期プロバイダーをOpenRouterとGemini APIに限定したまま、AI司書の候補提示と実行中の操作体験を追加する。AI司書は単一チャットtimelineの`＋`メニューから利用する。v2の生成結果と会話は永続化せず、既存のMarkdown正本、SQLite、操作journal、WebDAV outboxをAI処理だけで変更しない。共通コンポーザー、Provider管理Web検索、制限付きAgentモードの横断契約は [`../ai-chat.md`](ai-chat.md) とv3 scopeを参照する。
 
 ## 目的
 

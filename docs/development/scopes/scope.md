@@ -102,8 +102,8 @@ MVPで構築したローカル保存基盤と3ペインUIを維持しながら�
 
 ## Phase 2で確定した事項
 
-- 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定し、`docs/development/search-index.md` に記録する。
-- タグのデータモデル、制約、削除時の扱い、ノートとの関連付け方式は `docs/development/tag-design.md` で確定・実装済み。
+- 全文検索の索引方式はcontentful SQLite FTS5 + trigramに確定し、`docs/development/specs/search-index.md` に記録する。
+- タグのデータモデル、制約、削除時の扱い、ノートとの関連付け方式は `docs/development/specs/tag-design.md` で確定・実装済み。
 - ノートリンク・バックリンクの記法、抽出規則、更新境界は実装済み。
 - 検索・並び替えを組み合わせたAPIと画面状態は実装・検証済み。
 - DB変更時の既存データへの影響、migration、rollback方法はschema version 3〜7の変更で確認済み。
@@ -147,15 +147,15 @@ Phase 2の詳細な要求・実装・検証記録は `docs/archive/phase2/` に�
 ## 後続Phase着手前の必須事項
 
 - [x] インポート・同期前に、raw HTMLをregexだけに依存せず処理する変換・サニタイズ方針を `docs/rules/architecture.md` に確定する。
-- [x] クラウド同期・履歴・AIストリーミング前に、revision、競合検出、保存キューの仕様を `docs/development/note-concurrency.md` に確定する。
+- [x] クラウド同期・履歴・AIストリーミング前に、revision、競合検出、保存キューの仕様を `docs/development/specs/note-concurrency.md` に確定する。
 
 ---
 
 # Phase 3：同期
 
-詳細設計: `docs/development/webdav-sync.md`
+詳細設計: `docs/development/specs/webdav-sync.md`
 
-実装順序: `docs/development/implementation-plan.md`
+実装順序: `docs/archive/history/phase3-implementation-plan.md`
 
 受け入れ記録: `docs/archive/phase3/todo.md`
 
@@ -180,19 +180,19 @@ Phase 2の詳細な要求・実装・検証記録は `docs/archive/phase2/` に�
 
 # Phase 4：AI
 
-詳細スコープ v1: `docs/development/scopes/scope-phese4.md`
+詳細スコープ v1: `docs/archive/phase4/scope-phese4.md`
 
-作業チェック v1: `docs/todo/todo-phese4.md`
+作業チェック v1: `docs/archive/phase4/todo-phese4.md`
 
-詳細スコープ v2: `docs/development/scopes/scope-phese4-v2.md`
+詳細スコープ v2: `docs/archive/phase4/scope-phese4-v2.md`
 
-作業チェック v2: `docs/todo/todo-phese4-v2.md`
+作業チェック v2: `docs/archive/phase4/todo-phese4-v2.md`
 
-詳細スコープ v3: `docs/development/scopes/scope-phese4-v3.md`
+詳細スコープ v3: `docs/archive/phase4/scope-phese4-v3.md`
 
-作業チェック v3: `docs/todo/todo-phese4-v3.md`
+作業チェック v3: `docs/archive/phase4/todo-phese4-v3.md`
 
-現状: v1（AI設定・単発要約）のD-01〜D-07は承認・実装・受け入れ済み（2026-07-27）。Phase 4はv2・v3を順に完了し、v3完了をもって正式完了とする。単一チャット、Provider管理Web検索、共通下書き、制限付きAgentの変更提案・差分確認・編集権限設定（既定は明示適用、更新可能は検証済み提案の自動適用）は実装済みである。詳細な正本は上記のversion別scope／TODO、`ai-integration.md`、`ai-chat.md`とする。
+現状: v1（AI設定・単発要約）のD-01〜D-07は承認・実装・受け入れ済み（2026-07-27）。Phase 4はv2・v3を順に完了し、v3完了をもって正式完了とする。単一チャット、Provider管理Web検索、共通下書き、制限付きAgentの変更提案・差分確認・編集権限設定（既定は明示適用、更新可能は検証済み提案の自動適用）は実装済みである。詳細な正本は上記のversion別scope／TODO、`docs/archive/phase4/ai-integration.md`、`docs/archive/phase4/ai-chat.md`とする。
 
 ## AI設定
 
@@ -231,7 +231,7 @@ v2へ移管
 
 ## 関連メモ
 
-Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書スコープへ正式移管した（2026-07-27）。判定基準、AI抽出方式、候補実装、関連度が低い・候補なし・大量ノート時のテストは [`todo-phese4-v2.md`](../../todo/todo-phese4-v2.md) で管理する。
+Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書スコープへ正式移管した（2026-07-27）。判定基準、AI抽出方式、候補実装、関連度が低い・候補なし・大量ノート時のテストは [`todo-phese4-v2.md`](../../archive/phase4/todo-phese4-v2.md) で管理する。
 
 ---
 
@@ -335,7 +335,7 @@ Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書ス�
 - 保存領域（データルート）とバックアップ保存領域（アーカイブルート）をOSのフォルダ選択ダイアログから選択できる。
 - 初回起動時は空の既定領域にDBや保存空間台帳を作成せず、設定画面で保存場所を選んでから開始する。
 - 既存のAtlas Note領域は引き継ぎ、保存場所変更は再起動時に非破壊で移行する。環境変数で固定された場合はUI変更を無効にする。
-- 論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は [`../storage-locations.md`](../storage-locations.md) を正とする。
+- 論理保存空間ごとの外部フォルダ割り当ては対象外。詳細は [`../storage-locations.md`](../specs/storage-locations.md) を正とする。
 
 ### グローバルショートカット（2026-08-28実装済み）
 
@@ -343,12 +343,12 @@ Phase 2からPhase 4へ完全に移管し、未完了項目はv2のAI司書ス�
 - 新規ノート`Ctrl + N`、検索欄へ移動`Ctrl + F`、設定を開く`Ctrl + ,`
 - 上記を含む全操作を「設定 > ショートカット」で変更・解除・初期化可能
 - 対象はAtlas Noteのアプリウィンドウ内。OS全体のシステムホットキーは対象外
-- 詳細は [`../keyboard-shortcuts.md`](../keyboard-shortcuts.md) を正とする
+- 詳細は [`../keyboard-shortcuts.md`](../specs/keyboard-shortcuts.md) を正とする
 
 ### バックアップ（2026-08-28実装済み）
 
-- 自動バックアップとバックアップ復元を実装済み。詳細は [`../backup-restore.md`](../backup-restore.md) を正とする。
+- 自動バックアップとバックアップ復元を実装済み。詳細は [`../backup-restore.md`](../specs/backup-restore.md) を正とする。
 
 ### Mermaid対応（別ブランチへ分離）
 
-Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。 詳細は [分離方針](../mermaid.md) を参照。
+Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。 詳細は [分離方針](../specs/mermaid.md) を参照。

@@ -6,7 +6,7 @@ Phase 3「同期」で、ローカルのMarkdown正本とSQLiteメタデータ�
 
 機能要件は `../../development/scopes/scope.md`、ローカル保存と競合検出の既存契約は `../../development/note-concurrency.md`、Phase 3の同期設計は `../../development/webdav-sync.md` を正とする。
 
-このファイルはPhase 3の進捗チェックリストです。同期契約の変更は [`webdav-sync.md`](../../development/webdav-sync.md)、実装順序の変更は [`implementation-plan.md`](../../development/implementation-plan.md) に反映します。
+このファイルはPhase 3の進捗チェックリストです。同期契約の変更は [`webdav-sync.md`](../../development/specs/webdav-sync.md)、実装順序の変更は [`implementation-plan.md`](../history/phase3-implementation-plan.md) に反映します。
 
 ## 現状・前提
 
@@ -18,8 +18,8 @@ Phase 3「同期」で、ローカルのMarkdown正本とSQLiteメタデータ�
 
 ## 現在の設計状態
 
-- [x] `docs/development/webdav-sync.md` に同期対象、リモート配置、状態遷移、競合、認証、migration、テストの設計を追加する。
-- [x] `docs/development/implementation-plan.md`、`docs/status.md`、`docs/rules/architecture.md`、`docs/development/environment.md` から確定設計を参照する。
+- [x] `docs/development/specs/webdav-sync.md` に同期対象、リモート配置、状態遷移、競合、認証、migration、テストの設計を追加する。
+- [x] `docs/archive/history/phase3-implementation-plan.md`、`docs/status.md`、`docs/rules/architecture.md`、`docs/development/guides/environment.md` から確定設計を参照する。
 - [x] 設計レビューで未確定事項を決定し、設計上の実装開始条件を満たす。
 
 ## Phase 3開始条件（完了記録）
@@ -49,7 +49,7 @@ Phase 3「同期」で、ローカルのMarkdown正本とSQLiteメタデータ�
 
 ### 3. 設計承認後に実装・検証する
 
-- [x] 設計レビュー内容を、`docs/development/implementation-plan.md` のPhase 3順序へ反映する。
+- [x] 設計レビュー内容を、`docs/archive/history/phase3-implementation-plan.md` のPhase 3順序へ反映する。
 - [x] 実装後、正常系・異常系・競合・データ保全を自動テストし、非本番の実WebDAVサーバーで受け入れ確認する。実環境の回帰確認は継続する。
 - [x] schema version 10へ同期間隔、フェイルセーフ、custom TLS、TLS error ignore、proxy設定を追加し、version 9 backfillと制約をテストする。
 - [x] Joplinと同じ設定項目・draft方式、単一WebDAV URL、読み取り専用設定確認、Apply/OK/戻るを実装する。

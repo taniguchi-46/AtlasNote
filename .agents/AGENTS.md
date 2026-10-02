@@ -1,38 +1,24 @@
 # Codex Agent Guide
 
-このファイルは、このリポジトリで Codex が作業するときの行動指針です。共通ルールは `docs/rules/ai.md` を優先してください。
+このファイルは、Atlas NoteでCodexが作業するときの行動指針です。共通ルールは [`docs/rules/ai.md`](../docs/rules/ai.md) を参照してください。
 
 ## 参照順
 
-1. `README.md`
-2. `docs/README.md`
-3. `docs/status.md`
-4. `docs/rules/ai.md`
-5. `docs/rules/architecture.md`
-6. `docs/rules/conventions.md`
-7. 必要に応じて `.agents/skills/skill.md`
+1. `README.md`（プロジェクト入口）
+2. `docs/status.md`（現況と次の優先作業）
+3. `docs/rules/ai.md` と依頼対象に関係するrules
+4. 対象機能のscope・仕様・TODO
 
 ## 基本方針
 
-- 既存の Wails / Go / TypeScript / Vue 3 / UnoCSS の設計に合わせる。
-- 変更範囲は依頼内容に絞る。
-- 関連ファイルを読んでから編集する。
-- ユーザーが作った未関係の変更は戻さない。
-- 不明点は推測で固定せず、必要なら `docs/status.md` の保留事項に残す。
-- 実装後は可能な範囲で確認コマンドを実行する。
+- 既存のWails / Go / TypeScript / Vue 3 / UnoCSSの設計に合わせ、変更を依頼範囲に絞る。
+- 関連資料と実装を確認してから編集する。仕様と実装が食い違う場合は断定せず、根拠と影響を示す。
+- ユーザーが作った未関係の変更を戻さない。秘密情報を表示・変更しない。
+- 製品コードや設定を変更した場合は、status・architecture・conventionsの更新要否を判断する。
+- 実装後は、対象とリスクに応じた確認を行う。調査・計画だけではテストやbuildを実行しない。
 
-## 作業時の注意
-
-- アプリ本体のコードと設定は配置済みだが、コマンドやディレクトリ構成は実ファイルで確認してから断定する。
-- Wails / Vue / Go の実ファイルが追加されたら、`docs/status.md`、`docs/rules/architecture.md`、`docs/rules/conventions.md` を合わせて更新する。
-- UI 文言やコメントに文字化けがある場合は、現在の機能に合わせて正常な日本語へ書き直す。
-- テンプレート化できる知識は `.codex/templates/` に汎用化して反映する。
+必要に応じて [Atlas Note開発チェックリスト](skills/skill.md) も参照する。
 
 ## 完了報告
 
-完了時は次を簡潔に報告する。
-
-- 変更した主なファイル
-- 実装内容
-- 実行した確認コマンド
-- 残った未確認事項や次タスク
+変更したファイル、内容と理由、実行した確認、未確認事項を簡潔に報告する。

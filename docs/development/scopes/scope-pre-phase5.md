@@ -47,7 +47,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - 保存空間ごとに、SQLite、Markdown、WebDAV 接続・同期設定、ロックを独立して管理する。
 - 保存空間は以降のロック、インポート、エクスポートの基盤として先に実装する。
 - 既存データの安全な扱いと、SQLite・Markdown・WebDAV・単一書き込みの整合性を優先する。
-- 内部管理ディレクトリ、設定画面からの選択、切替時再起動の実装契約は [`../storage-spaces.md`](../storage-spaces.md) を正とする。
+- 内部管理ディレクトリ、設定画面からの選択、切替時再起動の実装契約は [`../storage-spaces.md`](../specs/storage-spaces.md) を正とする。
 
 ### 2. ロック機能
 
@@ -78,7 +78,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - dirty draftを既存保存laneでflushし、保存ダイアログ選択後にGo側でrevision、Markdown snapshot、ロック状態を再検証する。HTML断片はGo側のallowlistで再サニタイズし、外部CSS、JavaScript、画像を含めない。
 - 保護された解除済みノートは、暗号化領域外に平文を出力する明示警告と確認を必須とする。
 - 添付ファイルを含むエクスポートや複数ノートの一括出力は本スコープに含めない。
-- 詳細契約は [`../note-export.md`](../note-export.md) を正とする。
+- 詳細契約は [`../note-export.md`](../specs/note-export.md) を正とする。
 
 ### 5. PDFエクスポート
 
@@ -86,7 +86,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - `pdfmake` 0.3.11と同梱Noto Sans JP Regular／Boldを使い、日本語を選択・検索可能な文字として埋め込む。画像データは出力せず`alt`文字列だけを保持する。
 - HTMLと同じflush、revision・Markdown snapshot・ロック再検証、平文警告、ネイティブ保存ダイアログ、原子的保存の契約に従う。Go側はBase64復号後のPDFについてヘッダー、終端、32 MiB上限を検証する。
 - 添付ファイル、複数ノート、用紙設定、PDF暗号化は本スコープに含めない。
-- 詳細契約は [`../note-export.md`](../note-export.md) を正とする。
+- 詳細契約は [`../note-export.md`](../specs/note-export.md) を正とする。
 
 ### 6. グローバルショートカット
 
@@ -96,7 +96,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - キー設定はversion付きの端末ローカルUI設定として`localStorage`へ保存し、保存空間、SQLite、Markdown、WebDAVへ保存・同期しない。重複、文字入力の標準操作との衝突、修飾キー不足、不正な保存値は検証する。
 - 「元に戻す」「やり直す」は開いているノート本文のMarkdown／Rich編集履歴だけを対象とし、既存のautosave経路へ新しい下書きとして渡す。保存済みrevisionの巻き戻し、別ノートの履歴、Agent適用結果の巻き戻しには使わない。
 - 本文履歴は起動中のメモリだけに保持し、ノート切替、本文の外部再読込、競合下書きの破棄、編集モード切替、ロック、アンマウントで破棄する。
-- 詳細契約は [`../keyboard-shortcuts.md`](../keyboard-shortcuts.md) を正とする。
+- 詳細契約は [`../keyboard-shortcuts.md`](../specs/keyboard-shortcuts.md) を正とする。
 
 ### 7. 自動バックアップ・バックアップ復元
 
@@ -104,7 +104,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 - 各世代はmanifest、ファイルサイズ、SHA-256、SQLite integrity、schema versionを検証し、symlink、パス traversal、マニフェスト外ファイルを拒否する。Credential Store、保存空間台帳、同期復旧領域はバックアップへ含めない。
 - 復元はプレビューと5分間有効の確認トークンを必要とする。検証済みstageを作成して次回起動へ引き渡し、データロック取得後かつSQLite open前に現行データを安全用バックアップ・rollbackへ退避してswapする。途中終了時はフェーズマーカーから再開し、失敗時はrollbackする。
 - 同期復旧との同時適用を禁止し、dirty draftのflush、同期・AI・インポート・エクスポート・本文ロック・保存空間切替のbusy確認を既存ライフサイクルへ接続する。
-- 詳細契約は [`../backup-restore.md`](../backup-restore.md) を正とする。
+- 詳細契約は [`../backup-restore.md`](../specs/backup-restore.md) を正とする。
 
 ## 追加対応（次期検討）
 
@@ -112,7 +112,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 
 ### 保存領域選択（2026-08-29実装済み）
 
-保存領域（データルート）とバックアップ保存領域（アーカイブルート）の選択、初回起動時の`setup-required`、既存データを保持する再起動時移行を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外とする。詳細は [`../storage-locations.md`](../storage-locations.md) を正とする。
+保存領域（データルート）とバックアップ保存領域（アーカイブルート）の選択、初回起動時の`setup-required`、既存データを保持する再起動時移行を実装した。論理保存空間ごとの外部フォルダ割り当ては対象外とする。詳細は [`../storage-locations.md`](../specs/storage-locations.md) を正とする。
 
 ### 優先度4追加機能（2026-09-09実装済み）
 
@@ -122,7 +122,7 @@ Phase 5へ進む前に、将来的な機能として整理していた項目か�
 
 ### Mermaid対応（別ブランチへ分離）
 
-Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。詳細は [分離方針](../mermaid.md) を参照。
+Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した。通常開発用の `codex/pre-phase5-future-features` では、既存のMermaidフェンスを通常のコードブロックとして表示・編集し、ソースを保存する。詳細は [分離方針](../specs/mermaid.md) を参照。
 
 ### P2追加機能（2026-09-16実装済み）
 
@@ -144,7 +144,7 @@ Mermaidの描画・挿入・専用編集は `codex/mermaid-full` に分離した
 - 保存空間、Notebook、ノートscopeごとにsession・選択・結果を保持する。別scopeへの切替で既存sessionを上書きせず、同scopeの古い解析応答だけを個別に破棄する。ロック時は全sessionを無効化し、遅延応答で候補を復元しない。
 - 小型パネルでは対象・変更前・変更案・根拠・結果を確認してから、候補単位または一括で承認できる。同一ノートの承認候補は一度のrevision更新へまとめ、関連対象・重複の保存対象を適用直前に再確認する。タグ表示更新は対象の切替・ロック後に古い状態を復元しない。
 - 実測ベンチマークと手動受け入れは後続確認として残す。
-- 詳細なUI・候補・保存契約と実装状態は [`../organization-center.md`](../organization-center.md)、チェックリストは [`../../todo/todo-pre-phase5-organization.md`](../../todo/todo-pre-phase5-organization.md) を正とする。
+- 詳細なUI・候補・保存契約と実装状態は [`../organization-center.md`](../specs/organization-center.md)、チェックリストは [`../../todo/todo-pre-phase5-organization.md`](../../todo/todo-pre-phase5-organization.md) を正とする。
 
 ## HTML変換ルール（確定）
 
