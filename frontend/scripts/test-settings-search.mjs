@@ -35,6 +35,8 @@ try {
   assert.equal(settingsSearch.searchSettings('診断情報').length, 0)
   assert.equal(settingsSearch.searchSettings('Windows 削除').some((item) => item.id === 'general.uninstall'), true)
   assert.equal(settingsSearch.searchSettings('存在しない設定').length, 0)
+  assert.ok(settingsSearch.searchSettings('ターミナル 文字サイズ').some(item => item.id === 'terminal.font-size'))
+  assert.ok(settingsSearch.searchSettings('High Contrast').some(item => item.id === 'terminal.theme'))
 
   const [settingsSource, helpSource] = await Promise.all([
     readFile(path.join(rootDir, 'src', 'components', 'SettingsModal.vue'), 'utf8'),
@@ -50,6 +52,58 @@ try {
   assert.match(settingsSource, /closest\('details'\)/)
   assert.match(helpSource, /ヘルプ本文は一時的に非表示/)
   assert.match(helpSource, /<!-- ヘルプ本文は一時的に非表示/)
+  const locationSource = await readFile(path.join(rootDir, 'src/components/StorageLocationSettingsPanel.vue'), 'utf8')
+  const spacesSource = await readFile(path.join(rootDir, 'src/components/StorageSpaceSettingsPanel.vue'), 'utf8')
+  const shortcutsSource = await readFile(path.join(rootDir, 'src/components/ShortcutSettingsPanel.vue'), 'utf8')
+  const themeSource = await readFile(path.join(rootDir, 'src/style.css'), 'utf8')
+  const declaredTokens = new Set([...themeSource.matchAll(/(--[\w-]+)\s*:/g)].map(match => match[1]))
+  const terminalSettingsSource = await readFile(path.join(rootDir, 'src/components/TerminalSettingsPanel.vue'), 'utf8')
+  const supportSource = await readFile(path.join(rootDir, 'src/components/SupportWorkspace.vue'), 'utf8')
+  const terminalSource = await readFile(path.join(rootDir, 'src/components/TerminalComponent.vue'), 'utf8')
+  const zIndex = (source, selector) => {
+    const css = source.slice(source.indexOf('<style'))
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rule = css.match(new RegExp(`${escaped}\\s*\\{([^}]+)\\}`))
+    assert.ok(rule, `missing layer rule: ${selector}`)
+    const declaration = rule[1].match(/z-index\s*:\s*(\d+)\s*;/)
+    assert.ok(declaration, `missing numeric z-index: ${selector}`)
+    return Number(declaration[1])
+  }
+  const floatingLayer = zIndex(supportSource, '.support-workspace.is-floating')
+  const menuLayer = zIndex(terminalSource, '.terminal-menu')
+  const settingsOverlay = zIndex(settingsSource, '.settings-modal-overlay')
+  const settingsContent = zIndex(settingsSource, '.settings-modal-content')
+  const nestedOverlay = zIndex(spacesSource, '.nested-dialog-overlay')
+  const nestedContent = zIndex(spacesSource, '.nested-dialog-content')
+  assert.equal(floatingLayer, 1300, 'floating layer is unchanged')
+  assert.ok(settingsOverlay > floatingLayer, 'settings overlay covers floating workspace')
+  assert.ok(settingsOverlay > menuLayer, 'settings overlay covers Terminal More')
+  assert.ok(settingsContent > settingsOverlay, 'settings dialog is above its overlay')
+  assert.ok(nestedOverlay > settingsContent, 'nested overlay covers parent settings dialog')
+  assert.ok(nestedContent > nestedOverlay, 'nested dialog is above its overlay')
+  // All settings dialogs use the default body Portal; creation, switching and lock
+  // dialogs must share the nested layer rather than inherit the parent content layer.
+  const parentPortals = [...settingsSource.matchAll(/<DialogPortal>([\s\S]*?)<\/DialogPortal>/g)]
+  const nestedPortals = [...spacesSource.matchAll(/<DialogPortal>([\s\S]*?)<\/DialogPortal>/g)]
+  assert.equal(parentPortals.length, 1)
+  assert.equal(nestedPortals.length, 3)
+  assert.match(parentPortals[0][1], /<DialogOverlay class="settings-modal-overlay"/)
+  assert.match(parentPortals[0][1], /<DialogContent class="settings-modal-content"/)
+  for (const [, portal] of nestedPortals) {
+    assert.match(portal, /<DialogOverlay class="nested-dialog-overlay"/)
+    assert.match(portal, /<DialogContent class="nested-dialog-content(?: lock-dialog-content)?"/)
+  }
+  for (const source of [locationSource, spacesSource, shortcutsSource, terminalSettingsSource, settingsSource]) {
+    const css = source.split('<style scoped>')[1]
+    assert.doesNotMatch(css, /var\(--color-(border|surface|text-muted|accent)|var\([^)]*,\s*#/i)
+    for (const [, token] of css.matchAll(/var\((--[\w-]+)/g)) assert.ok(declaredTokens.has(token), `undeclared theme token: ${token}`)
+    assert.doesNotMatch(css, /opacity: 0\.[0-6]/)
+  }
+  assert.match(settingsSource, /<TerminalSettingsPanel \/>/)
+  assert.match(settingsSource, /:deep\(select\)[\s\S]*background: var\(--bg-sidebar\)/)
+  assert.match(settingsSource, /:deep\(option\)[\s\S]*color: var\(--text-primary\)/)
+  assert.doesNotMatch(shortcutsSource, /枠|shortcut-slot-label/)
+  assert.match(shortcutsSource, /ショートカット\$\{slot \+ 1\}/)
 
   console.log('settings search tests passed')
 } finally {

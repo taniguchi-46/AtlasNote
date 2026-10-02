@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { DEFAULT_NOTEBOOK_ICON, isKnownNotebookIcon } from '../utils/notebookIcons'
+import { TERMINAL_FONT_SIZES, TERMINAL_THEME_IDS, TERMINAL_FONT_FAMILIES, TERMINAL_CURSOR_STYLES, TERMINAL_SCROLLBACK_OPTIONS } from '../utils/terminalAppearance'
 import {
   SHORTCUT_LEGACY_STORAGE_KEY,
   SHORTCUT_STORAGE_KEY,
@@ -21,6 +22,7 @@ export type SettingsTab =
   | 'theme'
   | 'general'
   | 'editor'
+  | 'terminal'
   | 'shortcuts'
   | 'sync'
   | 'ai'
@@ -86,7 +88,7 @@ export const useSettingsStore = defineStore('settings', () => {
     readNumberInRange('atlas-note-list-width', 280, NOTE_LIST_WIDTH_MIN, NOTE_LIST_WIDTH_MAX),
   )
   const aiWorkspacePlacement = ref<AIWorkspacePlacement>(
-    readStringOption('atlas-ai-workspace-placement', 'right', AI_WORKSPACE_PLACEMENT_OPTIONS),
+    readStringOption('atlas-ai-workspace-placement', 'bottom', AI_WORKSPACE_PLACEMENT_OPTIONS),
   )
   const aiWorkspaceRightWidth = ref(
     readClampedNumberInRange(
@@ -112,6 +114,20 @@ export const useSettingsStore = defineStore('settings', () => {
     ),
   )
   
+  // Appearance is independent of the app theme; existing stored values are retained.
+  const terminalFontSize = ref(readNumberOption('atlas-terminal-font-size', 14, TERMINAL_FONT_SIZES))
+  const terminalTheme = ref(readStringOption('atlas-terminal-theme', 'atlas-dark', TERMINAL_THEME_IDS))
+  const terminalFont = ref(readStringOption('atlas-terminal-font-family', 'default', TERMINAL_FONT_FAMILIES))
+  const terminalCursorStyle = ref(readStringOption('atlas-terminal-cursor-style', 'block', TERMINAL_CURSOR_STYLES))
+  const terminalCursorBlink = ref(readBooleanOption('atlas-terminal-cursor-blink', true))
+  const terminalScrollback = ref(readNumberOption('atlas-terminal-scrollback', 2000, TERMINAL_SCROLLBACK_OPTIONS))
+  watch(terminalFont, value => localStorage.setItem('atlas-terminal-font-family', value), { immediate: true })
+  watch(terminalCursorStyle, value => localStorage.setItem('atlas-terminal-cursor-style', value), { immediate: true })
+  watch(terminalCursorBlink, value => localStorage.setItem('atlas-terminal-cursor-blink', String(value)), { immediate: true })
+  watch(terminalScrollback, value => localStorage.setItem('atlas-terminal-scrollback', String(value)), { immediate: true })
+  watch(terminalFontSize, value => localStorage.setItem('atlas-terminal-font-size', String(value)), { immediate: true })
+  watch(terminalTheme, value => localStorage.setItem('atlas-terminal-theme', value), { immediate: true })
+
   // Editor Settings
   const fontFamily = ref(localStorage.getItem('atlas-font-family') ?? 'Meiryo')
   const editorFontSize = ref(readNumberOption('atlas-editor-font-size', 14, FONT_SIZE_OPTIONS))
@@ -292,6 +308,12 @@ export const useSettingsStore = defineStore('settings', () => {
     contentLockAutoLockMinutes,
     fontFamily,
     editorFontSize,
+    terminalFontSize,
+    terminalTheme,
+    terminalFont,
+    terminalCursorStyle,
+    terminalCursorBlink,
+    terminalScrollback,
     editorFirstLineStyle,
     autoSaveEnabled,
     editorLineLength,

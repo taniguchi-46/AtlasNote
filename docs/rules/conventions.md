@@ -53,6 +53,8 @@
 - 整理候補は既存`internal/organize.Service`で生成し、CLI／MCPからの要求はStage B／Cのscope・CAS・承認契約を通す。旧整理GUIと専用Storeは使わない。変更確認GUIでの明示承認と保存laneは維持する。
 - Local Intelligenceの関連候補は読み取り専用とし、リンク・タグ・FTSの派生索引から件数制限付きで取得する。索引不整合とロック状態取得失敗は結果を返さない。旧AIへの参照追加導線は表示しない。
 
+- Terminalの表示設定は`useSettingsStore`の端末UI設定へ保存し、配色は`terminalAppearance.ts`へ集約する。表示設定変更でPTYを再起動しない。font変更後はfitして同一sessionをresizeする。Panel最大化は保存済み寸法と別の一時状態とし、Backendからshell名を取得しない間は実行shellを決めつけるラベルを付けない。
+
 ## エディタおよびフロントエンド実装時の追加ルール
 
 ### Tiptapエディタのカスタマイズ

@@ -3,11 +3,6 @@
     <h3>外部AI・旧AIデータ</h3>
     <p>AtlasNote内蔵AIの生成機能は廃止しました。AIは統合ターミナルからCLIとMCPを通して利用します。MCPの公開範囲は明示的に指定してください。ターミナルはsandboxではありません。</p>
     <p>旧AIの履歴と成果物は元の保存空間に保持され、ここから閲覧できます。</p>
-    <label>ワークスペースの表示位置
-      <select v-model="settingsStore.aiWorkspacePlacement">
-        <option value="right">右側</option><option value="bottom">下側</option>
-      </select>
-    </label>
     <button type="button" :disabled="loading" @click="refresh">{{ loading ? '読み込み中…' : '一覧を更新' }}</button>
     <p v-if="error" role="alert">{{ error }}</p>
 
@@ -59,8 +54,8 @@
 import { onMounted, ref, watch } from 'vue'
 import type { AIArtifact, AIHistory } from '../api/ai'
 import { getLegacyArtifact, getLegacyHistory, listLegacyArtifactsPage, listLegacyHistories, type LegacyArtifactKind } from '../api/legacyAIRecords'
-import { useSettingsStore } from '../stores/useSettingsStore'
 import { useContentLockStore } from '../stores/useContentLockStore'
+import { useSettingsStore } from '../stores/useSettingsStore'
 
 const settingsStore = useSettingsStore()
 const contentLockStore = useContentLockStore()
@@ -197,7 +192,7 @@ onMounted(() => { void refresh() })
 .legacy-records ul { margin: 0; padding-left: 18px; }
 .legacy-records li { margin: 5px 0; }
 .legacy-records button { padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-input); color: var(--text-primary); cursor: pointer; }
-.legacy-records button:disabled { opacity: .6; cursor: wait; }
+.legacy-records button:disabled { opacity: 1; color: var(--text-secondary); cursor: wait; }
 .legacy-records small { margin-left: 8px; color: var(--text-secondary); }
 .legacy-detail { padding: 10px; border: 1px solid var(--border); border-radius: 5px; }
 .legacy-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }

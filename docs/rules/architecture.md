@@ -65,7 +65,7 @@ Go Backend
 - 添付本体は `notes/attachments/<noteID>/` のmanifestとランダムなattachment IDから導出する。ユーザー入力の名前、本文の管理参照、OSパスを相互に代用しない。添付の詳細な保存・暗号化・復旧・WebDAV境界は `docs/development/attachments.md` を正とする。
 - SQL 組み立てには Squirrel を使い、直接 SQL 文字列を散らさない。
 - フロントエンドの画面状態は Composables と Pinia で管理する。
-- `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標を管理する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
+- `SupportWorkspace`は変更確認／ターミナルの2タブ、最小化、浮動座標、Editor workspace内の一時的な最大化を管理する。`TerminalComponent`の操作toolbarをPanelヘッダーへ配置し、単一sessionバーを表示する。`TerminalSettingsPanel`は端末表示設定、`utils/terminalAppearance.ts`はxterm配色とfont fallbackを担当する。terminal sessionは`internal/terminal`のメモリ内だけに保持する。AppTopBarにターミナルを開く導線を置き、既存3ペインとバックリンク表示を維持する。
 - 共通パネルの右側／下側配置、右側幅／下側高さは`useSettingsStore`の端末UI設定に保持する。保存した寸法は希望値として扱い、狭いウィンドウでは表示時だけ実効寸法または下側配置へ調整する。旧AI記録は既存保存空間のSQLite、旧認証情報は既存Credential Storeから移動しない。外部AIはターミナル＋明示scopeのCLI／MCPを正式経路とする。
 - アプリ内ショートカットは`KeyboardEvent.code`基準の単一定義と`useSettingsStore`で管理し、version付き端末UI設定として`localStorage`へ保存する。アプリ操作は`App.vue`のcapture listener、本文Undo／Redoは`NoteEditor`のMarkdown履歴とProseMirror historyへ分離してdispatchする。本文履歴はメモリ限定で、ノート切替、外部再読込、競合破棄、モード切替、ロック時に破棄する。詳細は`docs/development/keyboard-shortcuts.md`を正とする。
 - Wails API は画面から直接乱用せず、Composables または API クライアント層に寄せる。

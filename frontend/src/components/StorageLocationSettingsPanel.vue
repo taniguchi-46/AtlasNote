@@ -119,27 +119,32 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.storage-location-settings { display: grid; gap: 12px; }
+.storage-location-settings { display: grid; gap: 12px; color: var(--text-primary); }
 .location-settings-list { display: grid; gap: 10px; }
-.location-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--color-border, #dfe3eb); border-radius: 10px; }
+.location-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
 .location-settings-row strong { display: block; }
-.location-settings-row code { display: block; max-width: 420px; margin-top: 4px; overflow-wrap: anywhere; color: var(--color-text-muted, #667085); font-size: 0.78rem; }
-.location-settings-row button, .location-settings-actions button { padding: 7px 12px; border: 1px solid var(--color-border, #dfe3eb); border-radius: 8px; background: var(--color-surface, #fff); cursor: pointer; }
-.location-settings-row button:disabled, .location-settings-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.location-settings-row code { display: block; max-width: 420px; margin-top: 4px; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 0.78rem; }
+.location-settings-row button, .location-settings-actions button { padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); cursor: pointer; }
+.location-settings-row button:disabled, .location-settings-actions button:disabled { cursor: not-allowed; color: var(--text-secondary); opacity: 1; }
 .location-settings-actions { display: flex; justify-content: flex-end; }
-.location-settings-actions .primary { border-color: var(--color-accent, #4f46e5); background: var(--color-accent, #4f46e5); color: #fff; }
-.location-settings-error { color: #b42318; }
+.location-settings-actions .primary { border-color: var(--brand-primary); background: var(--brand-primary); color: #fff; }
+.location-settings-error { color: var(--color-danger); }
 .location-settings-error p { margin: 0; }
 .location-settings-error dl { display: grid; gap: 4px; margin: 8px 0 0; font-size: 0.82rem; }
 .location-settings-error dl div { display: flex; gap: 8px; }
 .location-settings-error dt { font-weight: 700; }
 .location-settings-error dd { margin: 0; }
-.location-diagnostics { display: grid; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--color-border, #dfe3eb); }
+.location-diagnostics { display: grid; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .location-diagnostics-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .location-diagnostics-heading h4 { margin: 0; }
-.location-diagnostics-heading button { padding: 7px 12px; border: 1px solid var(--color-border, #dfe3eb); border-radius: 8px; background: var(--color-surface, #fff); cursor: pointer; }
+.location-diagnostics-heading button { padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); cursor: pointer; }
 .location-diagnostics-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 0.78rem; }
 .location-diagnostics-list li { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
-.location-diagnostics-list small { color: var(--color-text-muted, #667085); }
+.location-diagnostics-list small { color: var(--text-secondary); }
 @media (max-width: 600px) { .location-settings-row { align-items: flex-start; flex-direction: column; } }
+.setting-help { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.location-settings-row > div { min-width: 0; }
+.location-settings-actions .primary:disabled { background: var(--bg-input); border-color: var(--border); color: var(--text-secondary); }
+.storage-location-settings button:hover:not(:disabled) { border-color: var(--brand-primary); }
+.storage-location-settings button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 </style>

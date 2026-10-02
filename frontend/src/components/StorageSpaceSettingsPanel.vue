@@ -279,7 +279,8 @@ onMounted(() => {
 .text-button:disabled,
 .create-space-button:disabled {
   cursor: default;
-  opacity: 0.55;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .storage-space-list {
@@ -349,7 +350,8 @@ onMounted(() => {
 
 .space-lock-button:disabled {
   cursor: wait;
-  opacity: 0.65;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .storage-space-row:hover:not(:disabled),
@@ -430,7 +432,7 @@ onMounted(() => {
 }
 
 .storage-space-error {
-  color: var(--danger, #dc2626);
+  color: var(--color-danger);
 }
 
 .storage-space-status {
@@ -440,7 +442,7 @@ onMounted(() => {
 .nested-dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 2100;
   background: rgba(0, 0, 0, 0.58);
 }
 
@@ -448,7 +450,7 @@ onMounted(() => {
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 1101;
+  z-index: 2101;
   width: min(430px, calc(100vw - 40px));
   padding: 24px;
   transform: translate(-50%, -50%);
@@ -522,7 +524,8 @@ onMounted(() => {
 
 .nested-dialog-actions button:disabled {
   cursor: default;
-  opacity: 0.55;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .nested-dialog-actions .primary-button {
@@ -530,4 +533,5 @@ onMounted(() => {
   background: var(--brand-primary);
   color: white;
 }
+.nested-dialog-actions .primary-button:disabled { background: var(--bg-input); border-color: var(--border); color: var(--text-secondary); }
 </style>

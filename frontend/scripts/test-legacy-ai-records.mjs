@@ -43,7 +43,7 @@ export async function ListAIArtifactsPage(kind, offset) {
 }
 export async function GetAIArtifact(id) { calls.push('GetAIArtifact'); return { artifact: artifacts.find(item => item.id === id) } }
 `)
-  await writeFile(path.join(outDir, 'mock-settings.mjs'), "export function useSettingsStore() { return { aiWorkspacePlacement: 'right', isSettingsOpen: true } }")
+  await writeFile(path.join(outDir, 'mock-settings.mjs'), "import { reactive } from 'vue'; export const settings = reactive({ aiWorkspacePlacement: 'right', isSettingsOpen: true }); export function useSettingsStore() { return settings }")
   await writeFile(path.join(outDir, 'mock-locks.mjs'), 'export function useContentLockStore() { return { locks: [] } }')
   const viewer = await readFile(path.join(root, 'src/components/LegacyAIRecordsPanel.vue'), 'utf8')
   const { descriptor, errors } = parse(viewer)
@@ -59,6 +59,7 @@ export async function GetAIArtifact(id) { calls.push('GetAIArtifact'); return { 
   const app = createApp(Viewer)
   app.mount(document.getElementById('app'))
   await flush()
+  assert.equal(document.querySelector('.workspace-placement'), null, 'placement is in Terminal settings')
   const writing = () => document.querySelector('[aria-label="旧AI成果物"]')
   const summary = () => document.querySelector('[aria-label="保存済み要約"]')
   const refresh = async () => { document.querySelector('.legacy-records > button').click(); await flush() }

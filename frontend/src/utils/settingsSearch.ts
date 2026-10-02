@@ -18,6 +18,20 @@ export type SettingsSearchResult = SettingsSearchItem & {
 // without collecting DOM text or any runtime/user-entered values such as keys,
 // URLs, paths, model ids, or diagnostic contents.
 export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchItem[] = [
+  { id: 'terminal.placement', label: 'パネルの表示位置', category: 'ターミナル', tab: 'terminal', anchor: 'terminal.placement', synonyms: ['配置', 'ワークスペース'], displayText: ['下', '右', '表示位置'] },
+  { id: 'terminal.font-family', label: 'ターミナルのフォント指定', category: 'ターミナル', tab: 'terminal', anchor: 'terminal.font-family', synonyms: ['等幅'], displayText: ['既定', 'Consolas', 'Cascadia Mono', 'monospace'] },
+  { id: 'terminal.cursor', label: 'ターミナルのカーソル', category: 'ターミナル', tab: 'terminal', anchor: 'terminal.cursor', synonyms: ['点滅'], displayText: ['Block', 'Bar', 'Underline', 'カーソルを点滅する'] },
+  { id: 'terminal.scrollback', label: 'ターミナルの保持する出力行数', category: 'ターミナル', tab: 'terminal', anchor: 'terminal.scrollback', synonyms: ['scrollback'], displayText: ['1000', '2000', '5000', '10000'] },
+  {
+    id: 'terminal.font-size', label: 'ターミナルの文字サイズ', category: 'ターミナル',
+    tab: 'terminal', anchor: 'terminal.font-size', synonyms: ['フォント', '大きさ'],
+    displayText: ['文字サイズ', '12', '13', '14', '15', '16', '18', '20'],
+  },
+  {
+    id: 'terminal.theme', label: 'ターミナルの配色', category: 'ターミナル',
+    tab: 'terminal', anchor: 'terminal.theme', synonyms: ['テーマ', '色'],
+    displayText: ['配色', 'Atlas Dark', 'VS Code Dark', 'Light', 'High Contrast'],
+  },
   {
     id: 'theme',
     label: 'テーマ',

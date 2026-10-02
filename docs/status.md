@@ -1,6 +1,32 @@
 # プロジェクト状況
 
-最終更新: 2026-09-30
+最終更新: 2026-10-02
+
+## Settings modal stacking修正（2026-10-02）
+
+floating SupportWorkspace（1300）とTerminal More（1500）より、設定overlay／contentを2000／2001へ上げた。保存場所内の保存空間作成・切替・ロックDialogは、共通overlay／contentを2100／2101へ上げ、親設定より前面に置く。親・子ともReka UIの既定body Portalを使用する。変更はmodal側のz-indexのみで、floating drag／resize／pointer capture、Terminal backend、開閉動作は変更していない。
+
+CSS/source契約テストで修正前の重なり順不具合を再現し、修正後にfloatingの1300維持、設定overlayとcontent、3つの子DialogのPortalと階層を検証した。typecheck／lint、全31個のtest:*、Frontend production build、git diff --checkは成功。既存の依存注釈・bundleサイズ警告は残る。Goコードは変更せず、Goテストは再実行していない。実Wailsでfloating→More→ターミナル設定、および保存空間の作成・切替・ロックDialogの表示・操作は手動確認へ残す。自己受け入れ判定・commit・pushは行わない。
+
+## Terminal / SupportWorkspace IDE風Panel（2026-10-01）
+
+基準HEAD: `2f78be96c632030840dcbc10a663f130297d7ecb`、ブランチ: `codex/cli-mcp-terminal-rearchitecture`。既存の未コミットUI修正を維持して追加実装した。新規設定の既定配置は下、保存済みの右／下と希望寸法は保持する。35pxを基準とするPanelヘッダー、active下線、ヘッダー右側の新規／終了／More操作、単一sessionバー、Editor workspace内の最大化／復元を追加。floating時の最大化は無効にし、pointer captureの移動／resizeと解除契約を維持する。
+
+設定「ターミナル」は`TerminalSettingsPanel.vue`へ分離し、表示位置、文字サイズ（新規既定14px）、フォント（既定／Consolas／Cascadia Mono／monospace）、4配色、カーソル形状・点滅、scrollback（既定2000）を端末内保存・即時反映する。フォント変更はfit→同一sessionのresizeへ接続し、非表示中は再表示時にfitする。配色は`terminalAppearance.ts`にcursorAccentを含む全ANSI色を集約。shortcutの枠番号表示は除去済みの構造を維持し、設定内の未定義tokenとdisabledの低opacityを補正した。保存場所／保存空間の既存token修正も維持する。
+
+Windows backendはCOMSPECを使いshell名をFrontendへ返さないため、表示は「既定のshell／shell 1」とする。`pwsh`を表示するためのshell切替は行っていない。Backend、PTY、ACK、UTF-8、CLI／MCP、Stage A〜C、DBは変更なし。
+
+検証: Frontend全31個の`test:*`、typecheck／lint、`go test ./internal/terminal ./internal/app -count=1`、`go vet ./...`、`npm run build`、`wails build -clean -platform windows/amd64`、`git diff --check`成功。設定token修正後のsettings-search／shortcuts回帰も成功。通常sandboxのNode起動はプロファイル参照EPERMとなり、許可済み実行環境を使用した。依存パッケージのpure注釈・bundleサイズ警告とWailsのtime.Time bindings警告は残る。
+
+ブラウザーの一時検証画面（実Vueコンポーネント、PTYモック）で下／右配置、floating移動／resize、最大化／復元、Light／Darkとterminal Light配色を確認。これは実Wailsの確認ではない。一時検証ソースは除去済み。実Wailsでのfloating drag／resize、bottom／right、maximize／restore、Dark／Light、font／theme変更、IME、Ctrl+C、shell restartは手動確認へ残す。自己受け入れ判定・commit・pushは行わない。
+
+## 最終受け入れ前のUI/UX修正（2026-09-30）
+
+基準HEADは`codex/cli-mcp-terminal-rearchitecture`の`2f78be96c632030840dcbc10a663f130297d7ecb`（origin fetch後も一致）。SupportWorkspaceのnavがヘッダー空き領域まで占有してpointerdownを止める構造を修正し、空き領域とpointer captureで浮動移動・resizeを扱う。pointerup／cancel／capture喪失／blur／表示切替／unmountで解除し、画面内の制限を維持する。実WebView2のイベント追跡と実操作は未実施。
+
+ワークスペース表示位置を既存設定と互換の2ボタンへ変更。設定にターミナル文字サイズ（既定15px）と4配色を追加し、localStorageへ保存する。既存xtermへ即時反映し、文字サイズ変更後はfit→既存backend resizeを行う。非表示時は再表示後にfitする。toolbarをlucideアイコンにし、shortcutの表示番号だけを除去した。保存場所の未定義テーマ変数・Light向けfallbackを既存トークンへ統一し、disabled文字、保存空間ダイアログ、設定select／optionの配色を調整した。CLI／MCP／Stage C承認／PTY lifecycle／backendは変更していない。
+
+検証: Frontend全31個の`test:*`（追加回帰を含む）、typecheck／lint、`go test ./internal/terminal ./internal/app -count=1`、`go vet ./...`、Frontend production build、生成済みFrontendを使う`wails build -s -skipbindings -m -nosyncgomod -o AtlasNote-ui-acceptance.exe`は成功。通常sandboxではNodeプロファイル参照EPERM、回避オプション付きbuildではViteのcompiler-dom解決失敗を再現したが、許可済みの通常Node起動でproduction build成功。依存パッケージのpure注釈・bundleサイズ警告は残る。実Wailsでのfloating drag、IME、Light／Dark表示、resize、文字サイズの視認性は手動確認へ残し、受け入れ判定は行っていない。
 
 ## ノート削除ショートカット（2026-09-30）
 

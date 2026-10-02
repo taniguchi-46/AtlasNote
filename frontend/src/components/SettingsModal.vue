@@ -5,7 +5,7 @@
   >
     <DialogPortal>
       <DialogOverlay class="settings-modal-overlay" />
-      <DialogContent class="settings-modal-content">
+      <DialogContent class="settings-modal-content" :style="{ colorScheme: appStore.theme }">
         <VisuallyHidden>
           <DialogDescription>アプリケーション設定を変更します</DialogDescription>
         </VisuallyHidden>
@@ -47,7 +47,7 @@
           </div>
         </div>
         <DialogClose as-child>
-          <button class="icon-btn close-btn" title="閉じる" type="button">
+          <button class="icon-btn close-btn" title="閉じる" aria-label="設定を閉じる" type="button">
             <XIcon :size="20" />
           </button>
         </DialogClose>
@@ -197,6 +197,10 @@
             </section>
           </TabsContent>
 
+          <TabsContent value="terminal" as-child>
+            <TerminalSettingsPanel />
+          </TabsContent>
+
           <TabsContent value="shortcuts" as-child>
             <ShortcutSettingsPanel />
           </TabsContent>
@@ -255,6 +259,7 @@ import {
   VisuallyHidden,
 } from 'reka-ui'
 import { useSettingsStore } from '../stores/useSettingsStore'
+import TerminalSettingsPanel from './TerminalSettingsPanel.vue'
 import { useNoteStore } from '../stores/useNoteStore'
 import { useAppStore } from '../stores/useAppStore'
 import type { SettingsTab } from '../stores/useSettingsStore'
@@ -286,6 +291,7 @@ const tabs: { id: SettingsTab; name: string }[] = [
   { id: 'theme', name: 'テーマ' },
   { id: 'general', name: '一般' },
   { id: 'editor', name: 'エディター' },
+  { id: 'terminal', name: 'ターミナル' },
   { id: 'shortcuts', name: 'ショートカット' },
 ]
 tabs.push({ id: 'sync', name: '同期' })
@@ -420,16 +426,17 @@ async function handleAutoSaveChange(event: Event) {
   position: fixed;
   inset: 0;
   background-color: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
+  z-index: 2000;
 }
 
 .settings-modal-content {
   position: fixed;
   top: 50%;
   left: 50%;
-  z-index: 1001;
+  z-index: 2001;
   transform: translate(-50%, -50%);
   background-color: var(--bg-editor);
+  color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
   width: min(820px, calc(100vw - 32px));
@@ -509,7 +516,7 @@ async function handleAutoSaveChange(event: Event) {
 
 .settings-search-result span {
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -548,6 +555,7 @@ async function handleAutoSaveChange(event: Event) {
   display: flex;
   flex-direction: column;
   padding: 16px 0;
+  overflow-y: auto;
 }
 
 .settings-tab {
@@ -682,6 +690,25 @@ select {
   color: var(--text-primary);
   font-size: 14px;
   width: 200px;
+}
+
+/* Native option popups need an opaque surface; bg-input is translucent. */
+.settings-modal-content :deep(select) {
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+}
+.settings-modal-content :deep(option) {
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+}
+.settings-modal-content :deep(select:focus-visible) {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+.settings-modal-content :deep(select:disabled) {
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 input[type='range'] {

@@ -30,8 +30,7 @@
           <span class="shortcut-scope">{{ action.scope === 'editor' ? 'ノート本文' : 'アプリ全体' }}</span>
         </div>
         <div class="shortcut-bindings">
-          <div v-for="slot in shortcutSlots" :key="slot" class="shortcut-slot">
-            <span class="shortcut-slot-label">枠{{ slot + 1 }}</span>
+          <div v-for="slot in shortcutSlots" :key="slot" class="shortcut-slot" role="group" :aria-label="`${action.label} ショートカット${slot + 1}`">
             <kbd>{{ formatShortcutBinding(settingsStore.shortcutBindings[action.id][slot]) }}</kbd>
             <button
               type="button"
@@ -252,12 +251,6 @@ function resetAllBindings() {
   min-width: 132px;
 }
 
-.shortcut-slot-label {
-  flex-basis: 100%;
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
 .shortcut-label {
   color: var(--text-primary);
   font-size: 14px;
@@ -265,7 +258,7 @@ function resetAllBindings() {
 }
 
 .shortcut-scope {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -317,7 +310,8 @@ kbd {
 
 .text-btn:disabled {
   cursor: default;
-  opacity: 0.45;
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .shortcut-feedback {
@@ -328,7 +322,7 @@ kbd {
 }
 
 .shortcut-feedback.is-error {
-  color: var(--danger, #d14343);
+  color: var(--color-danger);
 }
 
 .shortcut-global-feedback {

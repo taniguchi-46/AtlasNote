@@ -8,6 +8,7 @@ export const useSupportWorkspaceStore = defineStore('supportWorkspace', () => {
   const isMinimized = ref(false)
   const activeTab = ref<SupportTab>('terminal')
   const isFloating = ref(false)
+  const isMaximized = ref(false)
   const position = ref({ left: 48, top: 64, width: 480, height: 650 })
 
   function open(tab: SupportTab) {
@@ -26,12 +27,17 @@ export const useSupportWorkspaceStore = defineStore('supportWorkspace', () => {
   }
 
   function toggleFloating() {
+    isMaximized.value = false
     isFloating.value = !isFloating.value
+  }
+
+  function toggleMaximized() {
+    if (!isFloating.value) isMaximized.value = !isMaximized.value
   }
 
   function setPosition(next: Partial<typeof position.value>) {
     position.value = { ...position.value, ...next }
   }
 
-  return { isOpen, isMinimized, activeTab, isFloating, position, open, minimize, restore, toggleFloating, setPosition }
+  return { isOpen, isMinimized, activeTab, isFloating, isMaximized, position, open, minimize, restore, toggleFloating, toggleMaximized, setPosition }
 })
